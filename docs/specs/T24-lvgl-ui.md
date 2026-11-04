@@ -365,6 +365,18 @@ Milestone M2, status ⏸. Open (one line, as in the TODO table): Not built (UI d
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-04: the splash logo is at its own resolution again.** Alex, on the boot picture: *"der ist
+  "verkleinert" und sieht dadurch nicht so gut aus ... Also sollte er lieber wieder normale aufgelöst sein
+  oder ?"* - and that is what it is. The halving of 2026-10-10 (entry below) resampled the bitmap with
+  Lanczos and mapped the result back onto the three colours; the logo is drawn in one-pixel stripes, so
+  ULTIMATE became unreadable and the stripes of TRX64 ran into each other (measured on the picture: logo
+  bbox 300 x 92, 3 colours). There is no larger source in either repository - the 600 x 184 picture of
+  `b5b7c104` is the original - and the layer cannot carry more detail either: `pix_layer.v` is at most 960
+  wide and `trx_lv_port.cc` runs it at scale 2, so one layer pixel is always 2 x 2 on a 1920 x 1080 screen.
+  Asked which size he wants now that the cause is named, Alex chose the original. The picture is that of
+  `b5b7c104` again and `trx_splash.c` regenerated from it is byte for byte that commit's (6310 bytes of
+  runs); on screen the logo is 1200 x 368, 62 % of the width. App commit `cc766040`.
+
 - **2026-10-18: further phases inside Gideon's app void** (ADR-0057): the generic core app of MultiCore T104 replaces the whole app; the splash and the measured LVGL cost (§11) carry over as facts.
 - **2026-10-10 evening: splash logo at half size** (Alex: "viel zu gross, 50% verkleinern und den schwarzen Rand grösser"): logo 600 x 184 -> 300 x 92 (Lanczos, mapped back to the 3 colours), centred on the 960 x 540 black layer. After RC1.
 - **2026-10-10: boot splash = Alex's TRX64 Ultimate picture** (`TRX64.PNG`, 960 x 540, 3 colours, 6,310 bytes of runs; tools/splash_rle.py), for the M1 RC (Alex: "mit in den RC").
