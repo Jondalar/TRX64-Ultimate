@@ -50,7 +50,8 @@ jobs:
     with:
       part: 50t
     secrets: inherit
-  # The benches run after the package, not in front of it (T31 decision 15, 2026-10-30). They produce nothing the package contains - ci/sims.sh calls neither
+  # The benches run after the package, not in front of it (T31 decision 15, 2026-10-30; taken from
+  # MultiCore T100 D7). They produce nothing the package contains - ci/sims.sh calls neither
   # stage_dir nor need_stage - and in front of it they decided whether the testers get an update
   # file at all: runs 1064 and 1066 spent 44 and 40 minutes in bench timeouts and ended with no
   # artefact, over flash_gate and turbo, which the package does not touch. Behind the package the

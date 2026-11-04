@@ -52,7 +52,7 @@ branch_slug() { printf '%s' "${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abb
 # that leaves these files alone gets the same key. cores/gideon/VENDOR.md is left
 # out for that reason: it only records the submodule commit, and hashing it tied
 # the key to the app, so every app bump missed the cache and rebuilt the bitstream
-# (2026-10-30, b151154b -> 11265524).
+# (2026-10-30, b151154b -> 11265524; MultiCore does the same since its run 898).
 # The copied files themselves count, so an app change that moves fpga/ still does.
 tree_key() {
   {

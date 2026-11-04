@@ -22,6 +22,7 @@
 
 ## Designs
 
+What comes next and in which order: [TODO.md](TODO.md).
 
 
 - `designs/hdmi_test`: 720p60 test picture on HDMI through the four GTP lanes; programs

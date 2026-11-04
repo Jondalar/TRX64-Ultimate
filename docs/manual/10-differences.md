@@ -1,7 +1,7 @@
 # 10. Differences to the stock firmware
 
 The application is Gideon Zweijtzer's Ultimate application 3.15, modified, on our own bitstream.
-It reports itself as version 0.2.0, ours and not his (ADR-0059).
+It reports itself as version 0.2.0, ours and not his ([ADR-0059](../adr/0059-t135-installer-and-our-own-application-version.md)).
 These parts of the stock firmware are not here.
 
 ## Not available
