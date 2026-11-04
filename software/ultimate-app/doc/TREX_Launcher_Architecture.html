@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TREX Launcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --ink: #1d2233;
+  --muted: #5a6078;
+  --rule: #d9dcea;
+  --accent: #4b4bd8;          /* C64 light blue, pulled toward ink */
+  --accent-soft: #e6e6fb;
+  --code-bg: #eef0f8;
+  --ok: #1f7a4a;
+  --open: #a4570b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161f;
+    --surface: #1c1f2c;
+    --ink: #e4e6f0;
+    --muted: #9aa0ba;
+    --rule: #30344a;
+    --accent: #8f8ff5;
+    --accent-soft: #2a2b4f;
+    --code-bg: #232739;
+    --ok: #5cc98d;
+    --open: #e7a35a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161f;
+  --surface: #1c1f2c;
+  --ink: #e4e6f0;
+  --muted: #9aa0ba;
+  --rule: #30344a;
+  --accent: #8f8ff5;
+  --accent-soft: #2a2b4f;
+  --code-bg: #232739;
+  --ok: #5cc98d;
+  --open: #e7a35a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 "IBM Plex Sans", system-ui, sans-serif;
+  padding-inline: 16px;
+}
+main { max-width: 960px; margin: 0 auto; padding-block: 40px 80px; }
+header.doc { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 32px; }
+h1 { font-size: 2rem; margin: 0 0 8px; text-wrap: balance; }
+h2 { font-size: 1.35rem; margin: 48px 0 12px; padding-top: 8px; border-top: 1px solid var(--rule); text-wrap: balance; }
+h2 .n { color: var(--accent); font-family: "IBM Plex Mono", monospace; margin-right: 8px; }
+h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+h4 { font-size: .95rem; margin: 20px 0 6px; color: var(--muted); }
+p, li { max-width: 72ch; }
+.meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; color: var(--muted); font-size: .9rem; }
+.meta b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: "IBM Plex Mono", monospace; font-size: .88em; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: .85rem; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; margin: 8px 0 16px; }
+th, td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; color: var(--muted); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+.diagram { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; overflow-x: auto; margin: 12px 0 20px; }
+.note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 8px 14px; margin: 16px 0; }
+.pill { display: inline-block; font-size: .75rem; font-weight: 600; letter-spacing: .03em; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; }
+.pill.open { color: var(--open); }
+.pill.ok { color: var(--ok); }
+nav.toc { columns: 2; column-gap: 32px; font-size: .92rem; }
+nav.toc a { color: var(--accent); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { nav.toc { columns: 1; } h1 { font-size: 1.6rem; } }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc">
+  <h1>TREX Launcher</h1>
+  <div class="meta">
+    <span>Doc</span><b>arc42, architecture of a TREX-owned start screen</b>
+    <span>Status</span><b>Draft: current state read from the code, decisions open</b>
+    <span>Date</span><b>2026-09-23</b>
+    <span>Code base</span><b><code>trex/main</code> @ <code>d3d6b499</code> (firmware 3.15)</b>
+    <span>Targets</span><b>U64-II / C64U (RISC-V), U64 MK1 (Nios II). Not U2, U2+, U2+L.</b>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <a href="#s1">1 Introduction and goals</a><br>
+  <a href="#s2">2 Constraints</a><br>
+  <a href="#s3">3 Context and scope</a><br>
+  <a href="#s4">4 Solution strategy</a><br>
+  <a href="#s5">5 Building block view</a><br>
+  <a href="#s6">6 Runtime view</a><br>
+  <a href="#s7">7 Deployment view</a><br>
+  <a href="#s8">8 Cross-cutting concepts</a><br>
+  <a href="#s9">9 Architecture decisions</a><br>
+  <a href="#s10">10 Quality requirements</a><br>
+  <a href="#s11">11 Risks and technical debt</a><br>
+  <a href="#s12">12 Glossary</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="s1"><span class="n">1</span>Introduction and goals</h2>
+
+<p>The machine today starts straight into BASIC. The firmware's own interface
+(Gideon's file browser, or Commodore's menu on a C64U) appears only when the
+menu button is pressed. The TREX Launcher is a screen of our own that the
+firmware shows between power-on and the running machine, and that the menu
+button can reach again later.</p>
+
+<h3>Goals</h3>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Goal</th><th>Why</th></tr>
+<tr><td>G1</td><td>A start screen that belongs to TREX: titles, cartridge slots, dump and write, snapshots, one step from power-on.</td><td>The TREX tools are spread over context menus of a browser that is not ours.</td></tr>
+<tr><td>G2</td><td>Separation from Gideon's code: TREX lives in its own module and joins the firmware at as few places as possible.</td><td>Every upstream release is merged by hand; each touched upstream file is a conflict waiting.</td></tr>
+<tr><td>G3</td><td>A look of its own (charset, colours, logo) without restyling the upstream UI.</td><td>Idea 1 ("a TREX UI with more style") comes along for the screen that is ours.</td></tr>
+<tr><td>G4</td><td>Never in the way: a boot that goes straight to BASIC stays one setting away.</td><td>The machine is a C64 first.</td></tr>
+</table></div>
+
+<h3>The selector, as the user sees it</h3>
+<p>Something like GRUB, in front of the interfaces:</p>
+<ul>
+  <li>Holding the <b>C=</b> key at power-on opens the selector: TREX, Ultimate, Commodore.</li>
+  <li>The last choice is remembered and booted without asking next time.</li>
+  <li>A setting makes the selector appear at every power-on.</li>
+  <li>From the freeze menu and the overlay menu the user can go back to the selector.</li>
+  <li>The interfaces run as separated from each other as possible.</li>
+</ul>
+
+<div class="note">No C64 program is needed for this. Which interface appears,
+and when, is decided in <code>ultimate_main()</code> by the firmware; the
+screen is drawn by the firmware on a host it owns (the frozen C64 or the
+video overlay), like the existing menus.</div>
+
+<!-- ============================================================ -->
+<h2 id="s2"><span class="n">2</span>Constraints</h2>
+<div class="tablewrap"><table>
+<tr><th>Constraint</th><th>Consequence</th></tr>
+<tr><td>One firmware source for U64 (Nios II, <code>U64 == 1</code>) and U64-II / C64U (RISC-V, <code>U64 == 2</code>).</td><td>The launcher is plain C++ over <code>UserInterface</code>/<code>Screen</code>, no CPU-specific code.</td></tr>
+<tr><td>Upstream (GideonZ/1541ultimate) is merged regularly.</td><td>Hooks into upstream files are one-liners at a single seam; everything else sits in a TREX directory.</td></tr>
+<tr><td>The FPGA cores are binaries only.</td><td>Only what the existing hosts offer: the frozen C64 screen and the video overlay. No new video mode.</td></tr>
+<tr><td>Both interfaces (Ultimate, Commodore) ship in one image; <code>ui_is_commodore()</code> picks by board and setting.</td><td>The launcher sits in front of either, not in place of either.</td></tr>
+<tr><td>Only U64 (<code>U64 == 1</code>) and U64-II / C64U (<code>U64 == 2</code>).</td><td>All of it under <code>#if U64</code>, like the Commodore interface today; U2 and U2+ builds are unchanged.</td></tr>
+<tr><td>The firmware window is nearly full (see 7.1).</td><td>Code linked into the firmware is the scarce resource, not the heap.</td></tr>
+<tr><td>Apps (<code>.u2a</code>) run only while the C64 is frozen (<code>app_loader.cc:241</code>).</td><td>A launcher inside an app is possible on the C64 screen, not on the overlay.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s3"><span class="n">3</span>Context and scope</h2>
+
+<div class="diagram"><pre class="mermaid">
+flowchart LR
+  user([User]) -- "keyboard, joystick,<br>menu button" --> fw
+  subgraph fw [Firmware on the FPGA CPU]
+    main[ultimate_main]
+    launcher[[TREX Launcher<br><i>new</i>]]
+    gui[Gideon UI<br>TreeBrowser]
+    cmui[Commodore UI<br>CommodoreMenu]
+  end
+  fw -- "freeze / DMA / reset" --> c64[(C64 core<br>6510, VIC, SID)]
+  fw -- "character matrix" --> ovl[(Video overlay<br>HDMI)]
+  fw -- files --> media[(USB, SD, Flash)]
+  fw -- "bus, cartridge port" --> cart[(Cartridge<br>EF3, MegaByter, ...)]
+  c64 --> tv[/Screen/]
+  ovl --> tv
+</pre></div>
+
+<p><b>In scope:</b> what the firmware shows at boot and at the menu button, the
+module that draws it, the seam into <code>ultimate_main()</code>.
+<b>Out of scope:</b> changes to the FPGA, to the C64 ROMs, and a restyle of the
+upstream browser.</p>
+
+<!-- ============================================================ -->
+<h2 id="s4"><span class="n">4</span>Solution strategy</h2>
+
+<ol>
+  <li><b>A third front door.</b> <code>ultimate_main()</code> already chooses the
+  root object of each <code>UserInterface</code>: <code>TreeBrowser</code> for the
+  Ultimate interface, <code>CommodoreMenu</code> for the Commodore one
+  (<code>ultimate.cc:147-183</code>). The launcher is one more
+  <code>UIObject</code> in that same place. Its entries open the existing
+  browser, settings and TREX tools as objects pushed on top of it.</li>
+  <li><b>Shown once at boot.</b> After <code>c64-&gt;start()</code>
+  (<code>ultimate.cc:112</code>) the firmware runs the launcher once, the way the
+  menu button runs the UI (<code>run_once()</code>). Leaving it lets the machine
+  run on.</li>
+  <li><b>Its own directory.</b> <code>software/trex/launcher/</code> holds the
+  object, its theme and its settings. Upstream files get one include and one
+  call each.</li>
+  <li><b>Style through the theme table.</b> <code>t_ui_theme</code>
+  (<code>ui_mode.h</code>) is already the place where the two interfaces differ;
+  a TREX row adds what the launcher draws with.</li>
+</ol>
+
+<h3>Three ways to build it (to be examined)</h3>
+<div class="tablewrap"><table>
+<tr><th>Variant</th><th>Shape</th><th>Switching interfaces</th><th>Separation</th></tr>
+<tr><td><b>S</b> Single firmware</td><td>The launcher and a TREX interface are linked into the one firmware, next to Gideon's and Commodore's.</td><td>At runtime, or by a restart of the firmware.</td><td>By directory and a small seam; one image.</td></tr>
+<tr><td><b>M</b> Loadable UI module</td><td>One firmware with the selector. The TREX interface is a file on <code>/Flash</code>, loaded outside the firmware window like an app, and kept resident while it is the active interface.</td><td>At runtime or by restart.</td><td>TREX code outside the image; needs a new module interface (init, poll, poll_inactive, redraw, deinit): apps today only run while frozen and return.</td></tr>
+<tr><td><b>K</b> Kickstart modules</td><td>A base firmware (Gideon's plus the selector and a kickstart loader) boots always. Choosing TREX loads a complete TREX firmware from <code>/Flash</code> into RAM and jumps into it (4.1).</td><td>Only by restart: a kickstart never returns.</td><td>Strongest: two firmwares; the base stays close to upstream.</td></tr>
+</table></div>
+
+<h3 id="s4-1">4.1 Variant K: kickstart modules</h3>
+<p>Proven on RISC-V by the Spiffy / prkl firmware ("Kickstart", commit
+<code>9bf40b1</code>): <code>kickstart.ue2</code> is started like an update, embeds a
+whole <code>ultimate.app</code>, checks the FPGA and ESP32 versions and a checksum,
+copies the application to <code>0x00030000</code> and jumps to it. The flash is not
+touched; a power cycle returns to the installed firmware.</p>
+
+<div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant B as Base firmware (Gideon + selector)
+  participant F as /Flash
+  participant T as TREX firmware
+  B->>B: boot, init, C= held or "always show"?
+  alt Ultimate or Commodore chosen
+    B->>B: continue as today
+  else TREX chosen
+    B->>F: read trex.app
+    B->>B: check FPGA + ESP32 version, checksum
+    B->>T: copy to 0x00030000, jump
+    Note over T: runs until power off or restart;<br>back to the selector = restart into the base
+  end
+</pre></div>
+
+<div class="tablewrap"><table>
+<tr><th>For</th><th>Against</th></tr>
+<tr><td>The base firmware is upstream plus the selector and the loader; TREX changes never conflict with it.</td><td>Switching is always a restart; the running C64 program is lost.</td></tr>
+<tr><td>TREX can change anything, not only the interface.</td><td>The TREX module must match the base's FPGA core and ESP32 version; a new FPGA from upstream means rebuilding the module.</td></tr>
+<tr><td>A broken module cannot lock the machine out: power off returns to the base.</td><td><b>U64 MK1 (Nios): no kickstart exists yet.</b> The exception vector is fixed at <code>0x0</code>, inside the range the image is copied to; a design is in 4.2, not yet tried on hardware.</td></tr>
+<tr><td>No new module interface: the whole firmware is the module.</td><td>Each module is a full application, the code part alone about 1.3 MB of flash; usable flash space not checked. Boot into TREX takes the base boot plus a second one.</td></tr>
+</table></div>
+
+<h3 id="s4-2">4.2 Variant K on the U64 MK1 (Nios II)</h3>
+<p>From a read of the Nios boot chain, linker scripts and updater
+(2026-09-23). Every row is taken from the code; nothing here has run on a MK1 yet.</p>
+
+<h4>Memory map</h4>
+<div class="tablewrap"><table>
+<tr><th>Range</th><th>Use</th><th>Source</th></tr>
+<tr><td><code>0x30000000</code> (4 KB onchip)</td><td>Boot ROM: calibrates DDR, copies the one record at flash <code>0x290000</code>, jumps. Part of the FPGA image, no options.</td><td><code>u64_boot.c:35-60</code>, <code>boot/linker.x:54-55</code></td></tr>
+<tr><td><code>0x0</code></td><td>Exception vector, fixed by the CPU configuration</td><td><code>nios_appl_bsp/system.h:75</code></td></tr>
+<tr><td><code>0x0–0x112B7C</code></td><td><code>ultimate.app</code>: load <code>0x0</code>, entry <code>0x234</code>; the exception code is part of the image</td><td>app record in the <code>.u64</code></td></tr>
+<tr><td>up to <code>0xEA0000</code></td><td><code>.bss</code> with the 8 MiB FreeRTOS heap; stack top <code>0xEA0000</code></td><td><code>nios_appl_bsp/linker.x:353-369</code></td></tr>
+<tr><td><code>0xEA8000–0xF00000</code></td><td>Kernal copy, drive sound and memory, cartridge RAM: used live by the FPGA</td><td><code>linker.x:374-381</code></td></tr>
+<tr><td><code>0x01000000–0x02000000</code></td><td>REU, live</td><td><code>linker.x:383</code></td></tr>
+<tr><td><code>0x02000000–0x03000000</code></td><td>RAM disk</td><td><code>linker.x:386</code></td></tr>
+<tr><td><code>0x03000000–0x03C00000</code></td><td>Updater area, holding the app area at <code>0x03A00000</code>: staging for a kickstart</td><td><code>linker.x:389</code>, <code>app_format.h:32-33</code></td></tr>
+<tr><td><code>0x03C00000–0x04000000</code></td><td>Cartridge ROM, live</td><td><code>linker.x:392-393</code></td></tr>
+</table></div>
+<p><code>0xEA0000–0xEA8000</code> and <code>0xF00000–0x01000000</code> are assigned to
+nothing in the linker script; whether the FPGA uses them is not known, so they
+are not counted as free.</p>
+
+<h4>Why the RISC-V way needs one more rule here</h4>
+<ul>
+  <li>Loading <code>ultimate.app</code> through "Run Update" does not work: the
+  record is read straight to its load address <code>0x0</code> with no range check
+  (<code>filetype_u2p.cc:165-176</code>) and overwrites the running firmware.</li>
+  <li>The Nios has no movable trap vector. The vector at <code>0x0</code> is inside
+  the destination, so the copy must run with interrupts off and must not be able
+  to trap (no calls, no software <code>mul</code>/<code>div</code>).</li>
+  <li>Taking over <code>0x0</code> from a program at <code>0x03000000</code> is what the
+  Nios updater already does (<code>alt_load.c:66-85</code>); the firmware's
+  <code>crt0.S</code> already starts from a warm machine (status off, stack, BSS,
+  <code>itu_clear_irqs</code>).</li>
+</ul>
+
+<h4>Entry contract</h4>
+<p>The image bytes at <code>0x0</code> as the boot ROM would put them; jump to the
+record's start (<code>0x234</code>); interrupts off (<code>status.PIE=0</code>, no ITU
+interrupt enabled or pending); no bus master writing into
+<code>0x0–0xEA0000</code>. The new firmware needs no change.</p>
+<p><b>Quiesce before the copy:</b> <code>wrctl status,0</code>, <code>itu_clear_irqs()</code>,
+WiFi UART IRQ off (<code>alt_load.c:66-70</code>), USB DMA off
+(<code>NANO_START=0</code>, <code>usb_base.cc:377</code>), network receive off
+(<code>RMII_RX_ENABLE=0</code>, <code>rmii_interface.cc:113</code>), <code>esp32.Quit()</code>.
+Other bus masters (sampler, data streams, command interface) not yet audited.
+After the copy: read back and compare, then an <code>initi</code>/<code>flushd</code>
+sweep over the image in case the real core has caches the BSP does not show.</p>
+
+<h4>Ways to start it</h4>
+<div class="tablewrap"><table>
+<tr><th>Variant</th><th>How</th><th>For</th><th>Against</th></tr>
+<tr><td><b>A</b> <code>kickstart.u64</code> (first)</td><td>Built like the updater, links at <code>0x03000000</code>, embeds <code>ultimate.app</code>; started by the stock "Run Update"; checks, quiesces, copies to <code>0x0</code>, reads back, jumps.</td><td>Any installed firmware can start it. About 1–2 days.</td><td>One kickstart file per firmware build; after the point of no return a failure can only power off.</td></tr>
+<tr><td><b>B</b> "Kickstart" action in our firmware</td><td>Loads any <code>ultimate.app</code> to <code>0x03000000</code>, checks it while the old firmware still runs, then hands off to a ~30-instruction copier placed at <code>0x039FF000</code>.</td><td>No per-build file; errors end in a popup, not a dead machine.</td><td>Only in a firmware that has it; bootstrapped by A. About 1 more day.</td></tr>
+<tr><td><i>rejected</i> C</td><td>Boot ROM with a "boot from RAM" flag</td><td></td><td>The ROM is inside the FPGA image; no FPGA sources.</td></tr>
+<tr><td><i>rejected</i> D</td><td>Firmware linked at <code>0x03000000</code>, run in place</td><td>No copy</td><td>Not the binary that is flashed; its footprint reaches the app area; linker and app loader changes.</td></tr>
+</table></div>
+
+<h4>Checks before the jump</h4>
+<ol>
+  <li>Board: <code>CAPAB_ULTIMATE64</code> and FPGA type 0 or 1 (<code>update_u64.cc:105</code>).</li>
+  <li>Core version: <code>C64_CORE_VERSION</code> and <code>ITU_FPGA_VERSION</code> equal to the
+  values of the RBF the image was built for. Kickstart never loads an RBF, so this
+  is the check that matters; where the expected value comes from at build time is open.</li>
+  <li>Image: checksum (<code>update_common.h:34-46</code>), load <code>0</code>, start inside the
+  image, image plus BSS below <code>0xEA0000</code>.</li>
+  <li>ESP32 bridge version: warn only.</li>
+</ol>
+<p>On a failure after the point of no return (A): show why, then power off
+(<code>update_common.h:53-62</code>); the next power-on boots the flash firmware.</p>
+
+<h4>What must be tried first on a MK1</h4>
+<ol>
+  <li>Kickstart the identical installed build: shows whether the firmware takes a warm start.</li>
+  <li>Kickstart twice and compare a RAM checksum after boot: shows whether any DMA still writes into low RAM.</li>
+  <li>A changed build that prints its build ID: shows the copy and the cache sweep work.</li>
+</ol>
+<p>A JTAG load with <code>openFPGALoader -m</code> configures the FPGA only; the boot ROM
+then loads the firmware from flash. It is not a firmware run from RAM and does not
+answer point 1.</p>
+
+<!-- ============================================================ -->
+<h2 id="s5"><span class="n">5</span>Building block view</h2>
+
+<h3>5.1 Level 1: today</h3>
+<div class="diagram"><pre class="mermaid">
+flowchart TB
+  main["ultimate_main()<br>ultimate.cc:87"]
+  main --> init["InitFunction::executeAll()<br>subsystems, settings"]
+  main --> c64["C64::getMachine()<br>init() + start()"]
+  main --> ovlui["overlayUserInterface<br>host: Overlay"]
+  main --> c64ui["c64UserInterface<br>host: C64 (freeze)"]
+  ovlui --> r1{"ui_is_commodore()"}
+  c64ui --> r2{"ui_is_commodore()"}
+  r1 -- yes --> cm1[CommodoreMenu]
+  r1 -- no --> tb1[TreeBrowser + HomeDirectory]
+  r2 -- yes --> cm2[CommodoreMenu]
+  r2 -- no --> tb2[TreeBrowser + HomeDirectory]
+  main --> loop["main loop<br>button / F10 / Scroll Lock<br>ui-&gt;run_once()"]
+</pre></div>
+
+<h3>5.2 Level 1: with the launcher</h3>
+<div class="diagram"><pre class="mermaid">
+flowchart TB
+  main["ultimate_main()"]
+  main --> c64ui["c64UserInterface"]
+  main --> ovlui["overlayUserInterface"]
+  c64ui --> front{"front door"}
+  ovlui --> front2{"front door"}
+  front -- "TREX" --> tl[TrexLauncher]
+  front -- "Commodore" --> cm[CommodoreMenu]
+  front -- "Ultimate" --> tb[TreeBrowser]
+  front2 --> same["same choice"]
+  tl -. "push" .-> tb
+  tl -. "push" .-> cfg[ConfigBrowser]
+  tl -. "run" .-> apps["TREX apps<br>trex_crt"]
+  subgraph trex [software/trex/launcher, new]
+    tl
+    theme[TREX theme row]
+    set[launcher settings]
+  end
+</pre></div>
+
+<div class="tablewrap"><table>
+<tr><th>Block</th><th>Responsibility</th><th>Where</th></tr>
+<tr><td><code>TrexLauncher</code></td><td>The start screen: its entries, its drawing, its keys. A <code>UIObject</code> like <code>CommodoreMenu</code>.</td><td>new, <code>software/trex/launcher/</code></td></tr>
+<tr><td>TREX theme row</td><td>Frame glyphs, title style, key layout of the launcher.</td><td>one row in the <code>t_ui_theme</code> table</td></tr>
+<tr><td>Launcher settings</td><td>Show at boot (on/off), timeout, which interface the menu button opens.</td><td>new config store</td></tr>
+<tr><td>Seam</td><td>Choose the root object; run the launcher once after <code>start()</code>.</td><td><code>ultimate.cc</code>, about 10 lines</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s6"><span class="n">6</span>Runtime view</h2>
+
+<h3>6.1 Boot today (read from the code)</h3>
+<div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant M as ultimate_main
+  participant C as C64
+  participant O as Overlay
+  participant U as UserInterface x2
+  M->>M: InitFunction::executeAll()  (ultimate.cc:102)
+  M->>C: getMachine(), init()  (:109-111)
+  Note over C: effectuate settings, system ROMs,<br>cartridge (c64.cc:289)
+  M->>C: start()  (:112)
+  Note over C: C64_STOP = 0, the 6510 runs,<br>BASIC comes up (c64.cc:307)
+  M->>O: new Overlay + Keyboard_C64  (:130-141)
+  M->>U: overlay UI: root = Commodore or Tree  (:143-160)
+  M->>U: C64 UI: root = Commodore or Tree  (:163-184)
+  loop every 3 ticks  (:189-230)
+    M->>C: checkButton(), buttonPush()
+    alt button, F10, Scroll Lock
+      M->>U: run_once()
+      U->>C: take_ownership() = freeze()  (c64.h:390)
+    else idle
+      M->>U: pollInactive()
+    end
+  end
+</pre></div>
+
+<p>The C64 is running before either interface exists. Nothing is shown until
+the button; the overlay interface is taken instead of the C64 one only when HDMI
+is connected and the user prefers it (<code>ultimate.cc:205-210</code>,
+<code>CFG_USERIF_ITYPE</code>). The only start option today is where the browser
+opens (<code>CFG_USERIF_START_HOME</code>, "Enter Home on Startup").</p>
+
+<h3>6.2 Boot with the launcher</h3>
+<div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant M as ultimate_main
+  participant C as C64
+  participant L as TrexLauncher
+  M->>C: init(), start()
+  M->>M: create both UserInterfaces (unchanged)
+  alt launcher on at boot
+    M->>L: ui-&gt;run_once() with TrexLauncher on top
+    L->>C: freeze (C64 host) or overlay on
+    L-->>L: user picks: title / cart tool / browser / BASIC
+    L->>C: unfreeze, or reset + start the pick
+  end
+  M->>M: main loop as today
+</pre></div>
+
+<p>Three hosts are possible for that first screen; section 9 lists the choice.</p>
+<div class="tablewrap"><table>
+<tr><th>Host</th><th>How</th><th>For</th><th>Against</th></tr>
+<tr><td>A. Frozen C64</td><td><code>start()</code>, then <code>run_once()</code> on the C64 UI: the freeze stops the machine at BASIC.</td><td>Same path as the menu button today; works on every screen and board; apps can run from it.</td><td>BASIC's start-up message flashes first; freeze needs the 6510 running (<code>phi2_present()</code>, <code>c64.cc:1257</code>).</td></tr>
+<tr><td>B. Overlay</td><td>Overlay taken before or after <code>start()</code>.</td><td>No freeze, the C64 can wait in reset behind it.</td><td>Only where the overlay is on the output; no apps (they need the freeze).</td></tr>
+<tr><td>C. Before start()</td><td>Draw while <code>C64_STOP</code> still holds the CPU, start only when the launcher is left.</td><td>No BASIC flash; the pick can be started directly.</td><td>The C64 screen memory is not the menu's until a freeze; would need a host that draws into a stopped machine. Unverified.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s7"><span class="n">7</span>Deployment view</h2>
+<ul>
+  <li>The launcher is compiled into the firmware image (<code>.ue2</code>/<code>.cfw</code>
+  for U64-II/C64U, <code>.u64</code> for U64). No separate flash area.</li>
+  <li>Its settings live in a config store like every other page, in the flash the
+  firmware already writes settings to.</li>
+  <li>Assets (a TREX charset, a logo) are either tables in the image or files on
+  <code>/Flash</code>; the image stays self-sufficient if the file is missing.</li>
+  <li>TREX apps (<code>trex_crt.u2a</code>) stay separate
+  and are started from the launcher through the App Loader.</li>
+</ul>
+
+<h3>7.1 Memory of the firmware (C64U, measured)</h3>
+<p>From <code>target/u64ii/riscv/ultimate/linker.x</code>, <code>riscv64-elf-size</code> on the
+3.15 build, and <code>GET /v1/machine:heap</code> on the running C64U (2026-09-23).</p>
+<div class="tablewrap"><table>
+<tr><th>Region</th><th>Size</th><th>Holds</th></tr>
+<tr><td>Firmware window <code>0x30000–0xE90000</code></td><td>14.4 MiB</td><td>all of the rows below</td></tr>
+<tr><td><code>.text</code></td><td>958 KB</td><td>all code, including every interface linked in</td></tr>
+<tr><td><code>.rodata</code> + <code>.data</code></td><td>352 KB</td><td>constants, tables, strings, initialised data</td></tr>
+<tr><td><code>.bss</code></td><td>13.6 MB</td><td>static buffers, among them the FreeRTOS heap of 8 MiB (5.2 MB free, low-water 5.2 MB)</td></tr>
+<tr><td>End of <code>.bss</code> to end of window</td><td>about 153 KiB</td><td>start-up stack and newlib heap: taken, not spare</td></tr>
+<tr><td>Above the window</td><td>fixed addresses</td><td>app load area <code>0x03A00000</code>, cartridge ROM buffer from <code>0x03C00000</code>; the rest of this range not yet mapped</td></tr>
+</table></div>
+<p>The scarce resource is room for more code in the window, not the heap. Code
+loaded outside the window (variants M and K) does not compete for it.</p>
+
+<!-- ============================================================ -->
+<h2 id="s8"><span class="n">8</span>Cross-cutting concepts</h2>
+<div class="tablewrap"><table>
+<tr><th>Concept</th><th>Existing mechanism</th><th>Use in the launcher</th></tr>
+<tr><td>Hosts</td><td><code>GenericHost</code>: <code>C64</code> freezes on <code>take_ownership()</code>, <code>Overlay</code> is permanent and only switches transparency (<code>overlay.h:91</code>).</td><td>The launcher draws through <code>Screen</code>/<code>Window</code> and does not care which host.</td></tr>
+<tr><td>Object stack</td><td><code>UserInterface::activate_uiobject()</code>, <code>peel_off()</code> keeps the first object.</td><td>Launcher is object 0; browser, settings, tools are pushed and peeled back to it.</td></tr>
+<tr><td>Actions</td><td><code>SubsysCommand</code> / <code>Action</code> for everything the user can do.</td><td>Launcher entries are actions, so the same entries can sit in the task menu.</td></tr>
+<tr><td>Theme</td><td><code>t_ui_theme</code>: corners, title style, F-key layout per interface.</td><td>A TREX row; the launcher asks the theme, not the interface.</td></tr>
+<tr><td>Keys</td><td>Keymapper per interface; physical F-keys via <code>ui_fkey()</code> for apps.</td><td>The launcher's own layout, written once in its theme row.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s9"><span class="n">9</span>Architecture decisions</h2>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Question</th><th>Options</th><th>State</th></tr>
+<tr><td>D6</td><td>How the interfaces are built and separated</td><td>S single firmware · M loadable UI module · K kickstart modules (4)</td><td><span class="pill open">open, K to be examined</span></td></tr>
+<tr><td>D7</td><td>What "back to the selector" does</td><td>restart into the base / selector · rebuild the root objects at runtime</td><td><span class="pill open">open</span></td></tr>
+<tr><td>D1</td><td>Host of the boot screen</td><td>A frozen C64 · B overlay · C before <code>start()</code> (6.2)</td><td><span class="pill open">open</span></td></tr>
+<tr><td>D2</td><td>Where the launcher code lives</td><td>firmware module <code>software/trex/</code> · an app (<code>.u2a</code>) started at boot</td><td><span class="pill open">open</span></td></tr>
+<tr><td>D3</td><td>What the menu button opens afterwards</td><td>always the launcher · the upstream interface, launcher as its first entry · a setting</td><td><span class="pill open">open</span></td></tr>
+<tr><td>D4</td><td>When the selector shows at boot</td><td>C= held at power-on; a setting for every power-on; last choice remembered</td><td><span class="pill ok">wanted</span></td></tr>
+<tr><td>D5</td><td>Relation to the Commodore interface on a C64U</td><td>in front of it · replaces its main menu · off by default there</td><td><span class="pill open">open</span></td></tr>
+<tr><td>D0</td><td>A C64 program is not needed</td><td>The firmware chooses the interface and draws it on its hosts.</td><td><span class="pill ok">settled</span></td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s10"><span class="n">10</span>Quality requirements</h2>
+<div class="tablewrap"><table>
+<tr><th>Quality</th><th>Scenario</th><th>Measure</th></tr>
+<tr><td>Mergeability</td><td>A new upstream release is merged.</td><td>Upstream files touched by the launcher: at most <code>ultimate.cc</code> and the theme table.</td></tr>
+<tr><td>Boot time</td><td>Power-on with the launcher switched off.</td><td>Same time to BASIC as today.</td></tr>
+<tr><td>Never stuck</td><td>No keyboard, no HDMI, a cartridge that starts itself.</td><td>The launcher can be skipped by setting and by a timeout; a cartridge's own start is not blocked.</td></tr>
+<tr><td>Both boards</td><td>U64 MK1 and C64U.</td><td>Same launcher; differences only in the theme row.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="s11"><span class="n">11</span>Risks and technical debt</h2>
+<ul>
+  <li><b>Freeze right after <code>start()</code>.</b> <code>C64::freeze()</code>
+  returns without freezing when <code>phi2_present()</code> is false
+  (<code>c64.cc:1257</code>). Whether the clock is there immediately after
+  <code>start()</code> is not verified.</li>
+  <li><b>A cartridge that starts itself.</b> An EasyFlash or EF3 boots its own
+  menu at reset. A launcher at boot must either come first (and start the
+  cartridge afterwards) or not appear when a cartridge is active.</li>
+  <li><b>Overlay without HDMI.</b> The main loop only takes the overlay when HDMI
+  hot-plug is seen (<code>ultimate.cc:206</code>). Host B must fall back.</li>
+  <li><b>Keyboard matrix.</b> The USB keyboard is switched off the C64 matrix
+  while a UI runs (<code>ultimate.cc:221-223</code>); a boot-time run has to do
+  the same.</li>
+  <li><b>C= at power-on.</b> The keyboard matrix is read by the FPGA
+  (<code>U64II_KEYB_ROW/COL</code>, <code>ultimate.cc:134</code>); whether it is readable
+  that early in the boot is not verified.</li>
+  <li><b>Kickstart on the U64 MK1.</b> Only proven on RISC-V. The Nios design (4.2) rests on code the
+  updater already runs; a warm start of the firmware, remaining DMA into low RAM and the core
+  version check are untried on hardware.</li>
+  <li><b>Module and FPGA versions (variant K).</b> A TREX firmware module is tied to the FPGA core
+  and ESP32 version of the base it is started from.</li>
+  <li><b>Commodore firmware on the C64U.</b> Commodore's own releases may add
+  start-up behaviour; the launcher must stay in front of our build only.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="s12"><span class="n">12</span>Glossary</h2>
+<div class="tablewrap"><table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Front door</td><td>The root <code>UIObject</code> of a <code>UserInterface</code>: what appears first.</td></tr>
+<tr><td>Host</td><td>What a <code>UserInterface</code> draws on and takes keys from: the frozen C64 or the overlay.</td></tr>
+<tr><td>Freeze</td><td>Stopping the 6510, saving the screen and I/O, and showing the menu on the C64's own screen.</td></tr>
+<tr><td>Overlay</td><td>A character matrix the FPGA lays over the video output, independent of the C64.</td></tr>
+<tr><td>Kickstart</td><td>Loading a complete firmware application into RAM and jumping into it without flashing (Spiffy / prkl).</td></tr>
+<tr><td>Selector</td><td>The start screen that chooses the interface: TREX, Ultimate, Commodore.</td></tr>
+<tr><td>Seam</td><td>The few lines in upstream files where TREX code is called.</td></tr>
+</table></div>
+
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  var dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (document.documentElement.getAttribute('data-theme') !== 'light' &&
+     window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  if (window.mermaid) {
+    mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'neutral', securityLevel: 'strict' });
+  }
+})();
+</script>
+</body>
+</html>

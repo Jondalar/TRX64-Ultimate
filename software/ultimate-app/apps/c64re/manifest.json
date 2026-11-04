@@ -1,0 +1,8 @@
+{
+  "id": "c64re",
+  "name": "C64RE Snapshot",
+  "version": "1.0",
+  "tasks": [
+    { "category": "C64 Machine", "label": "Save .C64RE Dump", "action": "dump" }
+  ]
+}

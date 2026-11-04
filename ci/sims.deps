@@ -1,0 +1,90 @@
+# What each bench of ci/sims.txt reads (T31 §Per-bench cache, ci/sims.sh).
+#
+#   @name = spec ...      a macro, replaced wherever @name appears further down
+#   bench: spec ...       the inputs of bench <bench>; an indented line goes on
+#
+# A spec is a git pathspec from the repository root: a file, a directory (every
+# tracked file below it), a :(glob) or an :(exclude). Only tracked files count, so
+# build/ directories and generated files never do. <submodule>//<pathspec> reaches
+# INSIDE a submodule and counts the content of those files, not the submodule's
+# commit: software/ultimate-app carries Gideon's VHDL beside the application, and a
+# commit that moves the application alone must not rerun his benches (ci/lib.sh
+# files_key). The sandbox of --check-deps links the submodule whole, so a bench that
+# reads an undeclared file inside it is not caught there. The key also holds the
+# bench's line of ci/sims.txt, the versions of iverilog/ghdl/verilator and KEY_EPOCH of
+# ci/sims.sh. The runner's own content is NOT in it: a comment there used to throw away
+# all 40 markers at once, and then the stage ran every bench.
+#
+# A bench without a line here keeps the key of the whole tree (designs cores tools
+# roms ci): any change in those reruns it, nothing is ever skipped wrongly.
+# A spec that matches no tracked file makes the bench fall back the same way.
+#
+# Keep a line COMPLETE: what a bench reads and this list lacks is a change that does
+# not rerun it. ci/sims.sh --check-deps NAME runs the bench in a copy that holds only
+# these files, so a missing input fails there; the iverilog benches are also checked
+# on every run (the compiler's own list of files it read, ci/sim_iv.sh).
+
+# Gideon's VHDL: cores/gideon is generated from the submodule (tools/gideon_sources.sh)
+@gideon = software/ultimate-app//fpga tools/gideon_sources.sh tools/vendor_gideon.sh tools/patches/gideon
+# the C64 model of the Verilator benches: the cores, the ROMs and what rom2mem makes of them
+@vcore = cores/icepi cores/trx_sid roms tools/rom2mem.py designs/c64_basic/mem designs/c64_basic/c64_core.v designs/c64_basic/c64_mem.v designs/c64_basic/cart_slot.v designs/c64_basic/slot_port.v designs/c64_basic/trx_dbg.v
+# build.tcl's VHDL list is what eth and input compile besides Gideon's files
+@bt_vhdl = designs/c64_basic/build.tcl designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/usb_dpram.vhd designs/c64_basic/pseudo_dpram_8x32_x7.vhd designs/c64_basic/drive_mem.vhd designs/c64_basic/drive_unit.vhd designs/c64_basic/uci_unit.vhd designs/c64_basic/flash_gate.vhd designs/c64_basic/ultimate_sys.vhd designs/c64_basic/sim/usb/unisim_sim.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd
+# the shared MIG UI model and DDR2 port
+@mig = designs/c64_basic/ddr2_port.v designs/c64_basic/sim/mig_ui_model.v
+# ddr2_lean, its calibration sequencer, the DDR2 and Xilinx primitive models, the run script (OPT-ddr2)
+@ddr2 = designs/c64_basic/ddr2_lean.v designs/c64_basic/cal_seq.v designs/ddr2_test/sim/xilinx_models.v designs/ddr2_test/sim/ddr2_model.v designs/ddr2_test/sim/run.sh
+
+trx_io: designs/c64_basic/sim/trx_io designs/c64_basic/trx_io.v designs/c64_basic/trx_sys.v
+cart_unit: designs/c64_basic/sim/cart_unit designs/c64_basic/cart_slot.v designs/c64_basic/cart_fill.v designs/c64_basic/trx_io.v
+  tools/gen_cart_descriptors.py tools/cart_descriptors
+  cores/icepi/c64_cartridge.v cores/icepi/c64_flash_amd.v cores/icepi/c64_eeprom_93c86.v cores/icepi/c64_action_replay
+ring_f4: designs/c64_basic/sim/ring/run_f4.sh designs/c64_basic/sim/ring/tb_eng_f4.v designs/c64_basic/trx_engine.v
+
+# rvlite multiply (opt-rvmul): Gideon's rvlite as vendored and patched, run under GHDL against gen.py's model
+rvmul: designs/c64_basic/sim/rvmul designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @gideon
+
+keyboard: ci/sim_iv.sh designs/c64_basic/sim/tb_keyboard.v designs/c64_basic/c64u_keyboard.v
+app_i2c: ci/sim_iv.sh designs/c64_basic/sim/tb_app_i2c.v designs/c64_basic/app_i2c.v designs/c64_basic/c64u_keyboard.v
+bling: ci/sim_iv.sh designs/c64_basic/sim/tb_bling.v designs/c64_basic/bling_keyboard.v
+bling_io: ci/sim_iv.sh designs/c64_basic/sim/tb_bling_io.v designs/c64_basic/bling_io.v designs/c64_basic/bling_keyboard.v
+case_leds: ci/sim_iv.sh designs/c64_basic/sim/tb_case_leds.v designs/c64_basic/case_leds.v
+mig_arb: ci/sim_iv.sh designs/c64_basic/sim/tb_mig_arb.v @mig
+reu_map: ci/sim_iv.sh designs/c64_basic/sim/tb_reu_map.v designs/c64_basic/reu_ddr_map.v @mig
+udp_audio: ci/sim_iv.sh designs/c64_basic/sim/tb_udp_audio.v designs/c64_basic/udp_stream.v designs/c64_basic/udp_audio.v designs/c64_basic/stream_mux.v
+scaler: ci/sim_iv.sh designs/c64_basic/sim/tb_scaler.v designs/c64_basic/vic_scaler.v designs/c64_basic/pal_ram.v
+sock_audio: ci/sim_iv.sh designs/c64_basic/sim/tb_sock_audio.v designs/c64_basic/i2s_out.v designs/c64_basic/sock_audio.v
+
+pixlayer: designs/c64_basic/sim/pixlayer/run.sh designs/c64_basic/sim/pixlayer/tb_pixlayer.v designs/c64_basic/sim/pixlayer/tgl_client.v designs/c64_basic/pix_layer.v designs/c64_basic/trx_io.v @mig
+still60: designs/c64_basic/sim/pixlayer/run_still.sh designs/c64_basic/sim/pixlayer/tb_still.v designs/c64_basic/sim/pixlayer/tgl_client.v designs/c64_basic/pix_layer.v @mig
+
+drive_mem: designs/c64_basic/sim/drive_mem designs/c64_basic/drive_mem.vhd @mig @gideon
+uci: designs/c64_basic/sim/uci/run.sh designs/c64_basic/sim/uci/tb_uci.vhd designs/c64_basic/uci_unit.vhd @gideon
+flash_gate: designs/c64_basic/sim/flash_gate designs/c64_basic/flash_gate.vhd designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd tools/flashgate_test.py tools/flashgate @gideon
+  tools/flashgate_test.py tools/flashgate @gideon
+flash_boot: designs/c64_basic/sim/flash_boot designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @gideon
+eth: designs/c64_basic/sim/eth @bt_vhdl @gideon
+input: designs/c64_basic/sim/input designs/c64_basic/app_input.v @bt_vhdl @vcore @gideon
+slot: designs/c64_basic/sim/slot designs/c64_basic/dma_win.v @vcore
+
+# T16 Q8: ultimate_sys under GHDL with a bus-functional rvlite, the files build.tcl lists
+dma_bus: designs/c64_basic/sim/dma_bus designs/c64_basic/sim/usb/unisim_sim.vhd @bt_vhdl @gideon
+# G06 and T29: c64_core under Verilator
+steal: designs/c64_basic/sim/steal @vcore designs/c64_basic/dma_win.v
+reu: designs/c64_basic/sim/reu @vcore designs/c64_basic/dma_win.v
+turbo: designs/c64_basic/sim/turbo @vcore tools/rom2mem.py
+# T12 §14.8: c64_core with trx_dbg, dma_win, trx_sys and the cartridge's DDR2 side under Verilator
+# (had no line: the whole-tree key reran its 7.5 minutes on every push)
+dbgsess: designs/c64_basic/sim/dbgsess @vcore designs/c64_basic/cart_fill.v designs/c64_basic/dma_win.v
+  designs/c64_basic/trx_sys.v @mig tools/gen_cart_descriptors.py tools/cart_descriptors
+# trx_engine.v's trace former under iverilog
+ring_trace: designs/c64_basic/sim/ring/run_trace.sh designs/c64_basic/sim/ring/tb_eng_trace.v designs/c64_basic/trx_engine.v
+
+ddr2_cal: @ddr2 designs/ddr2_test/sim/tb_ddr2_lean.v
+ddr2_refresh: @ddr2 designs/ddr2_test/sim/tb_ddr2_lean.v
+ddr2_ctrl: @ddr2 designs/c64_basic/ddr2_ctrl.v designs/ddr2_test/sim/tb_ddr2_ctrl.v
+cal_equiv: designs/c64_basic/cal_seq.v designs/ddr2_test/sim/cal_seq_ref.v designs/ddr2_test/sim/tb_cal_equiv.v designs/ddr2_test/sim/run.sh
+ddr2_traffic: @ddr2 designs/ddr2_test/sim/tb_ddr2_lean.v
+ddr2_arb: @ddr2 designs/ddr2_test/sim/tb_mig_arb_lean.v designs/c64_basic/ddr2_port.v
+ddr2_test: @ddr2 designs/ddr2_test/sim/tb_ddr2_test.v designs/ddr2_test/top.v designs/ddr2_test/ddr2_tester.v designs/c64_basic/jtag_dbg.v
+redip_new: cores/icepi/c64_redip_sid cores/trx_sid/mem/sid_curve_init.mem designs/c64_basic/sim/redip

@@ -1,0 +1,104 @@
+# Build image for CI, with everything the firmware needs inside it.
+#
+# Unlike build/Dockerfile, this one carries Quartus 18.1 instead of expecting it
+# from a host mount, so a runner needs nothing but Docker. Nothing is read from
+# or written to the host.
+#
+# The build context must hold quartus-18.1.tar.gz, containing the two
+# directories the firmware build uses:
+#
+#     cd ~/quartus-18.1 && tar -czf quartus-18.1.tar.gz nios2eds quartus
+#
+# hls and ip are not used: 4.0 GB instead of 6.7. nios2eds alone is not enough,
+# the updater calls quartus_cpf out of quartus/.
+#
+# Build:
+#     docker build -t u64-build-env:ci -f Dockerfile.ci .
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential git wget curl \
+    python3 python3-pip python3-venv \
+    cmake ninja-build ccache \
+    libusb-1.0-0-dev pkg-config \
+    flex bison gperf libffi-dev libssl-dev \
+    dfu-util unzip xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# RISC-V toolchain (xPack riscv-none-elf-gcc 11.3.0)
+RUN mkdir -p /opt/riscv && \
+    curl -L https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v11.3.0-1/xpack-riscv-none-elf-gcc-11.3.0-1-linux-x64.tar.gz \
+    | tar -xzC /opt/riscv --strip-components=1 && \
+    for file in /opt/riscv/bin/riscv-none-elf-*; do \
+        ln -s "$file" "/usr/local/bin/riscv32-unknown-elf-${file##*riscv-none-elf-}"; \
+    done
+
+# git over HTTP/1.1. Ubuntu 22.04 ships git 2.34.1, whose HTTP/2 ref listing
+# breaks against GitHub from this network: every clone dies with "expected flush
+# after ref listing" and then, because git falls back to asking for credentials
+# in a place that has no terminal, "could not read Username for
+# https://github.com". Forcing HTTP/1.1 fixes it; verified in a container on the
+# build host, where the same clone succeeds with this set and fails without.
+# GIT_TERMINAL_PROMPT=0 keeps a real failure loud instead of hanging on a prompt.
+ENV GIT_TERMINAL_PROMPT=0
+RUN git config --global http.version HTTP/1.1
+
+# ESP-IDF. esp32s3 is in the list because software/u64ctrl is an S3 project and
+# the U64-II target builds it; esp32 and esp32c3 cover the WiFi modules.
+#
+# Two ways in, because the git one is unreliable from here. ESP-IDF pulls about
+# thirty submodules, and after the first handful GitHub starts answering the
+# anonymous ref listings with an auth challenge, which git reports as "could not
+# read Username" and "expected flush after ref listing". Serialising the clones
+# with --jobs 1 and retrying is enough most of the time; when it is not, the
+# release archive carries every submodule already and needs no clones at all.
+RUN set -eu; \
+    mkdir -p /opt/esp; cd /opt/esp; \
+    if git clone --single-branch -b v5.4 https://github.com/espressif/esp-idf.git; then \
+        cd esp-idf; \
+        n=0; \
+        until git submodule update --init --recursive --jobs 1; do \
+            n=$((n + 1)); \
+            if [ "$n" -ge 3 ]; then echo "submodules keep failing, falling back to the archive"; break; fi; \
+            echo "submodule fetch failed, retry $n after 30s"; sleep 30; \
+        done; \
+        cd /opt/esp; \
+        if [ ! -f esp-idf/components/heap/tlsf/tlsf.c ]; then rm -rf esp-idf; fi; \
+    fi; \
+    if [ ! -d esp-idf ]; then \
+        curl -fL -o idf.zip https://github.com/espressif/esp-idf/releases/download/v5.4/esp-idf-v5.4.zip; \
+        unzip -q idf.zip; rm -f idf.zip; \
+        test -d esp-idf-v5.4 && mv esp-idf-v5.4 esp-idf; \
+    fi; \
+    test -f esp-idf/components/heap/tlsf/tlsf.c; \
+    cd esp-idf && ./install.sh esp32,esp32c3,esp32s3 && \
+    rm -rf /opt/esp/esp-idf/.git
+
+# Quartus 18.1, unpacked and the archive dropped in the same layer so it does
+# not stay in the image.
+COPY quartus-18.1.tar.gz /tmp/quartus-18.1.tar.gz
+RUN mkdir -p /opt/altera_lite/18.1 && \
+    tar -xzf /tmp/quartus-18.1.tar.gz -C /opt/altera_lite/18.1 && \
+    rm -f /tmp/quartus-18.1.tar.gz && \
+    test -x /opt/altera_lite/18.1/nios2eds/bin/gnu/H-x86_64-pc-linux-gnu/bin/nios2-elf-gcc && \
+    test -f /opt/altera_lite/18.1/quartus/bin/quartus_cpf
+
+ENV QUARTUS_ROOTDIR=/opt/altera_lite/18.1/quartus
+ENV QSYS_ROOTDIR=/opt/altera_lite/18.1/quartus/sopc_builder/bin
+ENV ALTERAOCLSDKROOT=/opt/altera_lite/18.1/hld
+ENV PATH="${PATH}:/opt/altera_lite/18.1/quartus/bin"
+ENV PATH="${PATH}:/opt/altera_lite/18.1/nios2eds/bin"
+ENV PATH="${PATH}:/opt/altera_lite/18.1/nios2eds/sdk2/bin"
+ENV PATH="${PATH}:/opt/altera_lite/18.1/nios2eds/bin/gnu/H-x86_64-pc-linux-gnu/bin"
+ENV PATH="${PATH}:/opt/altera_lite/18.1/quartus/sopc_builder/bin"
+ENV PATH="${PATH}:/opt/riscv/bin"
+
+WORKDIR /project
+
+RUN echo '. /opt/esp/esp-idf/export.sh' >> /root/.bashrc
+
+ENTRYPOINT ["/bin/bash", "-c", ". /opt/esp/esp-idf/export.sh && exec \"$@\"", "--"]
+CMD ["/bin/bash"]

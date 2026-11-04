@@ -1,0 +1,6 @@
+{
+  "id": "restcheck",
+  "name": "REST Check",
+  "version": "1.0",
+  "rest": [ "echo", "config", "fail" ]
+}

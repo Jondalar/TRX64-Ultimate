@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installing, backup and the way back
+    url: https://github.com/Jondalar/TRX64-Ultimate/blob/main/INSTALL.md
+    about: Read this before you report an installation problem.
+  - name: User manual
+    url: https://github.com/Jondalar/TRX64-Ultimate/wiki
+    about: Every menu, function and app, chapter by chapter.

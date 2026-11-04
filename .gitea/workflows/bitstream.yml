@@ -1,0 +1,88 @@
+name: Bitstream
+
+# Stage bit-*: Vivado builds (ci/bitstream.sh), reused when nothing that goes into the bitstream changed.
+# Called by pipeline.yml (workflow_call) and runnable alone (workflow_dispatch).
+# No concurrency group here: a group in a called workflow made every call queue for
+# `gateware` again, so another pipeline slipped in between two stages of this one and
+# the run sat "waiting" with a stage left (run 351). The group is the pipeline's.
+# Run alone, a fragment is not serialised: look at the queue first, as before a push.
+on:
+  workflow_call:
+    inputs:
+      part:
+        description: 'FPGA: 50t (C64 Ultimate) or 100t (Ultimate 64 Elite II)'
+        type: string
+        default: 50t
+      ue2:
+        description: 'Must be true for part 100t (the 100T runs only when asked for; ci/select.sh ue2)'
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      part:
+        description: 'FPGA: 50t (C64 Ultimate) or 100t (Ultimate 64 Elite II)'
+        type: string
+        default: 50t
+      ue2:
+        description: 'Must be true for part 100t (the 100T runs only when asked for; ci/select.sh ue2)'
+        type: string
+        default: ''
+
+jobs:
+  bitstream:
+    name: Bitstream
+    # Repo variable CI_RUNNER=builder sends every stage to the builder; unset, the NAS
+    # runners take them. One machine per run: stages hand over through its /cache.
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: vivado-env:2024.1
+      # No CPU limit here: each runner sets its own in container.options (NAS --cpus=3, it
+      # also runs Gitea; builder none). --init: PID 1 of a job container is `sleep`,
+      # which never reaps, and Vivado's helper processes end up as zombies (runs 222, 225)
+      options: --init
+      volumes:
+        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      # The 100T runs only when asked for (ci/select.sh ue2). Decided here, before the
+      # submodule is fetched; a step-level `if:` is safe, a job-level one is not
+      # (docs/specs/T31-ci-pipeline.md, decision 2).
+      - name: Decide (100T skipped here unless requested)
+        env:
+          PART: ${{ inputs.part }}
+          UE2_INPUT: ${{ inputs.ue2 }}
+        run: |
+          if [ "$PART" = 100t ] && [ "$(src/ci/select.sh ue2)" != yes ]; then
+            echo "=========================================================="
+            echo "bit-ue2 SKIPPED: the 100T bitstream was not requested"
+            echo "(ask with a dispatch of the pipeline with ue2 = true, a tag or a release/* branch)"
+            echo "=========================================================="
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - name: bit-ue2 SKIPPED, not requested
+        if: env.SKIP == '1'
+        run: echo "bit-ue2 SKIPPED, the 100T bitstream was not requested; nothing was built"
+      - name: Fetch the Ultimate app submodule
+        if: env.SKIP != '1'
+        env:
+          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: src/ci/submodule.sh
+      - name: Vivado
+        if: env.SKIP != '1'
+        env:
+          PART: ${{ inputs.part }}
+          UE2_INPUT: ${{ inputs.ue2 }}
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: src/ci/bitstream.sh "$([ "$PART" = 100t ] && echo ue2 || echo c64u)"

@@ -1,0 +1,2232 @@
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ultimate II/64</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/jquery"></script>
+<script src="https://cdn.jsdelivr.net/npm/jquery.terminal/js/jquery.terminal.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jquery.terminal/css/jquery.terminal.min.css"/>
+
+<script>
+
+var serverIP = window.location.hostname;
+var apiPassword = "";
+var ultimateInfo = {};
+
+$(document).ready(async function () {
+
+    var basic_error = ""; // for error reports during parsing
+
+    async function ensureLoggedIn() {
+        // This also works with older firmware that do not support password protection (will get a 404 for /v1/info)
+        let [status_code, content] = await make_get_request("http://" + serverIP + "/v1/info");
+        if (status_code == 401 || status_code == 403) {
+            $("#bannertitle").html("&nbsp;");
+            $("#left-nav").css("visibility", "hidden");
+            $("#password").val("");
+            $(".page").hide();
+            $("#login").show();
+            $("#password").focus();
+        }
+        else {
+            if (content) {
+                ultimateInfo = content;
+            }
+            let product = ultimateInfo.product ? ultimateInfo.product : "Ultimate II/64";
+            if (apiPassword != "") {
+                $("#logoutmenuitem").show();
+            }
+            else {
+                $("#logoutmenuitem").hide();
+            }
+            $("#bannertitle").html(product + " HTTP Server");
+
+            // Power off reaches hardware on the Ultimate 64 family only; a
+            // cartridge answers 501. These are the names /v1/info reports for
+            // that family, from product_name[] in software/system/product.cc.
+            // That array is conditional on COMMODORE, which renames the last
+            // two entries, so both namings of the same hardware are listed
+            // here: leaving either out hides the item on machines that can
+            // power off.
+            const ProductsWithPwrCtrl = ["Ultimate 64", "Ultimate 64 Elite", "Ultimate 64-II",
+                                         "C64 Ultimate (MK1)", "C64 Ultimate"];
+            if (ProductsWithPwrCtrl.includes(product))
+                $("#menu-power").show();
+
+            // show firmware version in side panel
+            if (ultimateInfo.firmware_version)
+                $("#firmware-version").text("firmware v" + ultimateInfo.firmware_version);
+
+            $("#left-nav").css("visibility", "visible");
+            $(".page").hide();
+            $("#welcome").show();
+        }
+    };
+
+    $('#loginbutton').click(async function(event){
+        apiPassword = $("#password").val();
+        await ensureLoggedIn();
+    });
+
+    $('#password').on("keypress", async function(event){
+        if(event.which == 13) {
+            await $("#loginbutton").click();
+        }
+    });
+
+    $('#logout').click(async function(event){
+        apiPassword = "";
+        await ensureLoggedIn();
+    });
+
+    $('#doreset').click(function(event){
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        doReset();
+    });
+
+    async function doReset() {
+        let params = {};
+        let [status_code, content] = await make_put_request("http://" + serverIP + "/v1/machine:reset", params);
+    };
+
+    async function doPowerOff() {
+        let params = {};
+        if (confirm("Are you sure you want to power off your Ultimate?")) {
+            let [status_code, content] = await make_put_request("http://" + serverIP + "/v1/machine:poweroff", params);
+        }
+    };
+
+    $('#dopoweroff').click(function(event) {
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        doPowerOff();
+    });
+
+    $('#doreboot').click(function(event) {
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        doReboot();
+    });
+
+    async function doReboot() {
+        let params = {};
+        let [status_code, content] = await make_put_request("http://" + serverIP + "/v1/machine:reboot", params);
+    };
+
+    $('#domenubutton').click(function(event){
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        doMenuButton();
+    });
+
+    async function doMenuButton() {
+        let params = {};
+        let [status_code, content] = await make_put_request("http://" + serverIP + "/v1/machine:menu_button", params);
+    };
+
+    $('#showterminal').click(function(event){
+            event.preventDefault(); // Prevents the default action of the anchor tag
+            $(".page").hide();
+            $('#livemon').show(); // Shows the hidden div
+    });
+
+    $('#showwelcome').click(function(event){
+            event.preventDefault(); // Prevents the default action of the anchor tag
+            $(".page").hide();
+            $('#welcome').show();
+    });
+
+    // SID page event handlers
+    $('#showsidplay').click(function(event){
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        $(".page").hide();
+        $('#sidplay').show();
+    });
+
+    $('#sidplaysubmit').click(function(e) {
+        e.preventDefault();
+        submitSidPlayer();
+    });
+
+    $('#sidfile').on("change", function () {
+        submitSidPlayer();
+    });
+
+    $('#siddropzone').on("dragover", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).addClass("dragover");
+    });
+
+    $('#siddropzone').on("dragleave", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass("dragover");
+    });
+
+    $('#siddropzone').on("drop", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass("dragover");
+
+        const files = e.originalEvent.dataTransfer.files;
+        if (files.length > 0) {
+            $("#sidfile").prop("files", files);
+            submitSidPlayer();
+        }
+    });
+
+    // PRG/CRT page event handlers
+    $('#showrunner').click(function(event){
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        $(".page").hide();
+        $("#runner").show();
+    });
+
+    $('#runnersubmit').click(function(e) {
+        e.preventDefault();
+        submitRunner();
+    });
+
+    $('#runnerfile').on("change", function () {
+        submitRunner();
+    });
+
+    $('#runnerdropzone').on("dragover", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).addClass("dragover");
+    });
+
+    $('#runnerdropzone').on("dragleave", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass("dragover");
+    });
+
+    $('#runnerdropzone').on("drop", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass("dragover");
+
+        const files = e.originalEvent.dataTransfer.files;
+        if (files.length > 0) {
+            $('#runnerfile').prop("files", files);
+            submitRunner();
+        }
+    });
+
+    function getFileExtension(filename) {
+        let parts = filename.split('.');
+        let extension = parts.length > 1 ? parts[parts.length - 1] : '';
+        return extension.toUpperCase();
+    }
+
+    async function submitSidPlayer() {
+        let body = $('#sidfile')[0].files[0];
+        let params = {};
+        $("#sidmsg").hide();
+
+        let extension = getFileExtension(body.name);
+        if (extension !== "SID") {
+            alert("Unsupported file extension: '."+ extension.toLowerCase()+"'");
+            return;
+        }
+
+        let [status_code, content] = await make_post_request("http://" + serverIP + "/v1/runners:sidplay", params, body);
+        if(status_code !== 200) {
+            $("#sidmsg").show();
+        }
+    }
+
+    // PRG/CRT/SID loader, and disk-image mounter
+    const DISK_IMAGE_TYPES = ["D64", "G64", "D71", "G71", "D81"];
+    // This page offers no drive selection, so disk images go to drive A.
+    const MOUNT_DRIVE = "a";
+
+    async function submitRunner() {
+        let file = $('#runnerfile')[0].files[0];
+        let extension = getFileExtension(file.name);
+        let mounting = DISK_IMAGE_TYPES.includes(extension);
+        let params = {};
+        let route = null;
+        $("#runmsg").hide();
+        $("#runok").hide();
+
+        if (mounting) {
+            route = `/v1/drives/${MOUNT_DRIVE}:mount`;
+            // The upload carries no file name, so the device cannot take the
+            // image type from an extension and has to be told it here.
+            params = {"type": extension.toLowerCase()};
+        }
+        else if (extension === "PRG")
+            route = "/v1/runners:run_prg";
+        else if (extension === "CRT")
+            route = "/v1/runners:run_crt";
+        else if (extension === "SID")
+            route = "/v1/runners:sidplay";
+        else
+            alert("Unsupported file extension: '."+ extension.toLowerCase()+"'");
+
+        if (route === null)
+            return false;
+
+        let [status_code, content] = await make_post_request("http://" + serverIP + route, params, file);
+        if (status_code !== 200)
+            $("#runmsg").show();
+        else if (mounting)
+            // A mounted disk changes nothing on screen, unlike a program that runs.
+            $("#runok").show();
+        return status_code === 200;
+    }
+
+    // BASIC/tokenizer page event handlers
+    function showBASICerror(message) {
+        $("#basicmsg").text(message);
+        if (message === "")
+           $("#basicmsg").hide();
+        else
+           $("#basicmsg").show();
+    }
+
+    $('#showtokenizer').click(function(event){
+            event.preventDefault(); // Prevents the default action of the anchor tag
+            $(".page").hide();
+            $("#tokenizer").show();
+    });
+
+    $('#submitBASIC').click(async function(event){
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        await parseBASIC();
+    });
+
+    $('#submitBASICAndRun').click(async function (event) {
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        if (await parseBASIC() === true)
+            await runBASIC();   // Only RUN when parsing/upload was successful
+    });
+
+    $('#runBASIC').click(async function (event) {
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        await runBASIC();
+    });
+
+    $('#stopBASIC').click(async function (event) {
+        event.preventDefault(); // Prevents the default action of the anchor tag
+        await stopBASIC();
+    });
+
+    $('#uppercaseBASIC').on('change', async function (event) {
+        $("#basiceditor").toggleClass("uppercase", this.checked);  // change upper/lowercase display
+    });
+    // browser may have cached the checkbox state on a page reload: synchronize the initially displayed state
+    $("#basiceditor").toggleClass("uppercase", $('#uppercaseBASIC').prop('checked'));
+
+    // convenience: write memory - show error message when access fails
+    async function writeMemory(param, errorMsg) {
+        showBASICerror(""); // clear earlier errors
+        let [status_code, content] = await make_put_request("/v1/machine:writemem", param);
+        if (status_code !== 200) {
+            if (status_code === 0)
+                status_code = "no connection to device";
+            showBASICerror(errorMsg+" (error: "+status_code+").");
+            return false;
+        }
+        return true;
+    }
+
+    async function runBASIC() {
+        // Put "RUN\R" into the keyboard buffer
+        if (!await writeMemory({address: "0277", data: "52554E0D"}, "Failed to submit 'RUN' command"))
+            return;
+        // Set the keyboard buffer to 4 characters
+        await writeMemory({address: "00C6", data: "04"}, "Failed to submit 'RUN' command");
+    }
+
+    async function stopBASIC() {
+        // write the $91 STOP flag several times to reduce issues with a race condition, as the C64 kernal is also writing the flag
+        for (var i=0;i<5;i++)
+           // Set BASIC STOP key flag $0091
+           if (!await writeMemory({address: "0091", data: "7F"}, "Failed to set 'STOP' flag"))
+               return; // abort on first error
+    }
+
+    async function parseBASIC() {
+        var textarea = $("#basiceditor").val();
+
+        // Split into lines, remove blank lines, convert to lowercase, and join back
+        var temp = textarea.split('\n')
+                                .map(line => line.trim().toLowerCase())
+                                .filter(line => line.trim().length > 0) 
+                                .join('\n');
+
+        $("#basiceditor").val(temp);
+        var lines = temp.split('\n');
+
+        const tokenized_lines = [];
+        let addr = 2049;
+
+        // Clear error before starting
+        basic_error = "";
+
+        // Process each line
+        for(let x=0; x<lines.length; x++) {
+            const currentLineText = lines[x].trim();
+            // Correctly extract only the leading digits as line number
+            const lineNum = currentLineText.match(/^\d+/)?.[0] || "unknown";
+
+            const tokenizedLine = new TokenizedLine(currentLineText, addr);
+
+            // VALIDATION: Total line size in memory
+            let lineTotalLength = tokenizedLine.length();
+            if(lineTotalLength > 256) {
+                $("#basicmsg").text("Error in line " + lineNum + ". Line too long for C64 memory (" + lineTotalLength + " bytes). Max is 256. Program was not sent.").show();
+                return; // Abort processing to prevent memory corruption
+            }
+
+            // CHECK: If basic_error was set after processing this specific line
+            if(basic_error !== "") {
+                showBASICerror("Error in line " + lineNum + ". Program contains errors and was not sent. " + basic_error);
+                return false; // Stop execution to prevent sending corrupted data
+            }
+
+            addr += lineTotalLength;
+            tokenized_lines.push(tokenizedLine);
+        }
+
+        let i = 1
+        while (i < tokenized_lines.length)
+        {
+            tokenized_lines[i - 1].next_addr = tokenized_lines[i].addr
+            i += 1;
+        }
+
+        tokenized_lines[i-1].next_addr = tokenized_lines[i-1].addr + tokenized_lines[i-1].bytes.length + 5;
+
+
+        var data = convertData(tokenized_lines);
+
+        showBASICerror(basic_error); // show parser error messages (or hide the text box)
+
+        if(basic_error === "") {
+            let params = {"address":"0801"};
+            let [status_code, content] = await make_post_request("http://" + serverIP + "/v1/machine:writemem", params, data);
+        
+            if (status_code === 200) {
+                let varptr = toHex16(tokenized_lines[i-1].next_addr + 2);
+                varptr = varptr.substring(2, 4) + varptr.substring(0, 2);
+
+                params = {"address":"002d", "data": varptr };
+                [status_code, content] = await make_put_request("http://" + serverIP + "/v1/machine:writemem", params);
+            }
+
+            if (status_code !== 200) {
+                if (status_code === 0)
+                    status_code = "no connection to device";
+                showBASICerror("Upload failed (error: "+status_code+").");
+                return false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    function getAsciiValues(str) {
+        var asciiValues = [];
+        for (var i = 0; i < str.length; i++) {
+            asciiValues.push(str.charCodeAt(i));
+        }
+        return asciiValues;
+    }
+
+    const TOKENS = [
+        ['restore', 140],
+        ['input#', 132],
+        ['return', 142],
+        ['verify', 149],
+        ['print#', 152],
+        ['right$', 201],
+        ['input', 133],
+        ['gosub', 141],
+        ['print', 153],
+        ['close', 160],
+        ['left$', 200],
+        ['next', 130],
+        ['data', 131],
+        ['read', 135],
+        ['goto', 137],
+        ['stop', 144],
+        ['wait', 146],
+        ['load', 147],
+        ['save', 148],
+        ['poke', 151],
+        ['cont', 154],
+        ['list', 155],
+        ['open', 159],
+        ['tab(', 163],
+        ['spc(', 166],
+        ['then', 167],
+        ['step', 169],
+        ['peek', 194],
+        ['str$', 196],
+        ['chr$', 199],
+        ['mid$', 202],
+        ['end', 128],
+        ['for', 129],
+        ['dim', 134],
+        ['let', 136],
+        ['run', 138],
+        ['rem', 143],
+        ['def', 150],
+        ['clr', 156],
+        ['cmd', 157],
+        ['sys', 158],
+        ['get', 161],
+        ['new', 162],
+        ['not', 168],
+        ['and', 175],
+        ['sgn', 180],
+        ['int', 181],
+        ['abs', 182],
+        ['usr', 183],
+        ['fre', 184],
+        ['pos', 185],
+        ['sqr', 186],
+        ['rnd', 187],
+        ['log', 188],
+        ['exp', 189],
+        ['cos', 190],
+        ['sin', 191],
+        ['tan', 192],
+        ['atn', 193],
+        ['len', 195],
+        ['val', 197],
+        ['asc', 198],
+        ['if', 139],
+        ['on', 145],
+        ['to', 164],
+        ['fn', 165],
+        ['or', 176],
+        ['go', 203],
+        ['+', 170],
+        ['-', 171],
+        ['*', 172],
+        ['/', 173],
+        ['^', 174],
+        ['>', 177],
+        ['=', 178],
+        ['<', 179]
+    ];
+
+    const TOKENS_UPPERCASE = TOKENS.map(token => [token[0].toUpperCase(), token[1]]);
+
+
+    const SPECIAL = [
+        ['{rvs off}',  0x92],
+        ['{rvs on}',   0x12],
+        ['{up}',       0x91],
+        ['{down}',     0x11],
+        ['{left}',     0x9d],
+        ['{rght}',     0x1d],
+        ['{clr}',      0x93],
+        ['{clear}',    0x93],
+        ['{home}',     0x13],        
+        
+        ['{blk}',      0x90],
+        ['{wht}',      0x05],
+        ['{red}',      0x1c],
+        ['{cyn}',      0x9f],
+        ['{pur}',      0x9c],
+        ['{grn}',      0x1e],
+        ['{blu}',      0x1f],
+        ['{yel}',      0x9e],
+        ['{org}',      0x81],
+        ['{brn}',      0x95],
+        ['{lred}',     0x96],
+        ['{dgry}',     0x97],
+        ['{mgry}',     0x98],
+        ['{lgrn}',     0x99],
+        ['{lblu}',     0x9a],
+        ['{lgry}',     0x9b],
+        
+        // additional entries found in COMPUTES!'s Gazette
+        ['{rvs}',      0x12],
+        ['{space}',    0x20],
+        ['{spaces}',   0x20],
+        ['{gry1}',     0x97],
+        ['{gry2}',     0x98],
+        ['{gry3}',     0x9b],
+        ['{f1}',       0x85],
+        ['{f2}',       0x86],
+        ['{f3}',       0x87],
+        ['{f4}',       0x88],
+        ['{f5}',       0x89],
+        ['{f6}',       0x8a],
+        ['{f7}',       0x8b],
+        ['{f8}',       0x8c],
+    ];
+
+    function asciiToPetscii(o) {
+        // Check if character code is less than or equal to '@' or is '[' or ']'
+        if (o <= '@'.charCodeAt(0) || o === '['.charCodeAt(0) || o === ']'.charCodeAt(0)) {
+            return o;
+        }
+        // Check if character code is between 'a' and 'z'
+        if (o >= 'a'.charCodeAt(0) && o <= 'z'.charCodeAt(0)) {
+            return o - 'a'.charCodeAt(0) + 0x41;
+        }
+        // Check if character code is between 'A' and 'Z'
+        if (o >= 'A'.charCodeAt(0) && o <= 'Z'.charCodeAt(0)) {
+            return o - 'A'.charCodeAt(0) + 0x61 + 0x60;
+        }
+
+        basic_error = "Error -> ..." + o + " \nUnable to convert to PETSCII value.";
+        
+    }
+
+    function scan(s, tokenize = true) {
+        s = expandCounts(s);
+        
+        if (tokenize) {
+            for (let i = 0; i < TOKENS.length; i++) {
+                let [token, value] = TOKENS[i];
+                if (s.startsWith(token)) {
+                    return [value, s.substring(token.length)];
+                }
+            }
+        }
+        if (s[0] === '{') {
+            for (let i = 0; i < SPECIAL.length; i++) {
+                let [token, value] = SPECIAL[i];
+                if (s.startsWith(token)) {
+                    return [value, s.substring(token.length)];
+                }
+            }
+            basic_error = "Error -> ..." + s + " \nInvalid special character code occurred from this point.";
+            return [null, null];
+        }
+        return [asciiToPetscii(s.charCodeAt(0)), s.substring(1)];
+    }
+
+    // Expand patterns like {3 spaces} → {spaces}{spaces}{spaces}
+    function expandCounts(input) {
+        return input.replace(/\{(\d+)\s+([^}]+)\}/g, (_, count, word) => {
+            count = Number(count);
+            return Array(count).fill(`{${word}}`).join('');
+        });
+    }
+
+    function scanLineNumber(s) {
+        s = s.trimStart();
+        let acc = [];
+        while (s && s[0].match(/\d/)) {
+            acc.push(s[0]);
+            s = s.substring(1);
+        }
+        return [parseInt(acc.join(''), 10), s.trimStart()];
+    }
+
+    function tokenize(s) {
+        let [lineNumber, remainingString] = scanLineNumber(s);
+        let bytes = [];
+        let inQuotes = false;
+        let inRemark = false;
+        let inData   = false;
+
+        while (remainingString) {
+            let [byte, newString] = scan(remainingString, !(inQuotes || inRemark || inData));
+            bytes.push(byte);
+            remainingString = newString;
+
+            if (byte === '"'.charCodeAt(0)) {
+                inQuotes = !inQuotes;
+            }
+            else if (byte === 143) {
+                inRemark = true;
+            }
+            else if (byte === 131) {
+                inData = true;
+            }
+        }
+
+        return [lineNumber, bytes];
+    }
+
+    class TokenizedLine {
+        constructor(s, addr) {
+            let [lineNumber, bytes] = tokenize(s); // Ensure tokenize function is defined
+            this.lineNumber = lineNumber;
+            this.bytes = bytes;
+            this.addr = addr;
+            //this.nextAddr = null;
+        }
+
+        toString() {
+            return `${this.lineNumber} @${this.addr}: ${this.bytes}`;
+        }
+
+        length() {
+            return this.bytes.length + 5;
+        }
+
+
+    }
+
+    function convertData(dataArray) {
+        let result = [];
+
+        dataArray.forEach(item => {
+            // Extract low and high bytes of the next address and line number
+            let nextAddrLowByte = item.next_addr & 0xFF;
+            let nextAddrHighByte = (item.next_addr >> 8) & 0xFF;
+            let lineNumberLowByte = item.lineNumber & 0xFF;
+            let lineNumberHighByte = (item.lineNumber >> 8) & 0xFF;
+
+            // Append to the result
+            result.push(nextAddrLowByte, nextAddrHighByte, lineNumberLowByte, lineNumberHighByte);
+            result.push(...item.bytes);
+            result.push(0); // Terminator
+        });
+            result.push(0);
+        result.push(0);
+        
+        return new Uint8Array(result);
+    }
+
+
+    $('#basiceditor').on('keypress', function(e) {
+            var lines = $(this).val().split('\n');
+            var cursorPosition = this.selectionStart;
+            var currentLine = 0;
+            var currentLineLength = 0;
+
+            for (var i = 0; i < lines.length; i++) {
+                currentLineLength += lines[i].length + 1; // +1 for the newline character
+                if (cursorPosition <= currentLineLength) {
+                    currentLine = i;
+                    break;
+                }
+            }
+    });
+
+    function createTable() {
+            let $table = $('<table border="0"></table>');
+            
+            // Calculate the number of rows needed for 10 columns
+            let numRows = Math.ceil(SPECIAL.length / 10);
+
+            for (let row = 0; row < numRows; row++) {
+                let $row = $('<tr></tr>');
+                for (let col = 0; col < 10; col++) {
+                    let cellIndex = row * 10 + col;
+                    if (cellIndex < SPECIAL.length) {
+                        let [symbol, code] = SPECIAL[cellIndex];
+                        $row.append(`<td>${symbol}</td>`);
+                    } else {
+                        $row.append('<td></td>'); // Empty cell if no more data
+                    }
+                }
+                $table.append($row);
+            }
+
+            return $table;
+    }
+
+    $('#tableContainer').append(createTable());
+
+    var memViewAddress = 0;   // "m"emory view command current address
+    var memViewRange   = 256; // "m"emory view command: current range
+    var disViewAddress = 0;   // "d"isassemble current address
+    var disViewRange   = 256; // "d"isassemble current range
+
+    $('.body').terminal({
+        help: async function() {
+
+            this.echo("Available commands (with examples):");
+            this.echo(" m - memory view ( m | m c000 | m c000 c100 )");
+            this.echo(" h - hunt memory ( h c000 c100 4a 30 00 )");
+            this.echo(" f - fill memory ( f c000 c100 00 )");
+            this.echo(" d - disassemble ( d | d c000 | d c000 c100 )");
+
+        },
+        m: async function(start, end) {
+
+            if (typeof start === 'undefined')
+                start = memViewAddress.toString(16); // no start given: continue from the end of previous range
+
+            if (isHexadecimal(start)) {
+                start = hexToInt(start);
+                if ((typeof end === 'undefined')||(!isHexadecimal(end)))
+                    end = start+memViewRange; // no end given: use default range
+                else
+                {
+                    end = hexToInt(end);
+                    if (end > start)
+                        memViewRange = end-start; // remember current range as new default
+                }
+                memViewAddress = end; // remember current end address as default for next "m" command
+                if (end >= 0x10000)
+                {
+                    end = 0x10000;
+                    memViewAddress = 0; // wrap address
+                }
+                for (let i = 0; (i < 4096)&&(start < end); i++) {
+                    let hex_num = start.toString(16).padStart(4, "0");
+                    let size = (start+16 <= end) ? 16 : (end-start);
+                    let params = { 'address': hex_num, 'length': size };
+                    let [status_code, content] = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", params);
+                    
+                    if (status_code === 200) {
+                        let [hex_content, ascii_content] = format_bytes_as_hex_and_ascii(content);
+                        hex_content = hex_content.padEnd(16*3, " ");
+                        this.echo(`${hex_num}: ${hex_content} | ${ascii_content}`);
+                    } else {
+                        this.echo("Failed to read memory or invalid response length");
+                    }
+                    start += 16;
+                }
+            } else {
+                this.echo("Invalid hexadecimal number. Please enter a 16-bit hexadecimal number.");
+            }
+        },
+
+        h: async function(start, end, ...hunt) {
+
+            if(isHexadecimal(start) && isHexadecimal(end)) {
+
+                let result = areAllValuesInRange(hunt);
+                let startInt = hexToInt(start);
+                let endInt = hexToInt(end);
+
+                if(result == true) {
+                    
+                    let params = { 'address': '0', 'length': '65535' };
+                    let [status_code, content] = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", params);
+
+                    if (status_code === 200) {
+                        hunt = hunt.map(hex => hexToInt(hex));
+                        let indices = findConsecutiveValues(content, hunt, startInt, endInt)
+                        for(let x=0; x<indices.length; x++)
+                            this.echo(`${toHex16(indices[x])}`);
+                    } else {
+                        this.echo("Failed to read memory or invalid response length");
+                    }
+
+                }
+                else {
+                    this.echo("Invalid values.")
+                }
+            }
+            else {
+                this.echo("Usage: h <start addr> <end addr> <xx xx ...>");
+            }
+                
+        },
+        f: async function(start, end, byte) {
+
+            if(isHexadecimal(start) && isHexadecimal(end)) {
+
+                let startInt = hexToInt(start);
+                let endInt = hexToInt(end);
+                let hbyte = hexToInt(byte);
+                let size = (endInt - startInt) + 1;
+                
+                let body = new Uint8Array(size);
+                body.fill(hbyte);
+                    
+                let params = { 'address': start};
+                let [status_code, content] = await make_post_request("http://" + serverIP + "/v1/machine:writemem", params, body);
+
+                if (status_code !== 200) {
+                    
+                    this.echo("Failed to update memory");
+                }
+
+
+            }
+            else {
+                this.echo("Usage: f <start addr> <end addr> <xx>");
+            }
+                
+        },
+        d: async function(start, end) {
+
+            if (typeof start === 'undefined')
+                start = disViewAddress.toString(16); // no start given: continue from the end of previous range
+
+            if(isHexadecimal(start)) {
+                start = hexToInt(start);
+                if ((typeof end === 'undefined')||(!isHexadecimal(end)))
+                    end = start+disViewRange; // no end given: use default range
+                else
+                {
+                    end = hexToInt(end);
+                    if (end > start)
+                        disViewRange = end-start; // remember current range as new default
+                }
+                disViewAddress = end; // remember current end address as default for next "d" command
+                if (end >= 0x10000)
+                {
+                    end = 0x10000;
+                    disViewAddress = 0; // wrap address
+                }
+
+                let size = end - start;
+                if (size > 0) {
+                    disViewRange = end-start; // remember length as default for next "d" command
+
+                    let params = { 'address': start.toString(16), 'length': size };
+                    let [status_code, content] = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", params);
+
+                    if (status_code === 200) {
+                        let result = disassembler(start, content);
+                        this.echo(result);
+                    }
+                }
+            }
+            else {
+                this.echo("Invalid hexadecimal number. Please enter a 16-bit hexadecimal number.");
+            }
+        }
+
+    }, {
+        checkArity: false,
+        // Hand the commands their arguments as typed. Parsed, a hex address
+        // such as 1e00 arrives as the number 100, read as scientific notation.
+        processArguments: false,
+        greetings: 'Ultimate 64 / II+ Remote Monitor\nhelp = list of commands\n'
+    });
+
+    // To add a theme, register the css class name in the array of themeNames, then themes.setTheme(themeName).
+    // When setTheme is called, it will unregister all classes from the themeNames and then apply then new className.
+    const themes = (() =>  {
+        const themeNames = ['lightmode', 'darkmode' /*, 'purple-theme' */ ];
+
+        const themedSelectors = [
+            'body',
+            '#left-nav',
+            '#banner',
+            'a',
+            '#darkmode-button',
+            '#lightmode-button'
+        ];
+
+        // sessionStorage throws where the browser blocks site data, and the
+        // login screen is started after this, so both sides are guarded.
+        const readTheme = () => {
+            try {
+                return sessionStorage.getItem('theme');
+            } catch (e) {
+                return null;
+            }
+        };
+        const writeTheme = (themeName) => {
+            try {
+                sessionStorage.setItem('theme', themeName);
+            } catch (e) {
+            }
+        };
+
+        // theme: darkmode, lightmode, ...purple-theme...etc.
+        const removeThemes = () => themeNames.forEach(themeName => $(themedSelectors.join(',')).removeClass(themeName));
+        const setTheme = (themeName, save = true) => {
+            removeThemes();
+            $(themedSelectors.join(',')).addClass(themeName);
+            if (save) {
+                writeTheme(themeName);
+            }
+        };
+        const setLightMode = () => { setTheme('lightmode'); };
+        const setDarkMode = () => { setTheme('darkmode'); };
+        // Only a picked theme is stored, so a later change of the browser
+        // setting applies.
+        const initDisplayMode = () => {
+            const savedTheme = readTheme();
+            if (savedTheme && themeNames.includes(savedTheme)) {
+                setTheme(savedTheme, false);
+                return;
+            }
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                setTheme('darkmode', false);
+                return;
+            }
+            setTheme('lightmode', false);
+        };
+
+        return {
+             initDisplayMode, setTheme, setLightMode, setDarkMode
+         };
+    })();
+
+    $('#darkmode-button').on('click', () => themes.setDarkMode() );
+    $('#lightmode-button').on('click', () => themes.setLightMode() );
+
+    themes.initDisplayMode();
+
+    // === C64 Screen viewer ===
+    // Default: a single snapshot when the page is opened. User clicks Play to
+    // get a live feed; clicking again pauses. Avoids constant readmem traffic
+    // when the user just wants to glance at the screen.
+    let screenInterval = null;
+    let screenPaused = true;
+
+    // C64 palette (Pepto-style approximation), RGB triplets
+    const c64paletteRGB = [
+        [0,0,0],[255,255,255],[104,55,43],[112,164,178],
+        [111,61,134],[88,141,67],[53,40,121],[184,199,111],
+        [111,79,37],[67,57,0],[154,103,89],[68,68,68],
+        [108,108,108],[154,210,132],[108,94,181],[149,149,149]
+    ];
+
+    // C64 character ROM 901225-01, roms/characters.901225-01.bin (4096 bytes = 2 charsets x 2048):
+    //   bytes 0x000-0x7FF = charset 1 (uppercase + graphics) — default at boot
+    //   bytes 0x800-0xFFF = charset 2 (lowercase + uppercase) — after SHIFT+C=
+    // VIC register $D018 bit 1 selects which charset is active.
+    const charROM_b64 = "PGZubmBiPAAYPGZ+ZmZmAHxmZnxmZnwAPGZgYGBmPAB4bGZmZmx4AH5gYHhgYH4AfmBgeGBgYAA8ZmBuZmY8AGZmZn5mZmYAPBgYGBgYPAAeDAwMDGw4AGZseHB4bGYAYGBgYGBgfgBjd39rY2NjAGZ2fn5uZmYAPGZmZmZmPAB8ZmZ8YGBgADxmZmZmPA4AfGZmfHhsZgA8ZmA8BmY8AH4YGBgYGBgAZmZmZmZmPABmZmZmZjwYAGNjY2t/d2MAZmY8GDxmZgBmZmY8GBgYAH4GDBgwYH4APDAwMDAwPAAMEjB8MGL8ADwMDAwMDDwAABg8fhgYGBgAEDB/fzAQAAAAAAAAAAAAGBgYGAAAGABmZmYAAAAAAGZm/2b/ZmYAGD5gPAZ8GABiZgwYMGZGADxmPDhnZj8ABgwYAAAAAAAMGDAwMBgMADAYDAwMGDAAAGY8/zxmAAAAGBh+GBgAAAAAAAAAGBgwAAAAfgAAAAAAAAAAABgYAAADBgwYMGAAPGZudmZmPAAYGDgYGBh+ADxmBgwwYH4APGYGHAZmPAAGDh5mfwYGAH5gfAYGZjwAPGZgfGZmPAB+ZgwYGBgYADxmZjxmZjwAPGZmPgZmPAAAABgAABgAAAAAGAAAGBgwDhgwYDAYDgAAAH4AfgAAAHAYDAYMGHAAPGYGDBgAGAAAAAD//wAAAAgcPn9/HD4AGBgYGBgYGBgAAAD//wAAAAAA//8AAAAAAP//AAAAAAAAAAAA//8AADAwMDAwMDAwDAwMDAwMDAwAAADg8DgYGBgYHA8HAAAAGBg48OAAAADAwMDAwMD//8DgcDgcDgcDAwcOHDhw4MD//8DAwMDAwP//AwMDAwMDADx+fn5+PAAAAAAAAP//ADZ/f38+HAgAYGBgYGBgYGAAAAAHDxwYGMPnfjw8fufDADx+ZmZ+PAAYGGZmGBg8AAYGBgYGBgYGCBw+fz4cCAAYGBj//xgYGMDAMDDAwDAwGBgYGBgYGBgAAAM+djY2AP9/Px8PBwMBAAAAAAAAAADw8PDw8PDw8AAAAAD//////wAAAAAAAAAAAAAAAAAA/8DAwMDAwMDAzMwzM8zMMzMDAwMDAwMDAwAAAADMzDMz//78+PDgwIADAwMDAwMDAxgYGB8fGBgYAAAAAA8PDw8YGBgfHwAAAAAAAPj4GBgYAAAAAAAA//8AAAAfHxgYGBgYGP//AAAAAAAA//8YGBgYGBj4+BgYGMDAwMDAwMDA4ODg4ODg4OAHBwcHBwcHB///AAAAAAAA////AAAAAAAAAAAAAP///wMDAwMDA///AAAAAPDw8PAPDw8PAAAAABgYGPj4AAAA8PDw8AAAAADw8PDwDw8PD8OZkZGfmcP/58OZgZmZmf+DmZmDmZmD/8OZn5+fmcP/h5OZmZmTh/+Bn5+Hn5+B/4Gfn4efn5//w5mfkZmZw/+ZmZmBmZmZ/8Pn5+fn58P/4fPz8/OTx/+Zk4ePh5OZ/5+fn5+fn4H/nIiAlJycnP+ZiYGBkZmZ/8OZmZmZmcP/g5mZg5+fn//DmZmZmcPx/4OZmYOHk5n/w5mfw/mZw/+B5+fn5+fn/5mZmZmZmcP/mZmZmZnD5/+cnJyUgIic/5mZw+fDmZn/mZmZw+fn5/+B+fPnz5+B/8PPz8/Pz8P/8+3Pg8+dA//D8/Pz8/PD///nw4Hn5+fn/+/PgIDP7////////////+fn5+f//+f/mZmZ//////+ZmQCZAJmZ/+fBn8P5g+f/nZnz58+Zuf/DmcPHmJnA//nz5///////8+fPz8/n8//P5/Pz8+fP//+ZwwDDmf///+fngefn/////////+fnz////4H////////////n5////Pnz58+f/8OZkYmZmcP/5+fH5+fngf/Dmfnzz5+B/8OZ+eP5mcP/+fHhmYD5+f+Bn4P5+ZnD/8OZn4OZmcP/gZnz5+fn5//DmZnDmZnD/8OZmcH5mcP////n///n/////+f//+fnz/Hnz5/P5/H///+B/4H///+P5/P58+eP/8OZ+fPn/+f/////AAD////348GAgOPB/+fn5+fn5+fn////AAD//////wAA//////8AAP///////////wAA///Pz8/Pz8/Pz/Pz8/Pz8/Pz////Hw/H5+fn5+Pw+P///+fnxw8f////Pz8/Pz8/AAA/H4/H4/H4/Pz48ePHjx8/AAA/Pz8/Pz8AAPz8/Pz8/P/DgYGBgcP///////8AAP/JgICAweP3/5+fn5+fn5+f////+PDj5+c8GIHDw4EYPP/DgZmZgcP/5+eZmefnw//5+fn5+fn5+ffjwYDB4/f/5+fnAADn5+c/P8/PPz/Pz+fn5+fn5+fn///8wYnJyf8AgMDg8Pj8/v//////////Dw8PDw8PDw//////AAAAAAD//////////////////wA/Pz8/Pz8/PzMzzMwzM8zM/Pz8/Pz8/Pz/////MzPMzAABAwcPHz9//Pz8/Pz8/Pzn5+fg4Ofn5//////w8PDw5+fn4OD///////8HB+fn5////////wAA////4ODn5+fn5+cAAP///////wAA5+fn5+fnBwfn5+c/Pz8/Pz8/Px8fHx8fHx8f+Pj4+Pj4+PgAAP///////wAAAP////////////8AAAD8/Pz8/PwAAP////8PDw8P8PDw8P/////n5+cHB////w8PDw//////Dw8PD/Dw8PA8Zm5uYGI8AAAAPAY+Zj4AAGBgfGZmfAAAADxgYGA8AAAGBj5mZj4AAAA8Zn5gPAAADhg+GBgYAAAAPmZmPgZ8AGBgfGZmZgAAGAA4GBg8AAAGAAYGBgY8AGBgbHhsZgAAOBgYGBg8AAAAZn9/a2MAAAB8ZmZmZgAAADxmZmY8AAAAfGZmfGBgAAA+ZmY+BgYAAHxmYGBgAAAAPmA8BnwAABh+GBgYDgAAAGZmZmY+AAAAZmZmPBgAAABja38+NgAAAGY8GDxmAAAAZmZmPgx4AAB+DBgwfgA8MDAwMDA8AAwSMHwwYvwAPAwMDAwMPAAAGDx+GBgYGAAQMH9/MBAAAAAAAAAAAAAYGBgYAAAYAGZmZgAAAAAAZmb/Zv9mZgAYPmA8BnwYAGJmDBgwZkYAPGY8OGdmPwAGDBgAAAAAAAwYMDAwGAwAMBgMDAwYMAAAZjz/PGYAAAAYGH4YGAAAAAAAAAAYGDAAAAB+AAAAAAAAAAAAGBgAAAMGDBgwYAA8Zm52ZmY8ABgYOBgYGH4APGYGDDBgfgA8ZgYcBmY8AAYOHmZ/BgYAfmB8BgZmPAA8ZmB8ZmY8AH5mDBgYGBgAPGZmPGZmPAA8ZmY+BmY8AAAAGAAAGAAAAAAYAAAYGDAOGDBgMBgOAAAAfgB+AAAAcBgMBgwYcAA8ZgYMGAAYAAAAAP//AAAAGDxmfmZmZgB8ZmZ8ZmZ8ADxmYGBgZjwAeGxmZmZseAB+YGB4YGB+AH5gYHhgYGAAPGZgbmZmPABmZmZ+ZmZmADwYGBgYGDwAHgwMDAxsOABmbHhweGxmAGBgYGBgYH4AY3d/a2NjYwBmdn5+bmZmADxmZmZmZjwAfGZmfGBgYAA8ZmZmZjwOAHxmZnx4bGYAPGZgPAZmPAB+GBgYGBgYAGZmZmZmZjwAZmZmZmY8GABjY2Nrf3djAGZmPBg8ZmYAZmZmPBgYGAB+BgwYMGB+ABgYGP//GBgYwMAwMMDAMDAYGBgYGBgYGDMzzMwzM8zMM5nMZjOZzGYAAAAAAAAAAPDw8PDw8PDwAAAAAP//////AAAAAAAAAAAAAAAAAAD/wMDAwMDAwMDMzDMzzMwzMwMDAwMDAwMDAAAAAMzMMzPMmTNmzJkzZgMDAwMDAwMDGBgYHx8YGBgAAAAADw8PDxgYGB8fAAAAAAAA+PgYGBgAAAAAAAD//wAAAB8fGBgYGBgY//8AAAAAAAD//xgYGBgYGPj4GBgYwMDAwMDAwMDg4ODg4ODg4AcHBwcHBwcH//8AAAAAAAD///8AAAAAAAAAAAAA////AQMGbHhwYAAAAAAA8PDw8A8PDw8AAAAAGBgY+PgAAADw8PDwAAAAAPDw8PAPDw8Pw5mRkZ+Zw////8P5wZnB//+fn4OZmYP////Dn5+fw///+fnBmZnB////w5mBn8P///Hnwefn5////8GZmcH5g/+fn4OZmZn//+f/x+fnw///+f/5+fn5w/+fn5OHk5n//8fn5+fnw////5mAgJSc////g5mZmZn////DmZmZw////4OZmYOfn///wZmZwfn5//+DmZ+fn////8Gfw/mD///ngefn5/H///+ZmZmZwf///5mZmcPn////nJSAwcn///+Zw+fDmf///5mZmcHzh///gfPnz4H/w8/Pz8/Pw//z7c+Dz50D/8Pz8/Pz88P//+fDgefn5+f/78+AgM/v////////////5+fn5///5/+ZmZn//////5mZAJkAmZn/58Gfw/mD5/+dmfPnz5m5/8OZw8eYmcD/+fPn///////z58/Pz+fz/8/n8/Pz58///5nDAMOZ////5+eB5+f/////////5+fP////gf///////////+fn///8+fPnz5//w5mRiZmZw//n58fn5+eB/8OZ+fPPn4H/w5n54/mZw//58eGZgPn5/4Gfg/n5mcP/w5mfg5mZw/+BmfPn5+fn/8OZmcOZmcP/w5mZwfmZw////+f//+f/////5///5+fP8efPn8/n8f///4H/gf///4/n8/nz54//w5n58+f/5/////8AAP///+fDmYGZmZn/g5mZg5mZg//DmZ+fn5nD/4eTmZmZk4f/gZ+fh5+fgf+Bn5+Hn5+f/8OZn5GZmcP/mZmZgZmZmf/D5+fn5+fD/+Hz8/Pzk8f/mZOHj4eTmf+fn5+fn5+B/5yIgJScnJz/mYmBgZGZmf/DmZmZmZnD/4OZmYOfn5//w5mZmZnD8f+DmZmDh5OZ/8OZn8P5mcP/gefn5+fn5/+ZmZmZmZnD/5mZmZmZw+f/nJyclICInP+ZmcPnw5mZ/5mZmcPn5+f/gfnz58+fgf/n5+cAAOfn5z8/z88/P8/P5+fn5+fn5+fMzDMzzMwzM8xmM5nMZjOZ//////////8PDw8PDw8PD/////8AAAAAAP//////////////////AD8/Pz8/Pz8/MzPMzDMzzMz8/Pz8/Pz8/P////8zM8zMM2bMmTNmzJn8/Pz8/Pz8/Ofn5+Dg5+fn//////Dw8PDn5+fg4P///////wcH5+fn////////AAD////g4Ofn5+fn5wAA////////AADn5+fn5+cHB+fn5z8/Pz8/Pz8/Hx8fHx8fHx/4+Pj4+Pj4+AAA////////AAAA/////////////wAAAP78+ZOHj5///////w8PDw/w8PDw/////+fn5wcH////Dw8PD/////8PDw8P8PDw8A==";
+
+    // The Ultimate menu font, roms/chars.bin (256 chars × 8 bytes), used when the
+    // menu is on the C64 screen. Different glyph layout than the C64 ROM — graphics
+    // chars at 0x60-0x7F, etc.
+    const menuFont_b64 = "AAAAAAAAAAAAAAAfHxgYGAAAAP//AAAAAAAA+PgYGBgYGBgYGBgYGBgYGB8fAAAAGBgY+PgAAAAAAAAHDxwYGAAAAP//GBgYAAAA4PA4GBgYGBgfHxgYGAD/////////GBgY+PgYGBgYGBj//wAAABgYHA8HAAAAGBg48OAAAAAAOG1nZm47ADxmZmxmZmxg/////////wAYPH7/fjwYAAAAAAEDAwcHAD////DAgIAAgIDA8P//PwAAAAAA/PjwBwcHAwMBAAAA8Pj8AAAAAAA8fn5+fjwAAAAAAAAAAAD//vz48ODAAADA4PD4/P7//38/Hw8HAwAAAwcPHz9//wAAAAAAAAAAGBgYGAAAGABmZmYAAAAAAGZm/2b/ZmYAGD5gPAZ8GABiZgwYMGZGADxmPDhnZj8ABgwYAAAAAAAMGDAwMBgMADAYDAwMGDAAAGY8/zxmAAAAGBh+GBgAAAAAAAAAGBgwAAAAfgAAAAAAAAAAABgYAAADBgwYMGAAPGZudmZmPAAYGDgYGBh+ADxmBgwwYH4APGYGHAZmPAAGDh5mfwYGAH5gfAYGZjwAPGZgfGZmPAB+ZgwYGBgYADxmZjxmZjwAPGZmPgZmPAAAABgAABgAAAAAGAAAGBgwDhgwYDAYDgAAAH4AfgAAAHAYDAYMGHAAPGYGDBgAGAA8Zm5uYGI8ABg8Zn5mZmYAfGZmfGZmfAA8ZmBgYGY8AHhsZmZmbHgAfmBgeGBgfgB+YGB4YGBgADxmYG5mZjwAZmZmfmZmZgA8GBgYGBg8AB4MDAwMbDgAZmx4cHhsZgBgYGBgYGB+AGN3f2tjY2MAZnZ+fm5mZgA8ZmZmZmY8AHxmZnxgYGAAPGZmZmY8DgB8ZmZ8eGxmADxmYDwGZjwAfhgYGBgYGABmZmZmZmY8AGZmZmZmPBgAY2Nja393YwBmZjwYPGZmAGZmZjwYGBgAfgYMGDBgfgA8MDAwMDA8AABgMBgMBgMAPAwMDAwMPAAYPGYAAAAAAAAAAAAAAAD/GAwGAAAAAAAAADwGPmY+AABgYHxmZnwAAAA8YGBgPAAABgY+ZmY+AAAAPGZ+YDwAAA4YPhgYGAAAAD5mZj4GfABgYHxmZmYAABgAOBgYPAAABgAGBgYGPABgYGx4bGYAADgYGBgYPAAAAGZ/f2tjAAAAfGZmZmYAAAA8ZmZmPAAAAHxmZnxgYAAAPmZmPgYGAAB8ZmBgYAAAAD5gPAZ8AAAYfhgYGA4AAABmZmZmPgAAAGZmZjwYAAAAY2t/PjYAAABmPBg8ZgAAAGZmZj4MeAAAfgwYMH4ADBgYMBgYDAAYGBgYGBgYADAYGAwYGDAAAHBaDgAAAAAAfkJCQkJ+AP//////////////4ODn5+f///8AAP///////wcH5+fn5+fn5+fn5+fn5+fg4P///+fn5wcH////////+PDj5+f///8AAOfn5////x8Px+fn5+fn4ODn5+fn5+cAAOfn5+fn5wcH5+fn5+fj8Pj////n5+cAAP///+fnxw8f////////////////////////////////////58OBAIHD5///////////////////////////////////////////////////////////////////w4GBgYHD/////////////////////////////////////////////////////////////////+fn5+f//+f/mZmZ//////+ZmQCZAJmZ/+fBn8P5g+f/nZnz58+Zuf/DmcPHmJnA//nz5///////8+fPz8/n8//P5/Pz8+fP//+ZwwDDmf///+fngefn/////////+fnz////4H////////////n5////Pnz58+f/8OZkYmZmcP/5+fH5+fngf/Dmfnzz5+B/8OZ+eP5mcP/+fHhmYD5+f+Bn4P5+ZnD/8OZn4OZmcP/gZnz5+fn5//DmZnDmZnD/8OZmcH5mcP////n///n/////+f//+fnz/Hnz5/P5/H///+B/4H///+P5/P58+eP/8OZ+fPn/+f/w5mRkZ+dw//nw5mBmZmZ/4OZmYOZmYP/w5mfn5+Zw/+Hk5mZmZOH/4Gfn4efn4H/gZ+fh5+fn//DmZ+RmZnD/5mZmYGZmZn/w+fn5+fnw//h8/Pz85PH/5mTh4+Hk5n/n5+fn5+fgf+ciICUnJyc/5mJgYGRmZn/w5mZmZmZw/+DmZmDn5+f/8OZmZmZw/H/g5mZg4eTmf/DmZ/D+ZnD/4Hn5+fn5+f/mZmZmZmZw/+ZmZmZmcPn/5ycnJSAiJz/mZnD58OZmf+ZmZnD5+fn/4H58+fPn4H/w8/Pz8/Pw///n8/n8/n8/8Pz8/Pz88P/58OZ////////////////AOfz+f/////////D+cGZwf//n5+DmZmD////w5+fn8P///n5wZmZwf///8OZgZ/D///x58Hn5+f////BmZnB+YP/n5+DmZmZ///n/8fn58P///n/+fn5+cP/n5+Th5OZ///H5+fn58P///+ZgICUnP///4OZmZmZ////w5mZmcP///+DmZmDn5///8GZmcH5+f//g5mfn5/////Bn8P5g///54Hn5+fx////mZmZmcH///+ZmZnD5////5yUgMHJ////mcPnw5n///+ZmZnB84f//4Hz58+B//Pn58/n5/P/5+fn5+fn5//P5+fz5+fP//+PpfH//////4G9vb29gf8=";
+
+    let charROM = null;
+    let menuFont = null;
+    function decodeFonts() {
+        const a = atob(charROM_b64);
+        charROM = new Uint8Array(a.length);
+        for (let i = 0; i < a.length; i++) charROM[i] = a.charCodeAt(i);
+        const b = atob(menuFont_b64);
+        menuFont = new Uint8Array(b.length);
+        for (let i = 0; i < b.length; i++) menuFont[i] = b.charCodeAt(i);
+    }
+    decodeFonts();
+    let charsetBase = 0; // 0 = charset 1 (default), 0x800 = charset 2
+    let fontMode = 'auto'; // 'auto' | 'c64' | 'menu'
+
+    // Decode a row of C64 screen RAM (40 cells) into ASCII, treating charset 1
+    // codes (0x01-0x1A = A-Z, 0x40-0x5F passthrough) so we can pattern-match.
+    function rowToAscii(buf, row) {
+        let s = '';
+        for (let i = 0; i < 40; i++) {
+            let c = buf[row * 40 + i] & 0x7f;
+            if (c === 0) s += '@';
+            else if (c >= 1 && c <= 26) s += String.fromCharCode(0x40 + c);
+            else if (c >= 0x20 && c <= 0x5f) s += String.fromCharCode(c);
+            else s += ' ';
+        }
+        return s;
+    }
+
+    function detectMenuMode(buf) {
+        let score = 0;
+
+        // Signal 1: F-key footer pattern at row 24 (e.g. "F1=MENU", "F7=HELP",
+        // "F3/F5=PGUP/DN"). Two or more F-digit-equals patterns is very
+        // menu-specific.
+        let row24 = rowToAscii(buf, 24);
+        let fkeys = (row24.match(/F\d=/g) || []).length;
+        if (fkeys >= 2) score += 2;
+
+        // Signal 2: "ULTIMATE" or "COMMODORE" banner text on row 1.
+        let row1 = rowToAscii(buf, 1);
+        if (row1.indexOf('ULTIMATE') !== -1 || row1.indexOf('COMMODORE') !== -1) {
+            score += 2;
+        }
+
+        // Signal 3: high density of cells in 0x60-0x7F (border/decoration chars
+        // in the menu font). Confirms even when text-detection misses.
+        let menuish = 0;
+        for (let k = 0; k < 1000; k++) {
+            let c = buf[k] & 0x7f;
+            if (c >= 0x60 && c <= 0x7f) menuish++;
+        }
+        if (menuish > 150) score += 1;
+
+        return score >= 2;
+    }
+
+    async function refreshScreen(force) {
+        if (screenPaused && !force) return;
+        if (!$('#screenview').is(':visible')) return;
+        let chars = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", { address: '0400', length: 1000 });
+        let cols  = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", { address: 'd800', length: 1000 });
+        // $D018-$D021: charset select, border and background colour
+        let vic   = await make_binary_get_request("http://" + serverIP + "/v1/machine:readmem", { address: 'd018', length: 10 });
+        if (chars[0] !== 200 || cols[0] !== 200) {
+            $('#screenstatus').text('Read failed (' + chars[0] + '/' + cols[0] + ')');
+            return;
+        }
+        let border = 14, background = 6;    // light blue on blue, as after power on
+        if (vic[0] === 200 && vic[1].length === 10) {
+            // bit 1: 0 = charset 1 (uppercase+graphics), 1 = charset 2 (lowercase+uppercase)
+            charsetBase = (vic[1][0] & 0x02) ? 0x800 : 0;
+            border = vic[1][8] & 0x0f;
+            background = vic[1][9] & 0x0f;
+        }
+
+        // Pick font: menu font for U64 II overlay screens, C64 ROM otherwise.
+        // Auto detection uses three signals; >=2 hits = menu.
+        let useMenuFont;
+        if (fontMode === 'c64') useMenuFont = false;
+        else if (fontMode === 'menu') useMenuFont = true;
+        else useMenuFont = detectMenuMode(chars[1]);
+        const activeROM = useMenuFont ? menuFont : charROM;
+        const activeBase = useMenuFont ? 0 : charsetBase;
+        let canvas = document.getElementById('screencanvas');
+        let ctx = canvas.getContext('2d');
+        let img = ctx.createImageData(canvas.width, canvas.height);
+        let data = img.data;
+        let bg = c64paletteRGB[background];
+        canvas.style.borderColor = 'rgb(' + c64paletteRGB[border].join(',') + ')';
+        for (let p = 0; p < data.length; p += 4) {
+            data[p] = bg[0]; data[p+1] = bg[1]; data[p+2] = bg[2]; data[p+3] = 255;
+        }
+        for (let y = 0; y < 25; y++) {
+            for (let x = 0; x < 40; x++) {
+                let i = y * 40 + x;
+                let code = chars[1][i] & 0xff;
+                let fg = c64paletteRGB[cols[1][i] & 0x0f];
+                let romOffset = activeBase + (code & 0x7f) * 8;
+                if (useMenuFont) romOffset = (code & 0x7f) * 8;
+                let invert = (code & 0x80) ? 0xff : 0x00;
+                for (let row = 0; row < 8; row++) {
+                    let bits = activeROM[romOffset + row] ^ invert;
+                    let pxRow = (y * 8 + row) * canvas.width;
+                    for (let col = 0; col < 8; col++) {
+                        if (bits & (0x80 >> col)) {
+                            let p = (pxRow + x * 8 + col) * 4;
+                            data[p] = fg[0]; data[p+1] = fg[1]; data[p+2] = fg[2];
+                        }
+                    }
+                }
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        $('#screenstatus').text((screenPaused ? 'Snapshot · ' : 'Live · ') + new Date().toLocaleTimeString());
+    }
+
+    $('#showscreenview').click(function (e) {
+        e.preventDefault();
+        $('.page').hide();
+        $('#screenview').show();
+        // Take one snapshot every time the page is shown. Live polling is
+        // opt-in via the Play button.
+        refreshScreen(true);
+    });
+
+    $('#screenpause').click(function () {
+        if (screenPaused) {
+            screenPaused = false;
+            $('#screenpause').val('Pause');
+            refreshScreen();
+            if (screenInterval === null) {
+                screenInterval = setInterval(refreshScreen, 250);
+            }
+        } else {
+            screenPaused = true;
+            $('#screenpause').val('Play');
+            if (screenInterval !== null) {
+                clearInterval(screenInterval);
+                screenInterval = null;
+            }
+        }
+    });
+
+    $('#screenrefresh').click(function () { refreshScreen(true); });
+
+    $('#screenfont_auto').click(function () { fontMode = 'auto'; refreshScreen(true); });
+    $('#screenfont_c64').click(function () { fontMode = 'c64'; refreshScreen(true); });
+    $('#screenfont_menu').click(function () { fontMode = 'menu'; refreshScreen(true); });
+
+    $('#screensnapshot').click(function () {
+        let canvas = document.getElementById('screencanvas');
+        let link = document.createElement('a');
+        link.download = 'c64-screen-' + Date.now() + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    });
+
+    // === Streams ===
+    $('#showstreams').click(function (e) {
+        e.preventDefault();
+        $('.page').hide();
+        $('#streamsctrl').show();
+    });
+
+    function openInPlayer(kind, address) {
+        // Parse "ip[:port]" from the input field. If port is missing, use the
+        // default for this stream kind.
+        let defaultPort = { video: 11000, audio: 11001, debug: 11002 }[kind];
+        let parts = (address || '').trim().split(':');
+        let ip = parts[0] || '';
+        let port = (parts[1] && /^\d+$/.test(parts[1])) ? parts[1] : defaultPort;
+
+        // Multicast vs unicast: if the IP is in 224.0.0.0/4 (224..239 first
+        // octet), the player has to JOIN that multicast group, so the URL
+        // includes the IP (udp://@<group>:<port>). For unicast the device
+        // sends directly to the receiver, so the player just binds to its
+        // own interface (udp://@:<port>, no IP).
+        let firstOctet = parseInt((ip.split('.')[0] || ''), 10);
+        let isMulticast = firstOctet >= 224 && firstOctet <= 239;
+        let host = isMulticast ? ip : '';
+
+        // u64://... is the vlc-u64stream plugin's URL scheme (decodes the
+        // U64 raster-scan packet format). Audio/debug streams aren't
+        // U64-encoded, so plain udp:// is correct.
+        let scheme = (kind === 'video') ? 'u64' : 'udp';
+        let m3u = '#EXTM3U\n#EXTINF:-1,U64 ' + kind + '\n' + scheme + '://@' + host + ':' + port + '\n';
+        let blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
+        let url = URL.createObjectURL(blob);
+        let a = document.createElement('a');
+        a.href = url;
+        a.download = 'u64-' + kind + '.m3u';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    ['video', 'audio', 'debug'].forEach(function (kind) {
+        $('#streamopen_' + kind).click(function () {
+            openInPlayer(kind, $('#streamip_' + kind).val());
+        });
+        $('#streamstart_' + kind).click(async function () {
+            let ip = $('#streamip_' + kind).val().trim();
+            if (!ip) {
+                $('#streamstatus_' + kind).text('Enter target IP');
+                return;
+            }
+            $('#streamstatus_' + kind).text('Starting...');
+            let [code] = await make_put_request('http://' + serverIP + '/v1/streams/' + kind + ':start', { ip: ip });
+            $('#streamstatus_' + kind).text(code === 200 ? ('Started → ' + ip) : ('Failed (' + code + ')'));
+        });
+        $('#streamstop_' + kind).click(async function () {
+            $('#streamstatus_' + kind).text('Stopping...');
+            let [code] = await make_put_request('http://' + serverIP + '/v1/streams/' + kind + ':stop', {});
+            $('#streamstatus_' + kind).text(code === 200 ? 'Stopped' : ('Failed (' + code + ')'));
+        });
+    });
+
+    // Kick off login/welcome screen as needed
+    await ensureLoggedIn();
+});
+
+function isHexadecimal(str)
+{
+    hexval = false;
+    regexp = /^[0-9a-fA-F]+$/;
+  
+    if (regexp.test(str))
+        return true;
+    else
+        return false;
+
+}
+
+function toHex16(num) {
+    return num.toString(16).padStart(4, '0').toUpperCase();
+}
+
+function toHex8(num) {
+    return num.toString(16).padStart(2, '0').toUpperCase();
+}
+
+function hexToInt(hexString) {
+    return parseInt(hexString, 16);
+}
+
+function areAllValuesInRange(hexArray) {
+    for (let hex of hexArray) {
+        let value = parseInt(hex, 16); // Convert hex to decimal
+        if (value < 0 || value > 255) {
+            return false; // Value is out of range
+        }
+    }
+    return true; // All values are in range
+}
+
+function hex_increment(hex_str, increment=8) {
+    return (parseInt(hex_str, 16) + increment).toString(16).padStart(4, '0');
+}
+
+function format_bytes_as_hex_and_ascii(byteData) {
+    const hexContent = [];
+    const asciiContent = [];
+
+    for (const byte of byteData) {
+        hexContent.push(byte.toString(16).padStart(2, '0'));
+
+        // Printable ASCII characters are in the range 32 to 126
+        if (byte >= 32 && byte <= 126) {
+            asciiContent.push(String.fromCharCode(byte));
+        } else {
+            asciiContent.push('.');
+        }
+    }
+
+    return [hexContent.join(' '), asciiContent.join('')];
+}
+
+function findConsecutiveValues(byteArray, valuesToFind, startIndex, endIndex) {
+    const indices = [];
+    const sequenceLength = valuesToFind.length;
+
+    // Ensure start and end indices are within the array bounds
+    startIndex = Math.max(startIndex, 0);
+    endIndex = Math.min(endIndex, byteArray.length - sequenceLength);
+
+    for (let i = startIndex; i <= endIndex; i++) {
+        let match = true;
+        for (let j = 0; j < sequenceLength; j++) {
+            if (byteArray[i + j] !== valuesToFind[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            indices.push(i);
+        }
+    }
+
+    return indices;
+}
+
+$.ajaxTransport("+binary", function (options, originalOptions, jqXHR) {
+    // check for conditions and support for blob / arraybuffer response type
+    if (window.FormData && ((options.dataType && (options.dataType == 'binary')) ||
+         (options.data && ((window.ArrayBuffer && options.data instanceof ArrayBuffer) || 
+            (window.Blob && options.data instanceof Blob))))) {
+        return {
+            // create new XMLHttpRequest
+            send: function (headers, callback) {
+                // setup all variables
+                var xhr = new XMLHttpRequest(),
+                    url = options.url,
+                    type = options.type,
+                    async = options.async || true,
+                    // blob or arraybuffer. Default is blob
+                    dataType = options.responseType || "blob",
+                    data = options.data || null,
+                    username = options.username || null,
+                    password = options.password || null;
+
+                xhr.addEventListener('load', function () {
+                    var data = {};
+                    data[options.dataType] = xhr.response;
+                    // make callback and send data
+                    callback(xhr.status, xhr.statusText, data, xhr.getAllResponseHeaders());
+                });
+
+                xhr.open(type, url, async, username, password);
+
+                // setup custom headers
+                for (var i in headers) {
+                    xhr.setRequestHeader(i, headers[i]);
+                }
+
+                xhr.responseType = dataType;
+                xhr.send(data);
+            },
+            abort: function () {
+                jqXHR.abort();
+            }
+        };
+    }
+});
+
+async function make_binary_get_request(url, params) {
+    const queryString = Object.entries(params).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    const fullUrl = `${url}?${queryString}`;
+
+    console.log('Requesting URL:', fullUrl);
+
+    try {
+        const response = await $.ajax({
+            url: fullUrl,
+            method: 'GET',
+            dataType: 'binary',
+            responseType: 'arraybuffer',
+            processData: false,
+            headers: {"X-Password": apiPassword}
+        });
+
+       var data = new Uint8Array(response);
+
+        return [200, data];
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        console.log('Error details:', {
+            textStatus: error.statusText,
+            status: error.status,
+            responseText: error.responseText
+        });
+
+        const statusCode = error && error.status ? error.status : 500;
+        return [statusCode, new Uint8Array()];
+    }
+}
+
+async function make_get_request(url, params) {
+    params = params || {};
+    const queryString = Object.entries(params).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    const fullUrl = `${url}?${queryString}`;
+
+    console.log('Requesting URL:', fullUrl);
+
+    try {
+        const response = await $.ajax({
+            url: fullUrl,
+            method: 'GET',
+            processData: false,
+            headers: {"X-Password": apiPassword}
+        });
+        return [200, response];
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        console.log('Error details:', {
+            textStatus: error.statusText,
+            status: error.status,
+            responseText: error.responseText
+        });
+        return [error.status, error.responseText];
+    }
+}
+
+async function make_post_request(url, params, body) {
+    const queryString = Object.entries(params).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    const fullUrl = `${url}?${queryString}`;
+
+    try {
+        const response = await $.ajax({
+            url: fullUrl,
+            method: 'POST',
+            contentType: 'application/octet-stream',
+            data: body,
+            processData: false,
+            headers: {"X-Password": apiPassword}
+        });
+
+        return [200, response];
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        console.log('Error details:', {
+            textStatus: error.statusText,
+            status: error.status,
+            responseText: error.responseText
+        });
+        return [error.status, error.responseText];
+        //const statusCode = error && error.status ? error.status : 500;
+        //return [statusCode, response];
+    }
+}
+
+async function make_put_request(url, params) {
+    const queryString = Object.entries(params).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    const fullUrl = `${url}?${queryString}`;
+
+    try {
+        const response = await $.ajax({
+            url: fullUrl,
+            method: 'PUT',
+            contentType: 'application/octet-stream',
+            processData: false,
+            headers: {"X-Password": apiPassword}
+        });
+
+        return [200, response];
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        console.log('Error details:', {
+            textStatus: error.statusText,
+            status: error.status,
+            responseText: error.responseText
+        });
+        return [error.status, error.responseText];
+        //const statusCode = error && error.status ? error.status : 500;
+        //return [statusCode, response];
+    }
+}
+
+const opcodes = {
+	"00": {"code": "BRK", "len": 0, "addr": 0},
+	"01": {"code": "ORA", "len": 1, "addr": 11},
+	"05": {"code": "ORA", "len": 1, "addr": 3},
+	"06": {"code": "ASL", "len": 1, "addr": 3},
+	"08": {"code": "PHP", "len": 0, "addr": 0},
+	"09": {"code": "ORA", "len": 1, "addr": 2},
+	"0a": {"code": "ASL", "len": 0, "addr": 1},
+	"0d": {"code": "ORA", "len": 2, "addr": 7},
+	"0e": {"code": "ASL", "len": 2, "addr": 7},
+	"10": {"code": "BPL", "len": 1, "addr": 6},
+	"11": {"code": "ORA", "len": 1, "addr": 12},
+	"15": {"code": "ORA", "len": 1, "addr": 4},
+	"16": {"code": "ASL", "len": 1, "addr": 4},
+	"18": {"code": "CLC", "len": 0, "addr": 0},
+	"19": {"code": "ORA", "len": 2, "addr": 9},
+	"1d": {"code": "ORA", "len": 2, "addr": 8},
+	"1e": {"code": "ASL", "len": 2, "addr": 8},
+	"20": {"code": "JSR", "len": 2, "addr": 7},
+	"21": {"code": "AND", "len": 1, "addr": 11},
+	"24": {"code": "BIT", "len": 1, "addr": 3},
+	"25": {"code": "AND", "len": 1, "addr": 3},
+	"26": {"code": "ROL", "len": 1, "addr": 3},
+	"28": {"code": "PLP", "len": 0, "addr": 0},
+	"29": {"code": "AND", "len": 1, "addr": 2},
+	"2a": {"code": "ROL", "len": 0, "addr": 1},
+	"2c": {"code": "BIT", "len": 2, "addr": 7},
+	"2d": {"code": "AND", "len": 2, "addr": 7},
+	"2e": {"code": "ROL", "len": 2, "addr": 7},
+	"30": {"code": "BMI", "len": 1, "addr": 6},
+	"31": {"code": "AND", "len": 1, "addr": 12},
+	"35": {"code": "AND", "len": 1, "addr": 4},
+	"36": {"code": "ROL", "len": 1, "addr": 4},
+	"38": {"code": "SEC", "len": 0, "addr": 0},
+	"39": {"code": "AND", "len": 2, "addr": 9},
+	"3d": {"code": "AND", "len": 2, "addr": 8},
+	"3e": {"code": "ROL", "len": 2, "addr": 8},
+	"40": {"code": "RTI", "len": 0, "addr": 0},
+	"41": {"code": "EOR", "len": 1, "addr": 11},
+	"45": {"code": "EOR", "len": 1, "addr": 3},
+	"46": {"code": "LSR", "len": 1, "addr": 3},
+	"48": {"code": "PHA", "len": 0, "addr": 0},
+	"49": {"code": "EOR", "len": 1, "addr": 2},
+	"4a": {"code": "LSR", "len": 0, "addr": 1},
+	"4c": {"code": "JMP", "len": 2, "addr": 7},
+	"4d": {"code": "EOR", "len": 2, "addr": 7},
+	"4e": {"code": "LSR", "len": 2, "addr": 7},
+	"50": {"code": "BVC", "len": 1, "addr": 6},
+	"51": {"code": "EOR", "len": 1, "addr": 12},
+	"54": {"code": "EOR", "len": 1, "addr": 4},
+	"55": {"code": "LSR", "len": 1, "addr": 4},
+	"58": {"code": "CLI", "len": 0, "addr": 0},
+	"59": {"code": "EOR", "len": 2, "addr": 9},
+	"5d": {"code": "EOR", "len": 2, "addr": 8},
+	"5e": {"code": "LSR", "len": 2, "addr": 8},
+	"60": {"code": "RTS", "len": 0, "addr": 0},
+	"61": {"code": "ADC", "len": 1, "addr": 11},
+	"65": {"code": "ADC", "len": 1, "addr": 3},
+	"66": {"code": "ROR", "len": 1, "addr": 3},
+	"68": {"code": "PLA", "len": 0, "addr": 0},
+	"69": {"code": "ADC", "len": 1, "addr": 2},
+	"6a": {"code": "ROR", "len": 0, "addr": 1},
+	"6c": {"code": "JMP", "len": 2, "addr": 10},
+	"6d": {"code": "ADC", "len": 2, "addr": 7},
+	"6e": {"code": "ROR", "len": 2, "addr": 7},
+	"70": {"code": "BVS", "len": 1, "addr": 6},
+	"71": {"code": "ADC", "len": 1, "addr": 12},
+	"75": {"code": "ADC", "len": 1, "addr": 4},
+	"76": {"code": "ROR", "len": 1, "addr": 4},
+	"78": {"code": "SEI", "len": 0, "addr": 0},
+	"79": {"code": "ADC", "len": 2, "addr": 9},
+	"7d": {"code": "ADC", "len": 2, "addr": 8},
+	"7e": {"code": "ROR", "len": 2, "addr": 8},
+	"81": {"code": "STA", "len": 1, "addr": 11},
+	"84": {"code": "STY", "len": 1, "addr": 3},
+	"85": {"code": "STA", "len": 1, "addr": 3},
+	"86": {"code": "STX", "len": 1, "addr": 3},
+	"88": {"code": "DEY", "len": 0, "addr": 0},
+	"8a": {"code": "TXA", "len": 0, "addr": 0},
+	"8c": {"code": "STY", "len": 2, "addr": 7},
+	"8d": {"code": "STA", "len": 2, "addr": 7},
+	"8e": {"code": "STX", "len": 2, "addr": 7},
+	"90": {"code": "BCC", "len": 1, "addr": 6},
+	"91": {"code": "STA", "len": 1, "addr": 12},
+	"94": {"code": "STY", "len": 1, "addr": 4},
+	"95": {"code": "STA", "len": 1, "addr": 4},
+	"96": {"code": "STX", "len": 1, "addr": 5},
+	"98": {"code": "TYA", "len": 0, "addr": 0},
+	"99": {"code": "STA", "len": 2, "addr": 9},
+	"9a": {"code": "TXS", "len": 0, "addr": 0},
+	"9d": {"code": "STA", "len": 2, "addr": 8},
+	"a0": {"code": "LDY", "len": 1, "addr": 2},
+	"a1": {"code": "LDA", "len": 1, "addr": 11},
+	"a2": {"code": "LDX", "len": 1, "addr": 2},
+	"a4": {"code": "LDY", "len": 1, "addr": 3},
+	"a5": {"code": "LDA", "len": 1, "addr": 3},
+	"a6": {"code": "LDX", "len": 1, "addr": 3},
+	"a8": {"code": "TAY", "len": 0, "addr": 0},
+	"a9": {"code": "LDA", "len": 1, "addr": 2},
+	"aa": {"code": "TAX", "len": 0, "addr": 0},
+	"ac": {"code": "LDY", "len": 2, "addr": 7},
+	"ad": {"code": "LDA", "len": 2, "addr": 7},
+	"ae": {"code": "LDX", "len": 2, "addr": 7},
+	"b0": {"code": "BCS", "len": 1, "addr": 6},
+	"b1": {"code": "LDA", "len": 1, "addr": 12},
+	"b4": {"code": "LDY", "len": 1, "addr": 4},
+	"b5": {"code": "LDA", "len": 1, "addr": 4},
+	"b6": {"code": "LDX", "len": 1, "addr": 5},
+	"b8": {"code": "CLV", "len": 0, "addr": 0},
+	"b9": {"code": "LDA", "len": 2, "addr": 9},
+	"ba": {"code": "TSX", "len": 0, "addr": 0},
+	"bc": {"code": "LDY", "len": 2, "addr": 8},
+	"bd": {"code": "LDA", "len": 2, "addr": 8},
+	"be": {"code": "LDX", "len": 2, "addr": 9},
+	"c0": {"code": "CPY", "len": 1, "addr": 2},
+	"c1": {"code": "CMP", "len": 1, "addr": 11},
+	"c4": {"code": "CPY", "len": 1, "addr": 3},
+	"c5": {"code": "CMP", "len": 1, "addr": 3},
+	"c6": {"code": "DEC", "len": 1, "addr": 3},
+	"c8": {"code": "INY", "len": 0, "addr": 0},
+	"c9": {"code": "CMP", "len": 1, "addr": 2},
+	"ca": {"code": "DEX", "len": 0, "addr": 0},
+	"cc": {"code": "CPY", "len": 2, "addr": 7},
+	"cd": {"code": "CMP", "len": 2, "addr": 7},
+	"ce": {"code": "DEC", "len": 2, "addr": 7},
+	"d0": {"code": "BNE", "len": 1, "addr": 6},
+	"d1": {"code": "CMP", "len": 1, "addr": 12},
+	"d5": {"code": "CMP", "len": 1, "addr": 4},
+	"d6": {"code": "DEC", "len": 1, "addr": 4},
+	"d8": {"code": "CLD", "len": 0, "addr": 0},
+	"d9": {"code": "CMP", "len": 2, "addr": 9},
+	"dd": {"code": "CMP", "len": 2, "addr": 8},
+	"de": {"code": "DEC", "len": 2, "addr": 8},
+	"e0": {"code": "CPX", "len": 1, "addr": 2},
+	"e1": {"code": "SBC", "len": 1, "addr": 11},
+	"e4": {"code": "CPX", "len": 1, "addr": 3},
+	"e5": {"code": "SBC", "len": 1, "addr": 3},
+	"e6": {"code": "INC", "len": 1, "addr": 3},
+	"e8": {"code": "INX", "len": 0, "addr": 0},
+	"e9": {"code": "SBC", "len": 1, "addr": 2},
+	"ea": {"code": "NOP", "len": 0, "addr": 0},
+	"ec": {"code": "CPX", "len": 2, "addr": 7},
+	"ed": {"code": "SBC", "len": 2, "addr": 7},
+	"ee": {"code": "INC", "len": 2, "addr": 7},
+	"f0": {"code": "BEQ", "len": 1, "addr": 6},
+	"f1": {"code": "SBC", "len": 1, "addr": 12},
+	"f5": {"code": "SBC", "len": 1, "addr": 4},
+	"f6": {"code": "INC", "len": 1, "addr": 4},
+	"f8": {"code": "SED", "len": 0, "addr": 0},
+	"f9": {"code": "SBC", "len": 2, "addr": 9},
+	"fd": {"code": "SBC", "len": 2, "addr": 8},
+	"fe": {"code": "INC", "len": 2, "addr": 8},
+};
+
+function disassembler(startInt, byteArray) {
+	var result = "";
+	var instruction = "";
+	var operand = "";
+	
+	var address;
+	var instructionBytes;
+	var syntax;
+	
+	var startingAddr = 0;
+
+    hexString = Array.from(byteArray, byte => byte.toString(16).padStart(2, '0')).join('');
+	
+	for(pc = 0; pc < hexString.length;pc+=2){
+		operand = "";
+		address = "";
+		instructionBytes = "";
+		syntax = "";
+		
+		address = (pc/2).toString(16);
+		startingAddr = pc;
+		
+		if(!opcodes.hasOwnProperty(hexString.substring(pc,pc+2))){
+			instruction = {"code": "???", "len": 0, "addr": 0};
+		} else{
+			instruction = opcodes[hexString.substring(pc,pc+2)];
+		}
+		
+		//Retrieve operands (if there are any); Note: 6502 is little-endian
+		if(instruction.len > 0){
+			for(i = 0; i < instruction.len; i++){
+				pc+=2;
+				operand =  hexString.substring(pc,pc+2) + operand;
+			}
+		} else {
+			operand = hexString.substring(pc,pc+2);
+		}
+		
+		syntax += instruction.code;
+		
+		switch(instruction.addr){
+			case 0: //If Implict
+				break;
+			case 1: //If Accumulator
+				syntax += " A";
+				break;
+			case 2: //If Immediate
+				syntax += " #$" + operand;
+				break;
+			case 3: //If Zero Page
+				syntax += " $" + operand;
+				break;
+			case 4: //If Zero Page,X
+				syntax += " $" + operand + ",X";
+				break;
+			case 5: //If Zero Page,Y
+				syntax += " $" + operand + ",Y";
+				break;
+			case 6: //If Relative
+				syntax += " $" + operand;
+				break;
+			case 7: //If Absolute
+				syntax += " $" + operand;
+				break;
+			case 8: //If Absolute,X
+				syntax += " $" + operand + ",X";
+				break;
+			case 9: //If Absolute,Y
+				syntax += " $" + operand + ",Y";
+				break;
+			case 10: //If Indirect
+				syntax += " ($" + operand + ")";
+				break;
+			case 11: //If Indexed Indirect
+				syntax += " ($" + operand + ",X)";
+				break;
+			case 12: //If Indirect Indexed
+				syntax += " ($" + operand + "),Y";
+				break;
+		}
+		
+		//Pad out address to 4 bytes
+		while(address.length < 8){
+			address = "0" + address;
+		}
+		
+		//Set hexstring from for full instruction
+		instructionBytes = hexString.substring(startingAddr,pc+2);
+		
+		const paddedString = instructionBytes.padEnd(6, ' ');
+
+        // Insert spaces after every second character
+        const formattedBytes = paddedString.match(/.{1,2}/g).join(' ');
+        
+
+		result += "\n" + toHex16(hexToInt(address) + startInt) + ":" + formattedBytes + "  " + syntax
+		
+	}
+	
+	return result;
+};
+
+</script>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+    body.darkmode {
+        background-color:   #181818;
+        color: #e0e0e0;
+    }
+    #banner {
+        background: linear-gradient(to bottom, #0000FF, #0195c7); /* Dark blue to light blue */
+        color: white;
+        text-align: left;
+        padding: 10px;
+        font-size: 24px;
+        display: flex;
+        align-items: center;
+    }
+    #banner.darkmode {
+        background: linear-gradient(to bottom, #222, #444)
+    }
+    #bannertitle {
+        flex-grow: 1;
+        text-align: left;
+    }
+    #bannerspacer
+    {
+        flex-grow: 2;
+        text-align: center;
+    }
+    #bannertheme-selectors
+    {
+        flex-grow: 0;
+        margin-left: 40px;
+        text-align: right;
+        width:24px;
+        height:24px;
+    }
+    #content {
+        display: flex;
+        flex: 1;
+    }
+    #left-nav {
+        width: 200px;
+        background-color: #f2f2f2;
+        padding: 20px;
+        visibility: hidden;
+    }
+    #left-nav.darkmode {
+        background-color:   #1e1e1e;
+    }
+    div#left-nav a {
+        color: blue;
+        text-decoration: none;
+    }
+    div#left-nav a:hover {
+        background-color: #beffff;
+    }
+    div#left-nav a.darkmode:hover {
+        color: burlywood;
+        background-color: dimgray;
+    }
+    #firmware-version {
+        font-size: 12px;
+        color: darkgray;
+        text-align: center;
+    }
+    #menu-power {
+        display: none;
+    }
+    #login {
+        padding: 20px;
+        width: 800px;
+        display: none;
+    }
+    #welcome {
+        padding: 20px;
+        width: 800px;
+        display: none;
+    }
+    div#livemon, div#sidplay, div#runner, div#tokenizer, div#screenview, div#streamsctrl {
+        flex-grow: 1;
+        padding: 20px;
+        display:none;
+    }
+    .screencanvas {
+        background: #352879;
+        image-rendering: pixelated;
+        border: 16px solid #6C5EB5;
+        width: 640px;
+        height: 480px;
+    }
+    .streamrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .streamrow label {
+        width: 60px;
+        font-weight: bold;
+    }
+    .streamrow input[type=text] {
+        width: 200px;
+        padding: 4px;
+    }
+    .streamstatus {
+        margin-left: 1em;
+        color: #888;
+        font-size: 0.9em;
+    }
+    .dropzone {
+        max-width: 600px;
+        min-height: 120px;
+        border: 2px dashed #1966be;
+        border-radius: 6px;
+        text-align: center;
+        color: #666;
+        margin-top: 15px;
+        padding: 20px 10px;
+    }
+    .dropzone.dragover {
+        border-color: #4caf50;
+        color: #4caf50;
+        background-color: #f6fff6;
+    }
+    #sidmsg, #runmsg, #basicmsg {
+        flex-grow: 1;
+        margin-top: 20px;
+        padding: 20px;
+        display:none;
+        background-color: red;
+        color: white;
+        width: 400px;
+    }
+    #runok {
+        flex-grow: 1;
+        margin-top: 20px;
+        padding: 20px;
+        display:none;
+        background-color: #4caf50;
+        color: white;
+        width: 400px;
+    }
+    #uppercaseBASIC {
+        margin-left: 20px;
+    }
+    .uppercase {
+        text-transform: uppercase;
+    }
+    .c64-textarea:focus {
+        outline: none;
+    }
+    button, input[type="button"], input[type="password"], input[type="file"]::file-selector-button {
+        padding: 5px 10px;
+        font-size: 14px;
+    }
+    li {
+	margin: 5px 0;
+    }
+
+        @font-face {
+            font-family: 'C64';
+            src: url('C64_Pro-STYLE.woff') format('woff'); /* Path to your C64 font file */
+        }
+
+        .padding-tr-5 {
+            padding-top: 5px;
+            padding-right: 5px;
+        }
+
+        .c64-textarea {
+            font-family: monospace;
+            background-color: #1966be; /* Commodore 64 screen color */
+            color: #68bee6; /* Light blue text color */
+            border-style: solid;
+            border-color: #68bee6;
+            border-width: 20px 13px;
+            border-radius: 0;
+            padding: 10px;
+            font-size: 16px;
+            line-height: 1.5;
+            width: 900px;
+            height: 400px;
+            resize: both;
+        }
+
+.trinity-dialog {
+    --size: 1.4;
+    --background: black;
+    --color: rgba(160, 182, 247, 0.877);
+    /* Opaque: the title sits over the bar header::before draws. */
+    --title-background: rgb(160, 182, 247);
+    border: 2px solid var(--color);
+    background: var(--background);
+    width: 800px;
+    height: 400px;
+    min-height: 100px;
+    min-width: 250px;
+    max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 40px);
+    z-index: 100;
+    resize: both;
+    overflow: auto;
+}
+.trinity-dialog .body {
+    width: 100%;
+    height: calc(100% - 28px);
+}
+.trinity-dialog {
+    position: relative;
+    left: 420px;
+    top: 200px;
+    transform: translate(-50%, -50%);
+}
+.trinity-dialog header .title {
+    position: relative;
+    top: -6px;
+    left: -2px;
+    margin-top: -2px;
+    background: var(--title-background);
+    padding: 1px 10px;
+}
+.trinity-dialog header {
+    background: var(--color);
+    position: relative;
+}
+.trinity-dialog header::before {
+    content: "";
+    display: block;
+    position: absolute;
+    left: 55px;
+    top: 5px;
+    right: 10px;
+    width: calc(100% - 55px - 5px);
+    height: 15px;
+    background: #251180;
+}
+.trinity-dialog header .title::before {
+    content: "[ ";
+}
+.trinity-dialog header .title::after {
+    content: " ]";
+}
+.trinity-dialog header ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: inline-block;
+}
+.trinity-dialog header li {
+    display: inline-block;
+    margin: 3px;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--background);
+}
+.trinity-dialog header li.title-item {
+    width: auto;
+    height: auto;
+    margin: 0;
+    border: none;
+}
+
+a.darkmode {
+    color: yellow;
+}
+div#left-nav a.darkmode {
+    color:gray;
+}
+#darkmode-button {
+    visibility:hidden;
+    display: none;
+}
+#darkmode-button.lightmode {
+    visibility:visible;
+    display:inline;
+}
+#lightmode-button {
+    visibility:hidden;
+    display: none;
+}
+#lightmode-button.darkmode {
+    visibility:visible;
+    display:inline;
+}
+/* fix table's -internal-quirk-inherit*/
+/* Light mode */
+.lightmode table,
+.lightmode table * {
+    color: black;
+}
+
+/* Dark mode */
+.darkmode table,
+.darkmode table * {
+    color: gray;
+}
+
+</style>
+
+
+
+</head>
+<body>
+    <div id="banner">
+        <span id="bannertitle">&nbsp;</span>
+        <span id="bannerspacer">&nbsp;</span>
+        <span id="bannertheme-selectors">
+            <a id="darkmode-button" href="#"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M320 64C178.6 64 64 178.6 64 320C64 461.4 178.6 576 320 576C388.8 576 451.3 548.8 497.3 504.6C504.6 497.6 506.7 486.7 502.6 477.5C498.5 468.3 488.9 462.6 478.8 463.4C473.9 463.8 469 464 464 464C362.4 464 280 381.6 280 280C280 207.9 321.5 145.4 382.1 115.2C391.2 110.7 396.4 100.9 395.2 90.8C394 80.7 386.6 72.5 376.7 70.3C358.4 66.2 339.4 64 320 64z"/></svg></a>
+            <a id="lightmode-button" href="#"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path fill="rgb(116, 192, 252)" d="M320 32C328 32 335.4 36 339.9 42.6L398.7 130L502.1 109.8C509.9 108.3 518 110.7 523.7 116.4C529.4 122.1 531.8 130.2 530.3 138L510 241.3L597.4 300.1C604 304.5 608 312 608 320C608 328 604 335.4 597.4 339.9L510 398.7L530.2 502C531.7 509.8 529.3 517.9 523.6 523.6C517.9 529.3 509.8 531.7 502 530.2L398.7 510L339.9 597.4C335.4 604 328 608 320 608C312 608 304.6 604 300.1 597.4L241.3 510L137.9 530.2C130.1 531.7 122 529.3 116.3 523.6C110.6 517.9 108.2 509.8 109.7 502L130 398.7L42.6 339.9C36 335.4 32 328 32 320C32 312 36 304.6 42.6 300.1L130 241.3L109.8 137.9C108.3 130.1 110.7 122 116.4 116.3C122.1 110.6 130.2 108.2 138 109.7L241.3 129.9L300.1 42.5L301.9 40.2C306.4 35 313 32 320 32zM272.2 170C266.8 178 257.2 182 247.7 180.2L163.7 163.8L180.1 247.8C181.9 257.3 177.9 266.9 169.9 272.3L99 320L170 367.8C178 373.2 182 382.8 180.2 392.3L163.8 476.3L247.8 459.9L251.3 459.5C259.6 459.1 267.6 463.1 272.3 470.1L320.1 541.1L367.9 470.1L370.1 467.3C375.7 461.2 384.1 458.3 392.4 460L476.4 476.4L460 392.4C458.2 382.9 462.2 373.3 470.2 367.9L541.2 320.1L470.2 272.3C462.2 266.9 458.2 257.3 460 247.8L476.4 163.8L392.4 180.2C382.9 182 373.3 178 367.9 170L320.1 99L272.3 170zM320 440C253.7 440 200 386.3 200 320C200 253.7 253.7 200 320 200C386.3 200 440 253.7 440 320C440 386.3 386.3 440 320 440zM320 248C280.2 248 248 280.2 248 320C248 359.8 280.2 392 320 392C359.8 392 392 359.8 392 320C392 280.2 359.8 248 320 248z"/></svg></a>
+        </span>
+    </div>
+
+    <div id="content">
+        <div id="left-nav">
+            <ul>
+                <li><a id="showwelcome" href="#">Home</a></li>
+                <li><a id="showsidplay" href="#">SID Player</a></li>
+                <li><a id="showrunner" href="#">Run PRG / CRT / Disk</a></li>
+                <li><a id="showterminal"  href="#">Live Monitor</a></li>
+                <li><a id="showtokenizer"  href="#">BASIC Editor</a></li>
+                <li><a id="showscreenview" href="#">C64 Screen</a></li>
+                <li><a id="showstreams"    href="#">Data Streams</a></li>
+            </ul>
+            <ul>
+                <li><a id="doreset" href="#" title="Reset the C64...">Reset Machine</a></li>
+                <li><a id="doreboot" href="#" title="Reboot the C64...">Reboot Machine</a></li>
+                <li id="menu-power"><a id="dopoweroff" href="#" title="Standby/Switch off the Ultimate...">Power Off Machine</a></li>
+                <li><a id="domenubutton" href="#" title="Show menu...">Menu Button</a></li>
+            </ul>
+            <ul>
+                <li><a href="api.html">API Explorer</a></li>
+                <li><a href="https://1541u-documentation.readthedocs.io/en/latest/api/api_calls.html" target="_blank" rel="noopener">API Documentation</a></li>
+                <li><a href="https://ultimate64.com/Firmware" target="_blank" rel="noopener">Firmware Releases</a></li>
+            </ul>
+            <ul id="logoutmenuitem">
+                <li><a id="logout" href="#">Logout</a></li>
+            </ul>
+            <div id="firmware-version"></div>
+        </div>
+
+        <div id="login" class="page">
+            <h2>Password required</h2>
+            <input id="password" type="password">
+            <button id="loginbutton" type="button">Login</button>
+        </div>
+
+        <div id="welcome" class="page">
+            <h1>Welcome to your Ultimate product!</h1>
+            <p>This site serves as the dedicated web server 
+                for the Ultimate 64 and Ultimate cartridge systems. It offers a comprehensive suite of APIs, designed to 
+                enable the development of advanced integrations and remote access to your system.</p>
+            <p>You can find out more by visiting the official <a href="https://ultimate64.com/" target="_blank" rel="noopener"> Ultimate 64 website</a>,
+                or by joining our <a href="https://www.facebook.com/groups/ultimate64" target="_blank" rel="noopener">Facebook group</a>.
+            </p>
+            <p>
+                Thank you for joining and contributing to the Ultimate family of products.
+            </p>
+            <p>Gideon Z.</p>
+        </div>
+
+        <div id="sidplay" class="page">
+            <h1>SID Player</h1>
+            <p>Remotely play a SID file on your Ultimate!</p>
+
+            <div id="siddropzone" class="dropzone" title="Drop SID file to be loaded here">
+                Drag & drop SID file here
+                <br />
+                <p style="font-size: 4em">&#x1F3B6;</p>
+                <br />
+                or press button to browse
+                <br /><br />
+                <input type="file" id="sidfile" name="file" accept=".sid,.SID" title="Select SID sound file to be played">
+                <br /><br />
+                <input type="button" id="sidplaysubmit" value="Play Again!" title="Upload and play the selected SID sound file again">
+            </div>
+
+            <div id="sidmsg">An error has occurred when uploading the selected file.</div>
+        </div>
+
+        <div id="runner" class="page">
+            <h1>PRG / CRT / Disk Loader</h1>
+            <p>Remotely run a program or cartridge on your Ultimate, or mount a disk image in drive A.</p>
+
+            <div id="runnerdropzone" class="dropzone" title="Drop file to be loaded here">
+                Drag & drop PRG, CRT, SID or disk image file here
+                <br />
+                <p style="font-size: 4em">&#x21EA;</p>
+                <br />
+                or press button to browse
+                <br /><br />
+                <input type="file" id="runnerfile" name="file" accept=".prg,.crt,.sid,.d64,.g64,.d71,.g71,.d81,.PRG,.CRT,.SID,.D64,.G64,.D71,.G71,.D81" title="Select a PRG/CRT/SID file to run, or a D64/G64/D71/G71/D81 image to mount">
+                <br /><br />
+                <input type="button" id="runnersubmit" value="Load Again!" title="Upload the selected file again: RUN a program, or mount a disk image">
+            </div>
+
+            <div id="runmsg">An error has occurred when loading the selected file.</div>
+            <div id="runok">The disk image has been mounted in drive A.</div>
+        </div>
+
+        <div id="livemon" class="page">
+            <h1>Live Monitor</h1>
+            <p>Remotely inspect and debug the 6510 CPU of your U64 or UII+.</p>
+            <div id="terminal" class="trinity-dialog">
+                <header>
+                    <ul>
+                        <li><a href="#"></a></li>
+                        <li class="title-item"><span class="title">Ultimate 64 Monitor</span></li>
+                    </ul>
+                </header>
+                <div class="body"></div>
+            </div>
+            <div>
+                <br />
+                <table>
+                    <thead>
+                        <tr>
+                            <b>Available commands (with examples):</b>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>m</td><td>- memory view</td><td>( m | m c000 | m c000 c100 )</td></tr>
+                        <tr><td>h</td><td>- hunt memory</td><td>( h c000 c100 4a 30 00 )</td></tr>
+                        <tr><td>f</td><td>- fill memory</td><td>( f c000 c100 00 )</td></tr>
+                        <tr><td>d</td><td>- disassemble</td><td>( d | d c000 | d c000 c100 )</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="tokenizer" class="page">
+            <h1>BASIC Editor / Tokenizer</h1>
+            <p>Here, you may enter a BASIC program, and upload it directly to your machine.</p>
+
+            <textarea id="basiceditor" spellcheck="false" wrap="off" class="c64-textarea" cols="80">
+10 print "hello world"
+20 goto 10</textarea>
+            <div class="padding-tr-5">
+                <span class="padding-tr-5"><input type="button" id="submitBASIC" value="Upload" title="Upload program to C64 memory"></span>
+                <span class="padding-tr-5"><input type="button" id="submitBASICAndRun" value="Upload and Run"  title="Upload program to C64 memory and RUN"></span>
+                <span class="padding-tr-5"><input type="button" id="runBASIC" value="Run" title="Send RUN command to the C64"></span>
+                <span class="padding-tr-5"><input type="button" id="stopBASIC" value="Stop" title="Send STOP command to the C64"></span>
+                <input type="checkbox" id="uppercaseBASIC"><label for="uppercaseBASIC" title="Toggle uppercase/lowercase display of BASIC program text">Uppercase</label>
+            </div>
+
+            <div id="basicmsg">An error has occurred. Check for valid codes.</div>
+
+            <br />
+            <div><b>Special characters:</b></div>
+            <div id="tableContainer"></div>
+
+        </div>
+
+        <div id="screenview" class="page">
+            <h1>C64 Screen</h1>
+            <p>Snapshot of the C64 text screen ($0400 + $D800 color RAM). Click
+            <b>Refresh</b> for a fresh frame, or <b>Play</b> to poll continuously
+            (4 times a second). Works for text-mode programs (BASIC, menus, GEOS-text);
+            bitmap modes won't render correctly.</p>
+            <p style="font-size: 0.9em; color: #666;">
+            Note: each refresh briefly pauses the 6510 to DMA-read C64 RAM. Harmless
+            for menus, BASIC, and most programs, but a vbl-tight demo or running
+            disk operation may glitch slightly during Live polling. Use single
+            <b>Refresh</b> if you need a non-intrusive look.</p>
+            <canvas id="screencanvas" class="screencanvas" width="320" height="200"></canvas>
+            <div style="margin-top:10px;">
+                <input type="button" id="screenpause" value="Play">
+                <input type="button" id="screenrefresh" value="Refresh">
+                <input type="button" id="screensnapshot" value="Snapshot (PNG)">
+                <span style="margin-left:1em;">Font:</span>
+                <input type="button" id="screenfont_auto" value="Auto" title="Heuristic switch">
+                <input type="button" id="screenfont_c64"  value="C64">
+                <input type="button" id="screenfont_menu" value="Menu">
+                <span id="screenstatus" style="margin-left: 1em; color: #888;"></span>
+            </div>
+        </div>
+
+        <div id="streamsctrl" class="page">
+            <h1>Data Streams</h1>
+            <p>Start/stop UDP streams. Defaults are <b>multicast</b> (239.0.1.64–66) — receiver joins the group, no ARP/host lookup needed. Unicast IPs work too if the host is up on your LAN.</p>
+
+            <div class="streamrow">
+                <label>Video</label>
+                <input type="text" id="streamip_video" value="239.0.1.64:11000">
+                <input type="button" id="streamstart_video" value="Start">
+                <input type="button" id="streamstop_video" value="Stop">
+                <input type="button" id="streamopen_video" value="Open in Player" title="Download .m3u that opens your default UDP-capable player">
+                <span id="streamstatus_video" class="streamstatus"></span>
+            </div>
+            <div class="streamrow">
+                <label>Audio</label>
+                <input type="text" id="streamip_audio" value="239.0.1.65:11001">
+                <input type="button" id="streamstart_audio" value="Start">
+                <input type="button" id="streamstop_audio" value="Stop">
+                <input type="button" id="streamopen_audio" value="Open in Player">
+                <span id="streamstatus_audio" class="streamstatus"></span>
+            </div>
+            <div class="streamrow">
+                <label>Debug</label>
+                <input type="text" id="streamip_debug" value="239.0.1.66:11002">
+                <input type="button" id="streamstart_debug" value="Start">
+                <input type="button" id="streamstop_debug" value="Stop">
+                <input type="button" id="streamopen_debug" value="Open in Player">
+                <span id="streamstatus_debug" class="streamstatus"></span>
+            </div>
+            <p style="font-size: 0.9em; color: #666;">
+                Note: starting a Video stream automatically stops Debug.
+            </p>
+
+            <h2 style="margin-top: 1.5em;">Players</h2>
+            <p>The video stream uses the U64 II's custom raster-scan packet format
+            (<a href="https://1541u-documentation.readthedocs.io/en/latest/data_streams.html" target="_blank" rel="noopener">spec</a>).
+            Plain VLC/ffplay just see opaque packet noise — you need a decoder. Options:</p>
+            <ul style="font-size: 0.95em;">
+                <li><a href="https://github.com/jusii/vlc-u64stream" target="_blank" rel="noopener"><b>vlc-u64stream</b></a> — VLC plugin (open source, Linux / macOS / Windows). Install the platform-specific module into VLC's plugins dir (Linux: <code>~/.local/share/vlc/plugins/</code>); the <b>Open in Player</b> buttons above hand off a <code>u64://</code> URL via <code>.m3u</code> and VLC plays it natively. Recommended.</li>
+                <li><a href="https://github.com/DusteDdk/u64view" target="_blank" rel="noopener"><b>u64view</b></a> — standalone C viewer (WTFPL). Linux + macOS, source-tweakable.</li>
+                <li><a href="https://tsb.space/sdm_downloads/u64streamer/" target="_blank" rel="noopener"><b>U64 Streamer</b></a> by tsb — Windows binary, closed source.</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

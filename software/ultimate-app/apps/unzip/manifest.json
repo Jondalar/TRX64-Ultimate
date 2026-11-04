@@ -1,0 +1,10 @@
+{
+  "id": "unzip",
+  "name": "Unzip",
+  "version": "1.0",
+  "filetypes": [
+    { "ext": "zip", "label": "Unzip to folder", "action": "folder" },
+    { "ext": "zip", "label": "Unzip here", "action": "here" },
+    { "ext": "zip", "label": "Extract one file", "action": "one" }
+  ]
+}

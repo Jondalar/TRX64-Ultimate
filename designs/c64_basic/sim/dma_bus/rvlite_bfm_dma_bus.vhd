@@ -1,0 +1,153 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+--------------------------------------------------------------------------------
+-- tb_dma_bus (T16 Q8): a stand-in for the RISC-V inside ultimate_sys. It makes
+-- the app's DMA writes the way c64.cc does (C64_STOP, C64_DMA_MEMONLY, bytes
+-- through the window at 0x050000) and checks whether the window hands the byte
+-- to the C64 as a bus cycle (dma_bus): only the CPU-held, not-MEMONLY ones, and
+-- the MEMONLY writes of $0000/$0001, which must reach the 6510 port.
+--------------------------------------------------------------------------------
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+use work.io_bus_pkg.all;
+use work.mem_bus_pkg.all;
+use work.tb_dma_bus_pkg.all;
+
+architecture bfm of rvlite_wrapper is
+begin
+    mem_req <= c_mem_req_32_init;
+    io_busy <= '0';
+
+    process
+        variable errs : natural := 0;
+        variable dummy : std_logic_vector(7 downto 0);
+
+        procedure io_access(addr : natural; wr : boolean; wdata : std_logic_vector(7 downto 0);
+                            rdata : out std_logic_vector(7 downto 0)) is
+            variable n : natural := 0;
+        begin
+            io_req <= c_io_req_init;
+            io_req.address <= to_unsigned(addr, 24);
+            io_req.data <= wdata;
+            if wr then io_req.write <= '1'; else io_req.read <= '1'; end if;
+            wait until rising_edge(clock);
+            io_req <= c_io_req_init;
+            loop
+                wait until rising_edge(clock);
+                exit when io_resp.ack = '1';
+                n := n + 1;
+                if n = 200 then
+                    report "BFM: no ack at " & to_hstring(to_unsigned(addr, 24)) severity error;
+                    errs := errs + 1;
+                    exit;
+                end if;
+            end loop;
+            rdata := io_resp.data;
+        end procedure;
+
+        procedure wr(addr : natural; data : std_logic_vector(7 downto 0)) is
+        begin
+            io_access(addr, true, data, dummy);
+        end procedure;
+
+        -- one window access; bus = was it handed over as a bus cycle
+        procedure win(name : string; a : natural; w : boolean; want : std_logic) is
+            variable c0 : natural := pk_cnt;
+        begin
+            io_access(16#050000# + a, w, X"37", dummy);
+            for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+            if pk_cnt /= c0 + 1 then
+                report "BFM: " & name & ": no request reached the C64 side" severity error;
+                errs := errs + 1;
+            elsif pk_bus /= want then
+                report "BFM: " & name & ": dma_bus is " & std_logic'image(pk_bus) & ", expected " & std_logic'image(want)
+                    severity error;
+                errs := errs + 1;
+            end if;
+        end procedure;
+
+        -- a read of $D400-$D7FF while no socket is enabled is answered inside (the "no SID" stub), no bus cycle
+        procedure stub(name : string; a : natural) is
+            variable c0 : natural := pk_cnt;
+            variable d  : std_logic_vector(7 downto 0);
+        begin
+            io_access(16#050000# + a, false, X"00", d);
+            for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+            if pk_cnt /= c0 or d /= X"FF" then
+                report "BFM: " & name & ": request " & integer'image(pk_cnt - c0) & ", data " & to_hstring(d) &
+                       ", expected the stub $FF without a request" severity error;
+                errs := errs + 1;
+            end if;
+        end procedure;
+
+        procedure chk(name : string; ok : boolean) is
+        begin
+            if not ok then
+                report "BFM: " & name severity error;
+                errs := errs + 1;
+            end if;
+        end procedure;
+
+        constant STOP    : natural := 16#040001#;
+        constant MEMONLY : natural := 16#180003#;
+    begin
+        io_req <= c_io_req_init;
+        wait until reset = '0';
+        for i in 1 to 10 loop wait until rising_edge(clock); end loop;
+
+        -- CPU held, bus mode: everything is a bus cycle (the REST pause's plain DMA)
+        wr(STOP, X"01"); wr(MEMONLY, X"00");
+        win("bus write $0001", 16#0001#, true, '1');
+        win("bus write $0500", 16#0500#, true, '1');
+        win("bus read $0001", 16#0001#, false, '1');
+        bfm_step <= 1;
+
+        -- CPU held, MEMONLY (the app's raw transfer): RAM only, except a write of $00/$01
+        wr(MEMONLY, X"01");
+        win("memonly write $0001", 16#0001#, true, '1');
+        win("memonly write $0000", 16#0000#, true, '1');
+        win("memonly write $0002", 16#0002#, true, '0');
+        win("memonly write $0400", 16#0400#, true, '0');
+        win("memonly write $0500", 16#0500#, true, '0');
+        win("memonly read $0001", 16#0001#, false, '0');
+        win("memonly read $0000", 16#0000#, false, '0');
+        bfm_step <= 2;
+
+        -- CPU running: no bus cycles at all
+        wr(STOP, X"00"); wr(MEMONLY, X"01");
+        win("running memonly write $0001", 16#0001#, true, '0');
+        wr(MEMONLY, X"00");
+        win("running write $0001", 16#0001#, true, '0');
+        bfm_step <= 3;
+
+        -- T37: the socket registers (C64_SID1/2_BASE/MASK/EN, C64_STEREO_ADDRSEL, mixer bytes 4-7)
+        chk("sock reset values", sk_en = "00" and sk_base = X"0101" and sk_sel = "000" and sk_gains = X"00000000");
+        wr(STOP, X"01"); wr(MEMONLY, X"00");
+        stub("socket off, read $D419", 16#D419#);
+        stub("socket off, read $D519", 16#D519#);
+        win("socket off, write $D419", 16#D419#, true, '1');
+        wr(16#180008#, X"40"); wr(16#180009#, X"E0");
+        wr(16#18000C#, X"FE"); wr(16#18000D#, X"F0");
+        wr(16#180014#, X"03");
+        wr(16#100504#, X"11"); wr(16#100505#, X"22"); wr(16#100506#, X"33"); wr(16#100507#, X"44");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        chk("sock base/mask/sel/gains", sk_base = X"E040" and sk_mask = X"F0FE" and sk_sel = "011" and
+                                        sk_gains = X"44332211" and sk_en = "00");
+        wr(16#180011#, X"01");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        chk("sock 1 enable", sk_en = "01");
+        win("socket 1 on, read $D419", 16#D419#, false, '1');
+        wr(16#180011#, X"00"); wr(16#180012#, X"01");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        chk("sock 2 enable", sk_en = "10");
+        win("socket 2 on, read $D419", 16#D419#, false, '1');
+        wr(16#180012#, X"00");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        stub("sockets off again, read $D419", 16#D419#);
+        bfm_step <= 4;
+
+        bfm_errors <= errs;
+        bfm_step <= 99;
+        wait;
+    end process;
+end architecture;

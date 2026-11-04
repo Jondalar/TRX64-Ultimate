@@ -1,0 +1,95 @@
+{
+ "cart_type": "0x48",
+ "name": "GMod2 (legacy model)",
+ "regs": {
+  "R0": 0,
+  "R1": 0
+ },
+ "rules": [
+  {
+   "area": "IO1",
+   "match": "0x00",
+   "mask": "0xFF",
+   "on": "WRITE",
+   "target": "R0",
+   "src": "DATA"
+  },
+  {
+   "area": "IO1",
+   "match": "0x00",
+   "mask": "0x00",
+   "on": "WRITE",
+   "target": "R1",
+   "src": "DATA"
+  }
+ ],
+ "io1": {
+  "read": "DEV",
+  "write": [
+   "RULES"
+  ]
+ },
+ "io2": {
+  "read": "RAM",
+  "write": []
+ },
+ "bank": [
+  {
+   "reg": "R0",
+   "width": 6
+  }
+ ],
+ "mode": {
+  "reg": "R0",
+  "lsb": 6,
+  "width": 2
+ },
+ "table": [
+  {
+   "exrom": 0,
+   "game": 1
+  },
+  {
+   "exrom": 1,
+   "game": 1
+  },
+  {
+   "exrom": 0,
+   "game": 1
+  },
+  {
+   "exrom": 1,
+   "game": 0
+  }
+ ],
+ "layout": "L8_MIRROR",
+ "eeprom": {
+  "cs": 6,
+  "clk": 5,
+  "di": 4,
+  "do": 7
+ },
+ "flash": {
+  "part": "x",
+  "magic1": 0,
+  "magic2": 0,
+  "mask": 0,
+  "id": [
+   0,
+   0
+  ],
+  "id_ofs": 0,
+  "size": "512K",
+  "sectors": [
+   {
+    "count": 8,
+    "size": "64K"
+   }
+  ],
+  "select": [
+   "ROML_R",
+   "ROMH_R",
+   "ROMH_W"
+  ]
+ }
+}

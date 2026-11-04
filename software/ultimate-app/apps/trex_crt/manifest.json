@@ -1,0 +1,13 @@
+{
+  "id": "trex_crt",
+  "name": "TREX CRT Tool",
+  "version": "1.0",
+  "filetypes": [
+    { "ext": "CRT", "label": "Write to Cartridge", "action": "write" }
+  ],
+  "tasks": [
+    { "category": "C64 Machine", "label": "Dump Cartridge",  "action": "dump" },
+    { "category": "C64 Machine", "label": "Cart Inspector",  "action": "inspect" },
+    { "category": "C64 Machine", "label": "Flash Cartridge", "action": "flash" }
+  ]
+}

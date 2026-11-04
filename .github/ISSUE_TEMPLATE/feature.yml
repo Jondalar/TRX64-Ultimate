@@ -1,0 +1,41 @@
+name: Feature request
+description: Something the firmware should be able to do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What this firmware deliberately does differently from Gideon Zweijtzer's is listed in
+        [chapter 10 of the manual](https://github.com/Jondalar/TRX64-Ultimate/blob/main/docs/manual/10-differences.md).
+        Those points are decisions, not gaps.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - menu, file browser or settings
+        - the C64 itself (CPU, VIC-II, SID, CIA, timing)
+        - drives, D64 or the IEC bus
+        - cartridges and the expansion port
+        - monitor, breakpoints or the RPC server
+        - Timewarp
+        - network, REST, FTP or telnet
+        - apps (.u2a)
+        - installing, update or backup
+        - something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What for
+      description: What you want to do with it, in your words.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it should behave
+      description: Keys, menus, what you see. A photo, or how another machine or firmware does it, helps.
+    validations:
+      required: true

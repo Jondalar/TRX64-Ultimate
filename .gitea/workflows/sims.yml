@@ -1,0 +1,65 @@
+name: Sims
+
+# Stage sims: the benches of ci/sims.txt (ci/sims.sh); skipped when nothing they read changed.
+# Called by pipeline.yml (workflow_call) and runnable alone (workflow_dispatch).
+# No concurrency group here: a group in a called workflow made every call queue for
+# `gateware` again, so another pipeline slipped in between two stages of this one and
+# the run sat "waiting" with a stage left (run 351). The group is the pipeline's.
+# Run alone, a fragment is not serialised: look at the queue first, as before a push.
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: 'Bench tier, 1 or 2; empty = ci/select.sh decides'
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Bench tier, 1 or 2; empty = ci/select.sh decides'
+        type: string
+        default: ''
+
+jobs:
+  sims:
+    name: Simulations
+    # Repo variable CI_RUNNER=builder sends every stage to the builder; unset, the NAS
+    # runners take them. One machine per run: stages hand over through its /cache.
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: trx64-sim-env:4
+      # No CPU limit here: each runner sets its own in container.options (NAS --cpus=3, it
+      # also runs Gitea; builder none). --init: PID 1 of a job container is `sleep`,
+      # which never reaps, and Vivado's helper processes end up as zombies (runs 222, 225)
+      options: --init
+      volumes:
+        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+    # The long benches run one at a time (SOLO_TIMEOUT in ci/sims.sh), so a round that
+    # has to rebuild all of them is hours, not minutes: slot 2942 s, turbo 2043 s,
+    # ddr2_test 1671 s measured on 2026-11-01. A normal round runs a handful and ends
+    # in minutes; this limit is for the rare full one.
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      - name: Fetch the Ultimate app submodule
+        env:
+          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: src/ci/submodule.sh
+      - name: Run the benches
+        env:
+          TIER: ${{ inputs.tier }}
+        run: |
+          set -eu
+          cd src
+          ci/sims.sh -t "${TIER:-$(ci/select.sh sims-tier)}"

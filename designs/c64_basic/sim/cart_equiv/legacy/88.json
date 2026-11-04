@@ -1,0 +1,40 @@
+{
+ "cart_type": "0x88",
+ "name": "Dinamic (legacy model)",
+ "regs": {
+  "R0": 0,
+  "R1": 0
+ },
+ "rules": [
+  {
+   "area": "IO1",
+   "mask": "0x00",
+   "on": "READ",
+   "target": "R0",
+   "src": "ADDR"
+  }
+ ],
+ "io1": {
+  "read": "REG",
+  "write": [
+   "RULES"
+  ]
+ },
+ "io2": {
+  "read": "RAM",
+  "write": []
+ },
+ "bank": [
+  {
+   "reg": "R0",
+   "width": 4
+  }
+ ],
+ "table": [
+  {
+   "exrom": 0,
+   "game": 1
+  }
+ ],
+ "layout": "L8"
+}

@@ -1,0 +1,102 @@
+name: Bug report
+description: Something does not work on the board. Every field marked required has to be filled in.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. A report we can reproduce gets fixed; a report without the release, the
+        steps and photos usually cannot be checked at all. Read
+        [CONTRIBUTING.md](https://github.com/Jondalar/TRX64-Ultimate/blob/main/CONTRIBUTING.md) first —
+        above all: never attach ROMs, disk or cartridge images, or the backup files the installer wrote
+        (they carry your network password in clear). Names are enough.
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The package you installed, or the version and build id from `GET /v1/info` on the board.
+      placeholder: trx64_update_f6a4884f_20261031.cfw
+    validations:
+      required: true
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board
+      options:
+        - C64 Ultimate (C64U)
+        - Ultimate 64 Elite II
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it happens
+      options:
+        - menu, file browser or settings
+        - the C64 itself (CPU, VIC-II, SID, CIA, timing)
+        - drives, D64 or the IEC bus
+        - cartridges and the expansion port
+        - monitor, breakpoints or the RPC server
+        - Timewarp
+        - network, REST, FTP or telnet
+        - apps (.u2a)
+        - installing, update or backup
+        - something else
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: From switching on, what you did, one step per line (menus, keys, files). Say what was in the port and what was plugged in.
+      placeholder: |
+        1. Switch on, F5, Developer, TRX64 Monitor
+        2. Set a breakpoint at $E5CD
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: photos
+    attributes:
+      label: Photos or video of the screen
+      description: Drag them in here. Show the fault and the menu settings.
+    validations:
+      required: true
+  - type: input
+    id: media
+    attributes:
+      label: Media used
+      description: File names and where they came from (site, collection, version), with the sha256 if you have it. Never the file itself.
+      placeholder: Turrican.d64 from the TOSEC set 2023-01, or "none"
+    validations:
+      required: true
+  - type: textarea
+    id: rpc
+    attributes:
+      label: Request and answer
+      description: "For the monitor, the RPC server or the REST API: what you sent and what came back, as text."
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Before you send this
+      options:
+        - label: No ROMs, images, firmware packages of Commodore's or Gideon's, or backup files are attached.
+          required: true
+        - label: This is one defect, and the current release still shows it.
+          required: true

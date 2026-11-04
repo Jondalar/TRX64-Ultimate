@@ -1,0 +1,61 @@
+name: Update
+
+# Stage update: the tester update files (.cfw, .ue2) of the package, added to the same package
+# version (ci/update.sh). Called by pipeline.yml (workflow_call) and runnable alone
+# (workflow_dispatch). It builds only on integ-m1, main and v* tags, or when `force` is true;
+# elsewhere it stays green after seconds with "update SKIPPED" (decided in the script, step-level
+# `if:` only: docs/specs/T31-ci-pipeline.md, decision 2). No concurrency group, as in the other stages.
+on:
+  workflow_call:
+    inputs:
+      force:
+        description: 'true: build on any branch (dispatch input update of the pipeline)'
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'true: build on any branch'
+        type: string
+        default: ''
+
+jobs:
+  update:
+    name: Update files
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: u64-build-env:ci
+      options: --init
+      volumes:
+        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      - name: Decide
+        env:
+          UPDATE_FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$(src/ci/select.sh update)" != yes ]; then
+            echo "=========================================================="
+            echo "update SKIPPED: only integ-m1/main (and v* tags)"
+            echo "=========================================================="
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - name: Build and publish the update files
+        if: env.SKIP != '1'
+        env:
+          UPDATE_FORCE: ${{ inputs.force }}
+          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: src/ci/update.sh

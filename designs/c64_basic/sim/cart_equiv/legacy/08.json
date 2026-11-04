@@ -1,0 +1,49 @@
+{
+ "cart_type": "0x08",
+ "name": "Ocean 8K (legacy model)",
+ "regs": {
+  "R0": 0,
+  "R1": 0
+ },
+ "rules": [
+  {
+   "area": "IO1",
+   "match": "0x00",
+   "mask": "0xFF",
+   "on": "WRITE",
+   "target": "R0",
+   "src": "DATA"
+  },
+  {
+   "area": "IO1",
+   "match": "0x00",
+   "mask": "0x00",
+   "on": "WRITE",
+   "target": "R1",
+   "src": "DATA"
+  }
+ ],
+ "io1": {
+  "read": "REG",
+  "write": [
+   "RULES"
+  ]
+ },
+ "io2": {
+  "read": "RAM",
+  "write": []
+ },
+ "bank": [
+  {
+   "reg": "R0",
+   "width": 6
+  }
+ ],
+ "table": [
+  {
+   "exrom": 0,
+   "game": 1
+  }
+ ],
+ "layout": "L8"
+}

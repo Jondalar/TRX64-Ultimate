@@ -1,0 +1,51 @@
+# tier|name|timeout in seconds|command (bash, from the repository root)
+# Tier 1 (minutes) runs on every push, tier 2 on main, workflow_dispatch and [sims] (ci/select.sh).
+# A bench counts when its exit status or a PASS line decides (ci/sims.sh).
+#
+# Not listed, and why:
+#  cart_equiv, lat   compare against old commits with `git show`; a shallow clone has none of them
+#  lorenz            needs the Lorenz suite from outside the repository
+#  sid               fetches libresidfp from the internet and reports, it does not decide
+#  redip (equiv)     run_equiv2.sh / run_equiv8.sh / run_trx.sh of designs/c64_basic/sim/redip compare
+#                    with the original reDIP, taken with `git show` from a pinned commit (no shallow clone)
+1|trx_io|120|sh designs/c64_basic/sim/trx_io/run.sh
+1|cart_unit|300|sh designs/c64_basic/sim/cart_unit/run.sh
+1|ring_f4|300|sh designs/c64_basic/sim/ring/run_f4.sh
+1|ring_trace|300|sh designs/c64_basic/sim/ring/run_trace.sh
+1|keyboard|600|ci/sim_iv.sh tb_keyboard.v
+1|rvmul|900|sh designs/c64_basic/sim/rvmul/run.sh
+2|app_i2c|600|ci/sim_iv.sh tb_app_i2c.v
+1|bling|600|ci/sim_iv.sh tb_bling.v
+1|bling_io|600|ci/sim_iv.sh tb_bling_io.v
+1|case_leds|600|ci/sim_iv.sh tb_case_leds.v
+1|mig_arb|600|ci/sim_iv.sh tb_mig_arb.v designs/c64_basic/ddr2_port.v designs/c64_basic/sim/mig_ui_model.v
+1|reu_map|600|ci/sim_iv.sh tb_reu_map.v designs/c64_basic/reu_ddr_map.v designs/c64_basic/ddr2_port.v designs/c64_basic/sim/mig_ui_model.v
+1|udp_audio|300|ci/sim_iv.sh tb_udp_audio.v
+1|drive_mem|600|sh designs/c64_basic/sim/drive_mem/run.sh
+2|flash_gate|900|sh designs/c64_basic/sim/flash_gate/run.sh
+2|flash_boot|900|sh designs/c64_basic/sim/flash_boot/run.sh
+1|uci|600|sh designs/c64_basic/sim/uci/run.sh
+1|dbgsess|1200|sh designs/c64_basic/sim/dbgsess/run.sh
+2|statebus|1800|cd designs/c64_basic/sim/statebus && JOBS=3 sh build.sh && cd build/run && ../tb_statebus boot ../tb.state && ../tb_statebus run ../tb.state && echo PASS
+2|ultsys|900|sh designs/c64_basic/sim/ultsys/run.sh
+1|dma_bus|600|sh designs/c64_basic/sim/dma_bus/run.sh
+1|eth|900|sh designs/c64_basic/sim/eth/run.sh
+2|input|1200|JOBS=3 sh designs/c64_basic/sim/input/run.sh
+1|scaler|900|ci/sim_iv.sh tb_scaler.v
+1|sock_audio|600|ci/sim_iv.sh tb_sock_audio.v
+2|steal|1800|cd designs/c64_basic/sim/steal && JOBS=3 sh build.sh && cd build/run && ../tb_steal run
+2|reu|1800|cd designs/c64_basic/sim/reu && JOBS=3 sh build.sh && cd build/run && ../tb_reu run
+2|turbo|2400|cd designs/c64_basic/sim/turbo && JOBS=3 sh build.sh && python3 run.py
+2|slot|3600|cd designs/c64_basic/sim/slot && JOBS=3 sh build.sh && sh run.sh
+# ring_core: one entry for every tb_ring mode; two entries shared build/ and tb.state and raced (runs 567, 588)
+2|ring_core|3600|cd designs/c64_basic/sim/ring && JOBS=2 sh build.sh && cd build/run && ../tb_ring boot ../tb.state && ../tb_ring trace ../tb.state && ../tb_ring snap ../tb.state && ../tb_ring restore ../tb.state && ../tb_ring scrub ../tb.state
+2|still60|2400|sh designs/c64_basic/sim/pixlayer/run_still.sh
+2|pixlayer|2400|sh designs/c64_basic/sim/pixlayer/run.sh
+1|ddr2_cal|1200|sh designs/ddr2_test/sim/run.sh cal
+1|ddr2_arb|900|sh designs/ddr2_test/sim/run.sh arb
+1|ddr2_refresh|1200|sh designs/ddr2_test/sim/run.sh refresh
+1|ddr2_ctrl|900|sh designs/ddr2_test/sim/run.sh ctrl
+1|cal_equiv|900|sh designs/ddr2_test/sim/run.sh equiv
+2|ddr2_traffic|3000|sh designs/ddr2_test/sim/run.sh traffic
+2|ddr2_test|3000|sh designs/ddr2_test/sim/run.sh test
+2|redip_new|600|sh designs/c64_basic/sim/redip/run_new.sh

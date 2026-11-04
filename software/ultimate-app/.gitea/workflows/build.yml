@@ -1,0 +1,180 @@
+name: Firmware
+
+on:
+  push:
+    # Nothing here reaches the firmware, the apps or the tests, so a push
+    # that only touches these does not need a runner. workflow_dispatch still
+    # builds anything on demand.
+    #
+    # A path filter cannot look INSIDE a file: a commit that only rewrites a
+    # comment in software/**.cc still looks like a code change and starts all
+    # three jobs (u64ii alone is about 40 minutes on the NAS, and a waiting run
+    # cannot be cancelled with an API token). Such a commit carries a skip
+    # marker in its message instead - this Gitea (1.27.3) honours [skip ci],
+    # [ci skip], [no ci], [skip actions] and [actions skip] in the head commit
+    # of a push.
+    #
+    # html/ is deliberately NOT here: target/u64ii/riscv/update/Makefile reads
+    # index.html into the update image.
+    paths-ignore:
+      - '.gitea/**'          # the CI definition itself
+      - '.github/**'         # upstream's GitHub workflows, never run here
+      - 'doc/**'
+      - '**.md'
+      - '.clang-format'      # editor and IDE files
+      - '.dir-locals.el'
+      - '.project'
+      - '.gitignore'
+      - 'AUTHORS.txt'        # prose at the root: no Makefile, script or
+      - 'LICENSE.txt'        # workflow reads any of these five
+      - 'README.txt'
+      - 'changes.txt'
+      - 'release_notes.txt'
+  workflow_dispatch:
+
+# The jobs run INSIDE the build image, not in docker:cli with a nested
+# `docker run`. That first attempt failed in a way worth recording: the job
+# container talks to the host's Docker, so `-v "$PWD:/project"` is resolved
+# against the host, while the checkout lives in a volume act_runner created for
+# the job. The build container came up with an empty /project and make reported
+# "No rule to make target 'sw_clean'".
+#
+# Two consequences of running in the image:
+#  * git, bash and python are already there — no `apk add`.
+#  * Actions replaces the image's entrypoint, so ESP-IDF is not sourced for us.
+#    Each build step sources export.sh itself; without it idf.py is missing and
+#    the ESP32 part of the build fails.
+#
+# The repository is private, so the clone authenticates with the token Actions
+# provides. act_runner 0.6.1 panics in its reporter past roughly 45 minutes, so
+# the timeouts stay under that.
+
+# ONE JOB ON PURPOSE (Alex, 2026-11-04). This fork exists for the TRX64
+# Ultimate, and that machine is the C64 Ultimate II: target u64ii/riscv. What
+# used to stand here as well:
+#
+#  * `u64` (Nios II), Gideon's older Ultimate 64. Not a target of ours, and it
+#    built shared sources for hardware that has neither our IO block nor our
+#    debug block, so our own code kept breaking its link - twice in one day on
+#    2026-11-04. It was a canary for rebasing onto Gideon, and that is not worth
+#    a red light on every push.
+#  * `bundle`, a zip of what both jobs published. Nothing in our release comes
+#    from here: the TRX64-Ultimate pipeline builds the application itself from
+#    the submodule commit it pins (TRX64-Ultimate docs/specs/T31-ci-pipeline.md).
+#
+# Both are gone. `make u64` and the bundle still work by hand for anyone who
+# wants them; nothing in the repository was removed.
+
+jobs:
+
+  # Builds the firmware and the .u2a apps and tests them: the OpenAPI checks,
+  # then every e2e suite that runs against ue2emu (build/ci_emulator_suites.sh).
+  # u64-e2e-env:ci is u64-build-env:ci plus ue2emu, see build/Dockerfile.e2e.
+  u64ii:
+    name: U64-II / C64 Ultimate (RISC-V) + emulator tests
+    runs-on: dockerbuild
+    container:
+      image: u64-e2e-env:ci
+      volumes:
+        - /share/Container/1541ultimate-ci/ccache:/ccache
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          cd src
+          git submodule update --init --recursive --jobs 1
+          git log --oneline -1
+
+      - name: Build
+        env:
+          CCACHE_DIR: /ccache
+          CCACHE_MAXSIZE: 5G
+          IDF_CCACHE_ENABLE: '1'
+        run: |
+          set -eu
+          mkdir -p /ccache /tmp/ccache-shim
+          for t in nios2-elf-gcc nios2-elf-g++ nios2-elf-c++ \
+                   riscv32-unknown-elf-gcc riscv32-unknown-elf-g++ riscv32-unknown-elf-c++; do
+            real="$(command -v "$t" || true)"
+            [ -n "$real" ] || continue
+            printf '#!/bin/sh\nexec ccache %s "$@"\n' "$real" > "/tmp/ccache-shim/$t"
+            chmod +x "/tmp/ccache-shim/$t"
+          done
+          . /opt/esp/esp-idf/export.sh >/dev/null
+          export PATH="/tmp/ccache-shim:$PATH"
+          ccache --zero-stats >/dev/null 2>&1 || true
+          cd src
+          make u64ii
+
+      - name: Build the apps
+        run: |
+          set -eu
+          . /opt/esp/esp-idf/export.sh >/dev/null
+          cd src
+          for mk in apps/*/Makefile software/appsdk/samples/*/Makefile; do
+            dir="$(dirname "$mk")"
+            echo "=== $dir"
+            make -C "$dir" clean >/dev/null
+            make -C "$dir"
+          done
+
+      - name: OpenAPI checks
+        run: |
+          set -eu
+          cd src
+          make openapi_test openapi_check
+
+      - name: Emulator suites
+        run: |
+          set -eu
+          cd src
+          "$U64_EMU" --version
+          build/ci_emulator_suites.sh
+
+      - name: Publish the outputs
+        env:
+          TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: |
+          set -eu
+          cd src
+          # Generic package 1541ultimate-fw in the Gitea registry, version
+          # <branch>-<8 digit commit>, and <branch>-latest replaced each time.
+          # build/fetch_ci.sh reads them back.
+          branch="$(printf '%s' "$GITHUB_REF_NAME" | tr '/' '_')"
+          commit="$(git rev-parse --short=8 HEAD)"
+          api="$GITHUB_SERVER_URL/api/packages/${GITHUB_REPOSITORY_OWNER}/generic/1541ultimate-fw"
+          # File names only: the package holds the files side by side.
+          for f in update.ue2 update.cfw apps/*/*.u2a software/appsdk/samples/*/*.u2a; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")")
+          done > SHA256SUMS.u64ii
+          for version in "$branch-$commit" "$branch-latest"; do
+            for f in update.ue2 update.cfw apps/*/*.u2a software/appsdk/samples/*/*.u2a SHA256SUMS.u64ii; do
+              # A file cannot be replaced in place, so drop the old one first.
+              curl -s -o /dev/null -X DELETE -H "Authorization: token $TOKEN" \
+                "$api/$version/$(basename "$f")" || true
+              curl -sf -X PUT -H "Authorization: token $TOKEN" \
+                --upload-file "$f" "$api/$version/$(basename "$f")"
+            done
+            echo "published $version"
+          done
+
+      - name: Report what came out
+        if: always()
+        run: |
+          set -eu
+          cd src
+          ls -l update.ue2 update.cfw
+          sha256sum update.ue2 update.cfw
+          ls -l u64ii
+          ls -l apps/*/*.u2a software/appsdk/samples/*/*.u2a
+          echo "version: $(git describe --tags --always)"
+          CCACHE_DIR=/ccache ccache --show-stats | head -8

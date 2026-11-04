@@ -1,0 +1,103 @@
+name: Release
+
+# The tester release (T49, docs/specs/T49-update-packages.md "Release pipeline"): updater
+# package (.cfw/.ue2), our apps (.u2a), RELEASE_NOTES.md and SHA256SUMS in one zip, published
+# as a Gitea Release and as the generic package trx64-release/<id>.
+#
+#   resolve  the commit of the ref; does its CI package (trx64-ultimate/<branch>-<8 hex>) exist?
+#            Yes: it is reused and the three stages below skip themselves (ci/lib.sh
+#            release_reuse_skip, a file in the run's hand-over directory, no job-level `if:`).
+#            No: the stages build it, the same ones the push pipeline runs (workflow_call).
+#   release  ci/release.sh build
+#
+# Its own concurrency group: it does not queue behind or in front of the `gateware` pipelines;
+# the heavy stages still take the machine's heavy lock (ci/lib.sh heavy_lock).
+# Dispatch: the branch you pick in the dialog, and `ref` (default main) = what is released. If
+# `ref` is not the picked branch, its CI package must exist already (the stages only build the
+# picked branch). A tag v* releases that tag; the push pipeline runs for it as well.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag to release (its CI package is reused when it exists)'
+        type: string
+        default: main
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: u64-build-env:ci
+      options: --init
+      volumes:
+        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+          REL_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${REL_REF:-${GITHUB_REF_NAME}}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      - name: Resolve
+        env:
+          REL_REF: ${{ github.event.inputs.ref }}
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: src/ci/release.sh resolve
+  app:
+    needs: resolve
+    uses: ./.gitea/workflows/app.yml
+    secrets: inherit
+  bit-c64u:
+    needs: app
+    uses: ./.gitea/workflows/bitstream.yml
+    with:
+      part: 50t
+    secrets: inherit
+  package:
+    needs: [app, bit-c64u]
+    uses: ./.gitea/workflows/package.yml
+    secrets: inherit
+  release:
+    needs: package
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: u64-build-env:ci
+      options: --init
+      volumes:
+        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source (whole history, for the notes)
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+          REL_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --branch "${REL_REF:-${GITHUB_REF_NAME}}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      - name: Release
+        env:
+          REL_REF: ${{ github.event.inputs.ref }}
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+          REL_TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: src/ci/release.sh build

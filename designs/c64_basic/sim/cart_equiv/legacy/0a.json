@@ -1,0 +1,48 @@
+{
+ "cart_type": "0x0A",
+ "name": "C64GS (legacy model)",
+ "regs": {
+  "R0": 0,
+  "R1": 0
+ },
+ "rules": [
+  {
+   "area": "IO1",
+   "mask": "0x00",
+   "on": "WRITE",
+   "target": "R0",
+   "src": "ADDR"
+  },
+  {
+   "area": "IO1",
+   "mask": "0x00",
+   "on": "READ",
+   "target": "R0",
+   "src": "CONST",
+   "value": 0
+  }
+ ],
+ "io1": {
+  "read": "REG",
+  "write": [
+   "RULES"
+  ]
+ },
+ "io2": {
+  "read": "RAM",
+  "write": []
+ },
+ "bank": [
+  {
+   "reg": "R0",
+   "width": 6
+  }
+ ],
+ "table": [
+  {
+   "exrom": 0,
+   "game": 1
+  }
+ ],
+ "layout": "L8"
+}
