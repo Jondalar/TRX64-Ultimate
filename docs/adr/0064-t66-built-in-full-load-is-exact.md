@@ -62,6 +62,21 @@ it is dropped, and it goes into the spec's [T66](../specs/T20-delta-ring.md#t66)
 - Board tests: a file written on the board, loaded again, must run on; a TRX64 file must load coarse;
   both go on the pending list.
 
+**As built, 2026-11-05** (every part, app branch `t66-app`, CI 244; the detail is in
+[T66](../specs/T20-delta-ring.md#t66)). Three things the decision could not foresee, each settled by
+what the hardware can do rather than by preference:
+
+- A file from TRX64 cannot bring the CPU's instruction sequencer, so the chip block is built on top
+  of a **base block from this machine's newest ring frame**. Every frame snap sits in the same place
+  (the opcode fetch cycle), so that state belongs to the machine, not to the file - but a coarse load
+  therefore needs a running ring, and says so when there is none.
+- `keyboard` / `joystick` / `paddles` are not written at all: the input sampler is not in the built
+  capture table, and the physical matrix says what is held *now*, which is not what was held at a
+  frame three seconds back. They are a gateware question, not a firmware one.
+- Drive A's node is **`trx64Drive`**, not TRX64's `drive1541`: that one is a set of VICE modules whose
+  layout cannot be checked against anything on this machine. The same holds for the inner field names
+  of `iec`. Both wait for the cross-check with the TRX64 session (T20 §13.3).
+
 ## Links
 
 - [ADR-0030](0030-timewarp-dump-and-trace-export-out-of-m1.md)

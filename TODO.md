@@ -100,7 +100,7 @@ ring, Timewarp, monitor and SID sockets, with Gideon's app until the generic cor
 | T55 | 2 | ✅ | Monitor extras (from T21) | Done 2026-10-09 (script + Alex at the keyboard); counters still decimal (question); full 1541 VIAs out (budget) | [T55](docs/todo/T55.md) |
 | T56 | 2 | ⏸ | Drives as in Gideon's core (mm_drive, drive B, 1571/1581) | Spec first; trial synthesis for LUT/BRAM numbers | [T56](docs/todo/T56.md) |
 | T58 | 2 | ⏸ | Tape port in our core (Datasette and tapecart) | Not built; spec first | [T58](docs/todo/T58.md) |
-| T66 | 2 | 🔨 | Timewarp ring and .c64re snapshot save/load, done properly | Built in full by [ADR-0064](docs/adr/0064-t66-built-in-full-load-is-exact.md); part 1 (exact write + load, browser, REST, menu) is in, parts 2-9 open (monitor verbs, TRX64 files, full node set, `.trxring`, trace export, drive A, tests) | [T20-delta-ring](docs/specs/T20-delta-ring.md#t66) |
+| T66 | 2 | 🔨 | Timewarp ring and .c64re snapshot save/load, done properly | all nine parts built and compiling (app CI 244); the board test is Alex's, in docs/board-tests-pending.md | [T20-delta-ring](docs/specs/T20-delta-ring.md#t66) |
 | T73 | 2 | 📅 | Internal IO devices and cartridge IO usage: spec ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | Spec first | [T73](docs/todo/T73.md) |
 | T75 | 2 | 📅 | REU register window and turbo colour RAM read as on Gideon's core | Not built | [T75](docs/todo/T75.md) |
 | T76 | 2 | 📅 | R21 (`CIA_RSTn`): what Gideon's design resets with it | Not measured | [T76](docs/todo/T76.md) |
