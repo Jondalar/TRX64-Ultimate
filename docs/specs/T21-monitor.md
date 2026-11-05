@@ -535,8 +535,8 @@ These are TRX64's file verbs. The memory half goes through the same path as `wr`
 | `load` | `load "<f>" [addr]` | PRG into RAM through RP. | FW fs, RP | 2 |
 | `save` | `save "<f>" <a1> <a2>` | a1..a2 as a PRG (`cpu` lens: what the CPU sees). | FW fs, RP | 2 |
 | `bload` / `bsave` | | Raw. | FW fs, RP | 2 |
-| `dump` | `dump <p>` | **Removed from M1 (A13), T66 in M2.** A `.c64re` snapshot: `apps/c64re`'s writer plus the CPU state (state-bus chip 1); with T20, the full chip state. P2 writes "inspectable, not resumable", as that app does today. | RP, CS, FW | 2 |
-| `undump` | `undump <p>` | **Removed from M1 (A13), T66 in M2.** (T20). | — | 5 |
+| `dump` | `dump <p>` | **Back since 2026-11-05 (T66 part 2, [ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md)); `snapshot/dump` with it.** A `.c64re` snapshot: `apps/c64re`'s writer plus the CPU state (state-bus chip 1); with T20, the full chip state. P2 writes "inspectable, not resumable", as that app does today. | RP, CS, FW | 2 |
+| `undump` | `undump <p>` | **Back since 2026-11-05 (T66 part 2); `snapshot/undump` with it.** Loads a file this board wrote; a TRX64 file is still refused (T66 part 4). (T20 §8.2). | — | 5 |
 
 ### 4.8 Trace (Phase 4) [new hardware, TRX64 verbs]
 
@@ -546,9 +546,9 @@ These are TRX64's file verbs. The memory half goes through the same path as `wr`
 | `chis` | `chis [cyc]` / `chis <s> <e>` | CPU instruction history from the ring (PC, opcode, A X Y S P, cycle). | TR | 4 |
 | `whowrote` | `whowrote <addr> [n]` | Last n writers: PC, cycle, new value; the old value is the previous write to the same address in the ring, or `?`. A hit older than the ring prints `ring_exhausted: true` (TRX64 wording). | TR | 4 |
 | `triage` | `triage [pc]` | Causal chain: crash or wild PC → the last RTS/RTI/JMP(ind) → the stack slot it popped → `whowrote` on that slot. Forward data only, so it is inspect-only; it does not undo anything. | TR | 4 |
-| `tracering` | `tracering <s> <e> [path]` | **Removed from M1 (A13, Alex 2026-10-06; TODO T66 in M2).** Write a `.c64retrace` file (the trx64-trace format) from the ring window through `fs`. C64RE can then index and analyse it. | TR, FW fs | 4 |
+| `tracering` | `tracering <s> <e> [path]` | **Back since 2026-11-05 (T66 part 7); `trace/build_from_ring` and the ABI call `trace_writes` with it.** Write a `.c64retrace` file (the trx64-trace format) from the ring window through `fs`. C64RE can then index and analyse it. | TR, FW fs | 4 |
 | `revdepth` | `revdepth` | Reports the trace ring's depth in cycles and seconds. Setting it = `TRACE_SIZE` (it discards the ring). | TR | 4 |
-| `map`, `taint`, `swimlane`, `traceindex`, `tracedb` | | Not available here: they are analyses over a trace on the host. In M1 there is no export of a trace window to the host (`tracering` removed, A13; TODO T66). (TRX64 864 §3 "defaulted services"). | — | — |
+| `map`, `taint`, `swimlane`, `traceindex`, `tracedb` | | Not available here: they are analyses over a trace on the host. The export of a trace window is back since 2026-11-05 (`tracering`, T66 part 7): run these over the exported file in C64RE. (TRX64 864 §3 "defaulted services"). | — | — |
 
 ### 4.9 Session and help
 
@@ -598,9 +598,9 @@ count, so consecutive entries are always one frame apart. trxmon's reported cycl
 | `rewind`, `transport/status` | TRX64's status line and object (`mode` LIVE/REPLAY/CUT/STEP, `frameIndex`, `cursor`, `secondsBehind`, `range`). |
 | `mark`/`marks`/`unmark`, `mark/set|list|drop` | names on entries (32), kept in the app; **not pinned**: a mark goes when its frame leaves the ring (keyframe slots, T20 §4.5, not built). |
 | `checkpoint/list|restore|capture` | entries with TRX64's ids `cp_<frame>_<seq>` (frame = ring cycles / 19,656, as `.c64rering` writes them); `list` caps at 400 with a stride; `capture` returns the entry the machine is in (every frame start is captured anyway); `restore {then}` lands. `pin`/`unpin` answer -32001 (no slots), `clear` -32601. |
-| **Removed from M1 (A13; T66 in M2):** `ringdump <p> [s] [stride]`, `ringbuffer/dump` | `trx_c64rering_dump` (T20 §10.1), now with TRX64 0.12.2's `turbo` node in the reset state. |
-| **Removed from M1 (A13; T66 in M2):** `ringload <p>`, `ringbuffer/restore`, `undump`, `snapshot/undump` | `trx_c64re_load`, which now also takes the current entry of a `.c64rering` written by this board; the machine runs from it and the ring starts over (the hardware ring cannot be refilled from a file). |
-| **Removed from M1 (A13; T66 in M2):** `dump <p>`, `snapshot/dump` | `.c64re` of the frame start the machine is in (not the cycle it stands on). |
+| **Back since 2026-11-05 (T66 part 2):** `ringdump <p> [s] [stride]`, `ringbuffer/dump` | `trx_c64rering_dump` (T20 §10.1), now with TRX64 0.12.2's `turbo` node in the reset state. |
+| **Back since 2026-11-05 (T66 part 2):** `ringload <p>`, `ringbuffer/restore`, `undump`, `snapshot/undump` | `trx_c64re_load`, which now also takes the current entry of a `.c64rering` written by this board; the machine runs from it and the ring starts over (the hardware ring cannot be refilled from a file). |
+| **Back since 2026-11-05 (T66 part 2):** `dump <p>`, `snapshot/dump` | `.c64re` of the frame start the machine is in (not the cycle it stands on). |
 | `play`, `cadence`, `window`, `rawframe`, `diff`, `cdiff`, `transport/play back` | not available (no paced replay or thumbnails; the cadence is one per frame). |
 
 Limits: a land is as exact as a T20 restore (§16.6 there): the VIC's internals, the SID, the
@@ -650,7 +650,7 @@ for stream 3 (T20 §5.1, ARCH §6.1); stream 0's 16 MB covers the writes.
 
 #### 4.11.1 The trace former (P4), design 2026-10-04 (branch `t21-p4`)
 
-> The former, `chis`, `whowrote`, `triage`, `rstep` from the trace and the live trace RPCs stay in M1. The `.c64retrace` export (`tracering`, `trace/build_from_ring`, the ABI call `trace_writes`, now a reserved NULL slot) was removed again (A13, Alex 2026-10-06; TODO T66).
+> The former, `chis`, `whowrote`, `triage`, `rstep` from the trace and the live trace RPCs stay in M1. The `.c64retrace` export (`tracering`, `trace/build_from_ring`, the ABI call `trace_writes`) was removed by A13 on 2026-10-06 and is back since 2026-11-05 (T66 part 7, [ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md)); the ABI slot holds the function again, at the offset the reserved NULL kept.
 
 **What is recorded.** One record per instruction the CPU starts, at the edge that ends its
 opcode fetch (the IB of `trx_dbg.v`: sync, RDY, CPU on the bus, no interrupt decided). An
