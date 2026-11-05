@@ -642,6 +642,46 @@ void hw_ring_commit(void)
     }
 }
 
+const char *hw_ring_dump(const char *path, int index, uint32_t *bytes)
+{
+    (void)index;
+    snprintf(F.ring_path, sizeof(F.ring_path), "%s", path);
+    *bytes = 1234;
+    return 0;
+}
+
+const char *hw_ring_save(const char *path, int seconds, int stride, uint32_t *bytes, int *entries)
+{
+    snprintf(F.ring_path, sizeof(F.ring_path), "%s", path);
+    *bytes = 99999;
+    *entries = seconds * 50 / stride;
+    return 0;
+}
+
+const char *hw_ring_save_native(const char *path, uint32_t *bytes)
+{
+    snprintf(F.ring_path, sizeof(F.ring_path), "%s", path);
+    F.ring_native = 1;
+    if (bytes) {
+        *bytes = 4242424;
+    }
+    return 0;
+}
+
+const char *hw_ring_load(const char *path)
+{
+    snprintf(F.ring_path, sizeof(F.ring_path), "%s", path);
+    F.running = 1;
+    F.shut = 0;
+    return 0;
+}
+
+const char *hw_ring_load_entry(const char *path, const char *entry)
+{
+    snprintf(F.ring_entry, sizeof(F.ring_entry), "%s", entry ? entry : "");
+    return hw_ring_load(path);
+}
+
 /* The video mode */
 void hw_video(hw_video_t *v)
 {
@@ -714,6 +754,15 @@ int hw_trace_read(uint32_t first, uint32_t n, hw_trace_rec_t *out)
     int got = 0;
     for (; (got < (int)n) && (first + (uint32_t)got < (uint32_t)F.trace_n); got++) {
         out[got] = F.trace[first + (uint32_t)got];
+    }
+    return got;
+}
+
+int hw_trace_writes(uint32_t start, uint32_t n, hw_trace_write_t *out)
+{
+    int got = 0;
+    for (; (got < (int)n) && (start + (uint32_t)got < (uint32_t)F.writes_n); got++) {
+        out[got] = F.writes[start + (uint32_t)got];
     }
     return got;
 }

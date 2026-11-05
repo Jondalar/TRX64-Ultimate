@@ -36,6 +36,8 @@
 #include "trx_cart.h"
 #include "trx_video.h"
 #include "trx_ring.h"
+#include "trx_c64re.h"
+#include "trx_trxring.h"
 #include "trx_io.h"
 #include "trx_lens_fw.h"
 #include "flash.h"
@@ -1707,6 +1709,26 @@ void C64::unfreeze()
         trx_video_menu_off();
         freezer_unmute_sids();
         trx_ring_unfreeze();
+        backupIsValid = false;
+        slim_memonly_end();
+        trx_video_freeze_leave();
+        isFrozen = false;
+        return;
+    }
+
+    // T66: a snapshot chosen in the file browser. The file replaces the
+    // machine, so the menu's backup is not put back either (the load takes the
+    // same path a rewind does, trx_c64re.cc).
+    if (trx_trxring_pending()) {
+        // a .trxring: the whole ring and the machine come back (T66 part 6)
+        trx_video_menu_off(); freezer_unmute_sids(); trx_trxring_unfreeze();
+        backupIsValid = false; slim_memonly_end(); trx_video_freeze_leave();
+        isFrozen = false; return;
+    }
+    if (trx_c64re_pending()) {
+        trx_video_menu_off();
+        freezer_unmute_sids();
+        trx_c64re_unfreeze();
         backupIsValid = false;
         slim_memonly_end();
         trx_video_freeze_leave();

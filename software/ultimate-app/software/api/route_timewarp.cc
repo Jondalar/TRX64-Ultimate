@@ -4,6 +4,8 @@
 #include "routes.h"
 #include "c64.h"
 #include "trx_ring.h"
+#include "trx_c64re.h"
+#include "trx_trxring.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -327,5 +329,151 @@ API_CALL(PUT, timewarp, scrubend, NULL, ARRAY( { {"frames", P_OPTIONAL} }))
     }
     trx_ring_unfreeze();
     resp->json->add("frames", trx_ring_count());
+    resp->json_response(HTTP_OK);
+}
+
+API_DOC(PUT, timewarp, dump,
+    TAG("Timewarp")
+    SUMMARY("Write a frame as a .c64re snapshot")
+    DESCRIPTION("Writes the machine as it was at the start of a frame the ring holds as a .c64re "
+                "file that TRX64 opens. The machine pauses for a moment while its RAM is read and "
+                "then runs on. The file also carries the board's own chip block, so loading it here "
+                "again is exact.")
+    PATH("/v1/timewarp:dump", "dumpTimewarp", "")
+    PARAM("path", "string", "File to write, for example /Usb0/a.c64re.", "", "/Usb0/game.c64re")
+    PARAM("frames", "integer", "Frames back from the newest frame.", "0", "50")
+    PARAM("index", "integer", "The frame by its index in the ring (timewarp:frame shows it), instead of frames.", "", "1200")
+    PARAM("seq", "integer", "The frame by its seq (timewarp:frame shows it; unlike the index it does not move when old frames are dropped).", "", "4481")
+    RESPONSE("200", "application/json", "ErrorResponse", "The file is written.", "")
+    RESPONSE_ERROR("404", "No frame that far back", "")
+    RESPONSE_ERROR("409", "The menu has the machine; close it first", "")
+    RESPONSE_ERROR("500", "The file could not be written", "")
+    RESPONSE_ERROR("503", "No frame ring in this bitstream", "")
+)
+API_CALL(PUT, timewarp, dump, NULL, ARRAY( { {"path", P_REQUIRED}, {"frames", P_OPTIONAL}, {"index", P_OPTIONAL}, {"seq", P_OPTIONAL} }))
+{
+    if (refuse_absent(resp) || refuse_frozen(resp)) {
+        return;
+    }
+    int idx = args.get_int("index", -1);
+    int seq = args.get_int("seq", -1);
+    if (seq >= 0) {
+        idx = trx_ring_find(seq);
+    } else if (idx < 0) {
+        idx = trx_ring_target(args.get_int("frames", 0));
+    }
+    if (idx < 0) {
+        resp->error("No frame that far back");
+        resp->json_response(HTTP_NOT_FOUND);
+        return;
+    }
+    uint32_t bytes = 0;
+    const char *err = trx_c64re_dump(args["path"], idx, &bytes);
+    if (err) {
+        resp->error(err);
+        resp->json_response(HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+    resp->json->add("bytes", (int)bytes);
+    resp->json_response(HTTP_OK);
+}
+
+API_DOC(PUT, timewarp, ringdump,
+    TAG("Timewarp")
+    SUMMARY("Write the ring as a .c64rering")
+    DESCRIPTION("Writes frames of the ring as a .c64rering file that TRX64 opens: the newest "
+                "frames over the given number of seconds, one in every stride frames, each a "
+                "complete snapshot.")
+    PATH("/v1/timewarp:ringdump", "ringdumpTimewarp", "")
+    PARAM("path", "string", "File to write, for example /Usb0/a.c64rering.", "", "/Usb0/game.c64rering")
+    PARAM("seconds", "integer", "How far back.", "10", "10")
+    PARAM("stride", "integer", "Every how many frames one entry.", "25", "25")
+    RESPONSE("200", "application/json", "ErrorResponse", "The file is written.", "")
+    RESPONSE_ERROR("404", "The ring holds no frame", "")
+    RESPONSE_ERROR("409", "The menu has the machine; close it first", "")
+    RESPONSE_ERROR("500", "The file could not be written", "")
+    RESPONSE_ERROR("503", "No frame ring in this bitstream", "")
+)
+API_CALL(PUT, timewarp, ringdump, NULL, ARRAY( { {"path", P_REQUIRED}, {"seconds", P_OPTIONAL}, {"stride", P_OPTIONAL} }))
+{
+    if (refuse_absent(resp) || refuse_frozen(resp)) {
+        return;
+    }
+    int secs = args.get_int("seconds", 10);
+    int stride = args.get_int("stride", 25);
+    uint32_t bytes = 0;
+    int entries = 0;
+    const char *err = trx_c64rering_dump(args["path"], secs, stride, &bytes, &entries);
+    if (err) {
+        resp->error(err);
+        resp->json_response(HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+    resp->json->add("bytes", (int)bytes);
+    resp->json->add("entries", entries);
+    resp->json_response(HTTP_OK);
+}
+
+API_DOC(PUT, timewarp, ringsave,
+    TAG("Timewarp")
+    SUMMARY("Write the ring itself as a .trxring")
+    DESCRIPTION("Writes the frame ring as this board holds it: the timeline with every frame's chip "
+                "block, the undo log of the frames it still reaches, and the memories at the newest "
+                "frame. Loading it with timewarp:load brings the ring back as well, so you can rewind "
+                "through the same seconds again - which a .c64re cannot do. Only this board reads it, "
+                "and only from the bitstream that wrote it. The disk image and the cartridge file are "
+                "copied next to it if they are not there already.")
+    PATH("/v1/timewarp:ringsave", "ringsaveTimewarp", "")
+    PARAM("path", "string", "File to write, for example /Usb0/a.trxring.", "", "/Usb0/game.trxring")
+    RESPONSE("200", "application/json", "ErrorResponse", "The file is written.", "")
+    RESPONSE_ERROR("404", "The ring holds no frame a restore could reach", "")
+    RESPONSE_ERROR("409", "The menu has the machine; close it first", "")
+    RESPONSE_ERROR("500", "The file could not be written", "")
+    RESPONSE_ERROR("503", "No frame ring in this bitstream", "")
+)
+API_CALL(PUT, timewarp, ringsave, NULL, ARRAY( { {"path", P_REQUIRED} }))
+{
+    if (refuse_absent(resp) || refuse_frozen(resp)) {
+        return;
+    }
+    uint32_t bytes = 0;
+    const char *err = trx_trxring_save(args["path"], &bytes, NULL, NULL);
+    if (err) {
+        resp->error(err);
+        resp->json_response(HTTP_INTERNAL_SERVER_ERROR);
+        return;
+    }
+    resp->json->add("bytes", (int)bytes);
+    resp->json_response(HTTP_OK);
+}
+
+API_DOC(PUT, timewarp, load,
+    TAG("Timewarp")
+    SUMMARY("Load a .c64re snapshot into the machine")
+    CAUTION("machine-state", "The running program is replaced and the ring starts over.")
+    DESCRIPTION("Puts the machine into the state a .c64re or .c64rering file describes and lets it "
+                "run. A file this board wrote carries its chip block and comes back exactly; a "
+                "file from TRX64 is loaded the coarse way, its chip block built from the nodes it has "
+                "(the VIC's raster position and pixel pipeline, the SID and the drive are not in it). "
+                "A .trxring brings the whole ring back, not only the machine.")
+    PATH("/v1/timewarp:load", "loadTimewarp", "")
+    PARAM("path", "string", "The .c64re, .c64rering or .trxring file.", "", "/Usb0/game.c64re")
+    PARAM("entry", "string", "Which entry of a .c64rering to run from: its id, its label, its frame number, or #N for the Nth in the file (0 = oldest). Left out, the file's own cursor. A .c64re holds one state and ignores it; a .trxring refuses it.", "", "cp_1200_7")
+    RESPONSE("200", "application/json", "ErrorResponse", "The machine runs from the file's state.", "")
+    RESPONSE_ERROR("409", "The menu has the machine; close it first", "")
+    RESPONSE_ERROR("422", "The file could not be loaded", "")
+    RESPONSE_ERROR("503", "No frame ring in this bitstream", "")
+)
+API_CALL(PUT, timewarp, load, NULL, ARRAY( { {"path", P_REQUIRED}, {"entry", P_OPTIONAL} }))
+{
+    if (refuse_absent(resp) || refuse_frozen(resp)) {
+        return;
+    }
+    const char *err = trx_c64re_load_entry(args["path"], args["entry"]);
+    if (err) {
+        resp->error(err);
+        resp->json_response(HTTP_UNPROCESSABLE_ENTITY);
+        return;
+    }
     resp->json_response(HTTP_OK);
 }

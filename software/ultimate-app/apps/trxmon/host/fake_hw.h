@@ -44,6 +44,9 @@ typedef struct
     int ring_n, ring_landed, ring_commits, ring_lands;
     int ring_reu_off; /* A08: the firmware says the REU is on: no ring */
     uint64_t ring_c0;
+    char ring_path[64]; /* the last path hw_ring_dump/save/load was given (T66) */
+    char ring_entry[40]; /* the entry hw_ring_load_entry was given (T66 part 3) */
+    int ring_native;     /* hw_ring_save_native was called (T66 part 6) */
     /* drive A */
     uint8_t dmem[65536];
     uint16_t dpc, drv_cmp;

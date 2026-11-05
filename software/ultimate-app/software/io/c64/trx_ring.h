@@ -19,8 +19,10 @@
 #define TRX_RING_H
 
 #include <stdint.h>
+#include <stddef.h>   // NULL, for the default arguments below
 
 #define TRX_BLOCK_WORDS 58   // the capture table's reset value (c64_core.v map)
+#define TRX_CART_RAM_BYTES 65536  // the cartridge RAM window in DDR2 (cart_slot.v: 0xEF0000)
 
 // One frame boundary (the snap that starts frame "seq").
 struct TrxFrame {
@@ -62,6 +64,11 @@ struct TrxTraceRec {
     uint16_t pc;
     uint16_t write_count;
     uint8_t  a, x, y, sp, p, opcode, b1, b2;
+};
+
+struct TrxWriteRec {         // TRX64's WriteRec
+    uint16_t addr;
+    uint8_t  old_value, new_value;
 };
 
 struct TrxTraceHit {         // a write of whowrote's address
@@ -116,11 +123,13 @@ uint32_t trx_ring_frame_cycles(void);
 
 // The instruction trace (stream 3). present: the bitstream has the former (CAPS2 b6) and the
 // ring runs. ctl: on 1/0 sets the trace gate, -1 asks; returns the gate or -1 when not there.
-// read: records of the history by index (0 = oldest); whowrote: newest first.
+// read: records of the history by index (0 = oldest); writes: stream 0 records by physical
+// index (a record's write_start); whowrote: newest first.
 bool trx_ring_trace_present(void);
 int  trx_ring_trace_ctl(int on);
 bool trx_ring_trace_status(TrxTraceStatus *st);
 int  trx_ring_trace_read(uint32_t first, uint32_t n, TrxTraceRec *out);
+int  trx_ring_trace_writes(uint32_t start, uint32_t n, TrxWriteRec *out);
 int  trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *exhausted, uint32_t *unresolved);
 
 // The observer log (T55): the records of the debug block's log action since the last call (see trx_ring.cc).
@@ -163,6 +172,19 @@ int  trx_ring_find(uint32_t seq);
 int  trx_ring_restore(int index, TrxRestoreStats *stats);
 const char *trx_ring_error(int code);
 
+// The state of entry "index" without touching the live machine's run: a short
+// pause to read RAM and colour RAM, then the undo applied in software.
+// ram: 65536 bytes (C64 RAM, $D800-$DBFF the RAM under the I/O), color: 1024
+// (low nibbles). cart, when it is not NULL: TRX_CART_RAM_BYTES of the
+// cartridge's RAM window, read in the same pause and undone with the rest
+// (T66 part 5; it costs a 64 KB DDR2 read, so the ring dump asks for NULL).
+// Returns 0 or a negative error.
+int  trx_ring_materialize(int index, uint8_t *ram, uint8_t *color, uint8_t *cart = NULL);
+// Many entries at once (oldest first in idx[], n of them): one pause, the
+// undo walked back from the head once. ram/color: n buffers each.
+int  trx_ring_materialize_many(const int *idx, int n, uint8_t **ram, uint8_t **color,
+                               uint8_t **carts = NULL);
+
 // The freeze menu's deferred rewind: the menu chooses an entry, the restore
 // happens when the menu closes (C64::unfreeze() asks).
 void trx_ring_set_pending(int index);
@@ -195,6 +217,59 @@ uint32_t trx_ring_landed(void);
 // An entry a land or restore can go to (a whole block, the logs reach it).
 bool trx_ring_reachable(int index);
 
+// The memories a loaded state brings with it (T66). ram and col are always
+// there; the two cartridge buffers only when the file carries them, and they go
+// into DDR2 while the machine stands, before it is let go.
+struct TrxLoadMem {
+    const uint8_t *ram;      // 65536 (C64 RAM, $D800-$DBFF the RAM under the I/O)
+    const uint8_t *col;      // 1024, low nibbles
+    const uint8_t *cart;     // TRX_CART_RAM_BYTES of cartridge RAM, or NULL
+    const uint8_t *rom;      // the cartridge ROM/flash window, or NULL
+    uint32_t       rom_len;  // its length (a multiple of 16 KB, the bank size)
+};
+
+// Loads a machine state that is not in the ring (a .c64re with our chip
+// block): the memories and the block put in as a restore puts a ring entry,
+// then the ring restarts.
+int  trx_ring_load_state(const TrxLoadMem *mem, const uint32_t *w, uint16_t x);
+
+// ---- the native ring copy (.trxring, T20 §10.2, T66 part 6) ---------------------
+// The file is a raw copy of the three log areas as far as the timeline still
+// reaches them, so the ring itself comes back and not only the machine.
+//
+// Why a saved ring can be put back although the engine's record counters are
+// read-only (trx_engine.v LOG_CNT: R, and only LOG_CTRL b8 sets them to 0):
+// every count is rebased on the way in so that the newest entry's counts are
+// 0, which is what the counters hold after that restart. A record's place in
+// its area is (count * record size) & (size - 1), and 2^28 records are a whole
+// number of area passes for all three areas, so the restored records land at
+// the top of each area, ending just before offset 0 - exactly where the
+// engine, writing forward from 0, will overwrite them oldest first.
+uint32_t trx_ring_area_size(int s);     // bytes of area s (0, 1, 2)
+uint32_t trx_ring_rec_size(int s);      // bytes per record of area s
+// len bytes at byte offset off of area s, through the engine's mover; off and
+// len are multiples of 16 and off + len <= size.
+void trx_ring_area_read(int s, uint32_t off, void *dst, uint32_t len);
+void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len);
+// The stream 2 record the parse reads next: the newest entry's marker is
+// before it, so the save rebases the stream 2 counts on this one.
+uint32_t trx_ring_stream2_pos(void);
+
+// Puts a saved ring back. ents are the timeline entries oldest first, every
+// count already rebased as above. areas(ctx) is called with the log off and
+// the counters at 0 and has to write the records back with
+// trx_ring_area_write(); it returns 0 or a negative error of its own, which is
+// handed back. Then the newest entry's state goes into the machine (mem as
+// trx_ring_load_state wants it) and the log runs on from there, timeline kept.
+typedef int (*trx_area_fn)(void *ctx);
+int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_area_fn areas, void *ctx);
+
+// The turbo state the next trx_ring_load_state puts in with it (state bus chip 0 word 1, T29 §12.7:
+// {hold[22:8] b31:17, $D031 b16:9, $D030 bit 0 b8, enable word b7:5, PREFER bit 7 b4, index b3:0});
+// used once. A restore of a ring entry keeps the machine's current turbo state: the ring is
+// recorded at 1 MHz only and does not carry it.
+void trx_ring_set_turbo(uint32_t pack);
+
 #else
 
 // Other products: no frame ring (the REST verbs answer 503).
@@ -210,6 +285,7 @@ static inline bool trx_ring_trace_present(void) { return false; }
 static inline int  trx_ring_trace_ctl(int) { return -1; }
 static inline bool trx_ring_trace_status(TrxTraceStatus *st) { st->present = false; return false; }
 static inline int  trx_ring_trace_read(uint32_t, uint32_t, TrxTraceRec *) { return 0; }
+static inline int  trx_ring_trace_writes(uint32_t, uint32_t, TrxWriteRec *) { return 0; }
 static inline int  trx_ring_trace_whowrote(uint16_t, int, TrxTraceHit *, bool *e, uint32_t *u) { *e = true; *u = 0; return 0; }
 static inline void trx_ring_stop(void) { }
 static inline void trx_ring_status(TrxRingStatus *st) { st->present = false; }
@@ -218,6 +294,9 @@ static inline bool trx_ring_frame(int, TrxFrame *) { return false; }
 static inline int  trx_ring_target(int) { return -1; }
 static inline int  trx_ring_find(uint32_t) { return -1; }
 static inline int  trx_ring_restore(int, TrxRestoreStats *) { return -1; }
+static inline int  trx_ring_materialize(int, uint8_t *, uint8_t *, uint8_t * = NULL) { return -1; }
+static inline int  trx_ring_materialize_many(const int *, int, uint8_t **, uint8_t **, uint8_t ** = NULL)
+{ return -1; }
 static inline int  trx_ring_scrub_show(int, TrxRestoreStats *) { return -1; }
 static inline void trx_ring_set_pending(int) { }
 static inline const char *trx_ring_error(int) { return "no frame ring in this bitstream"; }
@@ -228,6 +307,17 @@ static inline void trx_ring_commit(void) { }
 static inline uint32_t trx_ring_landed(void) { return 0; }
 static inline bool trx_ring_reachable(int) { return false; }
 static inline void trx_ring_unfreeze(void) { }
+struct TrxLoadMem;
+static inline int  trx_ring_load_state(const TrxLoadMem *, const uint32_t *, uint16_t) { return -1; }
+static inline uint32_t trx_ring_area_size(int) { return 0; }
+static inline uint32_t trx_ring_rec_size(int) { return 0; }
+static inline void trx_ring_area_read(int, uint32_t, void *, uint32_t) { }
+static inline void trx_ring_area_write(int, uint32_t, const void *, uint32_t) { }
+static inline uint32_t trx_ring_stream2_pos(void) { return 0; }
+typedef int (*trx_area_fn)(void *ctx);
+static inline int trx_ring_install(const TrxFrame *, int, const TrxLoadMem *, trx_area_fn, void *)
+{ return -1; }
+static inline void trx_ring_set_turbo(uint32_t) { }
 
 #endif
 

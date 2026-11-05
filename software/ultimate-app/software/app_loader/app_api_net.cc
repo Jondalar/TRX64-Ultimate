@@ -356,6 +356,8 @@ extern "C" uint16_t app_trx_rpc_port(void) { return s_rpc_port; }
 #include "trx_io.h"
 #include "trx_cart.h"
 #include "trx_ring.h"
+#include "trx_c64re.h"
+#include "trx_trxring.h"
 
 #define TRX_P0(off)  (TRX_IO_BASE + (off))
 #define TRX_P3(off)  (TRX_IO_BASE + 0x3000 + (off))
@@ -457,6 +459,7 @@ static int api_ring_frame(int index, u2p_ring_frame_t *f)
 static int api_ring_land(int index) { return trx_ring_land(index, NULL); }
 
 static_assert(sizeof(u2p_trace_rec_t) == sizeof(TrxTraceRec), "trace record layout");
+static_assert(sizeof(u2p_trace_write_t) == sizeof(TrxWriteRec), "write record layout");
 static_assert(sizeof(u2p_trace_hit_t) == sizeof(TrxTraceHit), "hit layout");
 
 static int api_trace_status(u2p_trace_status_t *st)
@@ -481,6 +484,11 @@ static int api_trace_read(uint32_t first, uint32_t n, u2p_trace_rec_t *out)
 }
 
 
+static int api_trace_writes(uint32_t start, uint32_t n, u2p_trace_write_t *out)
+{
+    return trx_ring_trace_writes(start, n, (TrxWriteRec *)out);
+}
+
 static int api_trace_whowrote(uint16_t addr, int limit, u2p_trace_hit_t *hits, int *exhausted)
 {
     bool ex = true;
@@ -504,6 +512,19 @@ static int api_video(u2p_video_t *v)
     return U2P_OK;
 }
 
+// The ring as a file: the firmware call writes it, the ABI hands the size back
+// (T66 part 6). No progress callback over the ABI - an app that wants one asks
+// over REST.
+static const char *api_ring_save_native(const char *path, uint32_t *bytes)
+{
+    uint32_t n = 0;
+    const char *err = trx_trxring_save(path, &n, NULL, NULL);
+    if (bytes) {
+        *bytes = err ? 0 : n;
+    }
+    return err;
+}
+
 static u2p_ring_api_t s_ring = {
     sizeof(u2p_ring_api_t),
     api_ring_status,
@@ -512,13 +533,17 @@ static u2p_ring_api_t s_ring = {
     api_ring_land,
     trx_ring_commit,
     trx_ring_error,
-    { 0, 0, 0 },
+    trx_c64re_dump,
+    trx_c64rering_dump,
+    trx_c64re_load,
     trx_ring_trace_ctl,
     api_trace_status,
     api_trace_read,
-    0,
+    api_trace_writes,
     api_trace_whowrote,
     api_log_read,
+    trx_c64re_load_entry,
+    api_ring_save_native,
 };
 
 static int api_trx_ui_request(void (*fn)(void *), void *arg)

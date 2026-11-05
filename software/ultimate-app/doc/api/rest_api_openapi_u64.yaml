@@ -3832,6 +3832,96 @@ paths:
                   value:
                     errors:
                       - 'Unrecognized stream name ''screen'''
+  '/v1/timewarp:dump':
+    put:
+      tags:
+        - Timewarp
+      summary: Write a frame as a .c64re snapshot
+      description: 'Writes the machine as it was at the start of a frame the ring holds as a .c64re file that TRX64 opens. The machine pauses for a moment while its RAM is read and then runs on. The file also carries the board''s own chip block, so loading it here again is exact.'
+      operationId: dumpTimewarp
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File to write, for example /Usb0/a.c64re.
+          schema:
+            type: string
+          example: /Usb0/game.c64re
+        - name: frames
+          in: query
+          required: false
+          description: Frames back from the newest frame.
+          schema:
+            type: integer
+            default: 0
+          example: 50
+        - name: index
+          in: query
+          required: false
+          description: 'The frame by its index in the ring (timewarp:frame shows it), instead of frames.'
+          schema:
+            type: integer
+          example: 1200
+        - name: seq
+          in: query
+          required: false
+          description: 'The frame by its seq (timewarp:frame shows it; unlike the index it does not move when old frames are dropped).'
+          schema:
+            type: integer
+          example: 4481
+      responses:
+        '200':
+          description: The file is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                No frame that far back:
+                  value:
+                    errors:
+                      - No frame that far back
+        '409':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                'The menu has the machine; close it first':
+                  value:
+                    errors:
+                      - 'The menu has the machine; close it first'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The file could not be written:
+                  value:
+                    errors:
+                      - The file could not be written
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                No frame ring in this bitstream:
+                  value:
+                    errors:
+                      - No frame ring in this bitstream
   '/v1/timewarp:frame':
     get:
       tags:
@@ -3893,6 +3983,77 @@ paths:
                   value:
                     errors:
                       - Timewarp is off while the REU is enabled (A08)
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                No frame ring in this bitstream:
+                  value:
+                    errors:
+                      - No frame ring in this bitstream
+  '/v1/timewarp:load':
+    put:
+      tags:
+        - Timewarp
+      summary: Load a .c64re snapshot into the machine
+      description: |2-
+        Puts the machine into the state a .c64re or .c64rering file describes and lets it run. A file this board wrote carries its chip block and comes back exactly; a file from TRX64 is loaded the coarse way, its chip block built from the nodes it has (the VIC's raster position and pixel pipeline, the SID and the drive are not in it). A .trxring brings the whole ring back, not only the machine.
+
+        **Caution (machine-state):** The running program is replaced and the ring starts over.
+      operationId: loadTimewarp
+      x-ultimate-caution:
+        hints:
+          - machine-state
+        note: The running program is replaced and the ring starts over.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: The .c64re, .c64rering or .trxring file.
+          schema:
+            type: string
+          example: /Usb0/game.c64re
+        - name: entry
+          in: query
+          required: false
+          description: 'Which entry of a .c64rering to run from: its id, its label, its frame number, or #N for the Nth in the file (0 = oldest). Left out, the file''s own cursor. A .c64re holds one state and ignores it; a .trxring refuses it.'
+          schema:
+            type: string
+          example: cp_1200_7
+      responses:
+        '200':
+          description: 'The machine runs from the file''s state.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                'The menu has the machine; close it first':
+                  value:
+                    errors:
+                      - 'The menu has the machine; close it first'
+        '422':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The file could not be loaded:
+                  value:
+                    errors:
+                      - The file could not be loaded
         '503':
           description: Service unavailable
           content:
@@ -3979,6 +4140,158 @@ paths:
                   value:
                     errors:
                       - 'The menu has the machine; close it first, or Timewarp is off while the REU is enabled (A08)'
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                No frame ring in this bitstream:
+                  value:
+                    errors:
+                      - No frame ring in this bitstream
+  '/v1/timewarp:ringdump':
+    put:
+      tags:
+        - Timewarp
+      summary: Write the ring as a .c64rering
+      description: 'Writes frames of the ring as a .c64rering file that TRX64 opens: the newest frames over the given number of seconds, one in every stride frames, each a complete snapshot.'
+      operationId: ringdumpTimewarp
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File to write, for example /Usb0/a.c64rering.
+          schema:
+            type: string
+          example: /Usb0/game.c64rering
+        - name: seconds
+          in: query
+          required: false
+          description: How far back.
+          schema:
+            type: integer
+            default: 10
+          example: 10
+        - name: stride
+          in: query
+          required: false
+          description: Every how many frames one entry.
+          schema:
+            type: integer
+            default: 25
+          example: 25
+      responses:
+        '200':
+          description: The file is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The ring holds no frame:
+                  value:
+                    errors:
+                      - The ring holds no frame
+        '409':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                'The menu has the machine; close it first':
+                  value:
+                    errors:
+                      - 'The menu has the machine; close it first'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The file could not be written:
+                  value:
+                    errors:
+                      - The file could not be written
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                No frame ring in this bitstream:
+                  value:
+                    errors:
+                      - No frame ring in this bitstream
+  '/v1/timewarp:ringsave':
+    put:
+      tags:
+        - Timewarp
+      summary: Write the ring itself as a .trxring
+      description: 'Writes the frame ring as this board holds it: the timeline with every frame''s chip block, the undo log of the frames it still reaches, and the memories at the newest frame. Loading it with timewarp:load brings the ring back as well, so you can rewind through the same seconds again - which a .c64re cannot do. Only this board reads it, and only from the bitstream that wrote it. The disk image and the cartridge file are copied next to it if they are not there already.'
+      operationId: ringsaveTimewarp
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File to write, for example /Usb0/a.trxring.
+          schema:
+            type: string
+          example: /Usb0/game.trxring
+      responses:
+        '200':
+          description: The file is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The ring holds no frame a restore could reach:
+                  value:
+                    errors:
+                      - The ring holds no frame a restore could reach
+        '409':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                'The menu has the machine; close it first':
+                  value:
+                    errors:
+                      - 'The menu has the machine; close it first'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                The file could not be written:
+                  value:
+                    errors:
+                      - The file could not be written
         '503':
           description: Service unavailable
           content:

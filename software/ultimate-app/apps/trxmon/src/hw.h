@@ -192,6 +192,18 @@ int hw_ring_find(uint32_t seq);
 /* The machine onto entry index, paused on its snap edge; 0 or an error text */
 const char *hw_ring_land(int index);
 void hw_ring_commit(void);
+const char *hw_ring_dump(const char *path, int index, uint32_t *bytes);
+const char *hw_ring_save(const char *path, int seconds, int stride, uint32_t *bytes, int *entries);
+const char *hw_ring_load(const char *path);
+/* The same, naming the entry of a .c64rering to take (T66 part 3): NULL or ""
+ * is the file's own cursor, else an id, a label, a frame number or "#N".
+ * Firmware that has no such call answers that it cannot choose. */
+const char *hw_ring_load_entry(const char *path, const char *entry);
+/* The ring itself as a .trxring (T20 §10.2, T66 part 6): the timeline, the
+ * undo log and the memories at the newest frame. hw_ring_load_entry() takes
+ * such a file too - the firmware sees its magic - and brings the ring back
+ * with the machine. */
+const char *hw_ring_save_native(const char *path, uint32_t *bytes);
 
 /* The video System Mode that runs now (T40; trx->video, the firmware reads it on each call): 50 Hz
  * modes are 63 x 312 = 19656 cycles at 985248 Hz, 60 Hz modes 65 x 263 = 17095 at 1022727 Hz.
@@ -246,6 +258,7 @@ int hw_trace_present(void);
 int hw_trace_status(hw_trace_status_t *st);
 int hw_trace_ctl(int on); /* 1/0 sets the gate, -1 asks; the gate, or < 0 */
 int hw_trace_read(uint32_t first, uint32_t n, hw_trace_rec_t *out);
+int hw_trace_writes(uint32_t start, uint32_t n, hw_trace_write_t *out);
 int hw_trace_whowrote(uint16_t addr, int limit, hw_trace_hit_t *hits, int *exhausted);
 
 /* The debug block's log action (watch unit action LOG, trx_dbg.v; ring->log_read, T55): a record per hit while the

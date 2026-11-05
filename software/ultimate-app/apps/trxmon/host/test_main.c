@@ -857,7 +857,7 @@ static void test_monitor(void)
     o = mon("chis");
     CHECK(has(o, "needs the instruction trace"));
     o = mon("tracedb");
-    CHECK(has(o, "a trace export to C64RE/TRX64 is not in M1"));
+    CHECK(has(o, "export the window with `tracering`"));
     o = mon("frobnicate");
     CHECK_STR(o, "unknown command: frobnicate. Try 'help'.");
     o = mon("/frob");
@@ -944,13 +944,10 @@ static void test_ring(void)
     CHECK(has(a, "\"cursor\":\"cp_2_102\"") && has(a, "\"atHead\":false"));
     a = call("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"mark/list\"}");
     CHECK(has(a, "\"name\":\"here\",\"anchorId\":\"cp_9_109\""));
-    /* M1 has no .c64re / .c64rering file verbs (A13) */
     o = mon("ringdump /Usb0/a.c64rering 4 5");
-    CHECK(has(o, "unknown command: ringdump"));
+    CHECK(has(o, "ringdump: 40 anchor(s)") && !strcmp(F.ring_path, "/Usb0/a.c64rering"));
     o = mon("dump /Usb0/b.c64re");
-    CHECK(has(o, "unknown command: dump"));
-    a = call("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"snapshot/dump\",\"params\":{\"path\":\"/Usb0/b.c64re\"}}");
-    CHECK(has(a, "-32601") && has(a, "TODO T66"));
+    CHECK(has(o, "dump: /Usb0/b.c64re  (1234 bytes)") && has(o, "Frame 3"));
     /* a run from a land cuts the frames after it */
     o = mon("g");
     CHECK(F.ring_commits == 1 && F.ring_n == 3 && F.running);
@@ -960,7 +957,42 @@ static void test_ring(void)
     o = mon("unmark here");
     CHECK(has(o, "UNMARK here"));
     o = mon("undump /Usb0/b.c64re");
-    CHECK(has(o, "unknown command: undump"));
+    CHECK(has(o, "undump: /Usb0/b.c64re loaded") && F.running);
+    /* T66 part 3: ringload takes the entry to run from; without one, the file's cursor */
+    mon("pause");
+    o = mon("ringload /Usb0/a.c64rering cp_4_104");
+    CHECK(has(o, "ringload: restored 1 anchor(s)") && !strcmp(F.ring_entry, "cp_4_104") && F.running);
+    mon("pause");
+    o = mon("ringload /Usb0/a.c64rering");
+    CHECK(has(o, "ringload: restored 1 anchor(s)") && !F.ring_entry[0] && F.running);
+    mon("pause");
+    o = mon("ringload /Usb0/a.c64rering #2");
+    CHECK(!strcmp(F.ring_entry, "#2") && F.running);
+    /* T66 part 6: the ring itself, and the word that says it came back whole */
+    mon("pause");
+    F.ring_native = 0;
+    o = mon("ringsave /Usb0/a.trxring");
+    CHECK(has(o, "ringsave: the ring \xe2\x86\x92 /Usb0/a.trxring") && has(o, "4242424 bytes") &&
+          F.ring_native == 1 && !strcmp(F.ring_path, "/Usb0/a.trxring"));
+    o = mon("ringsave");
+    CHECK(has(o, "usage: ringsave <path.trxring>"));
+    mon("pause");
+    o = mon("ringload /Usb0/a.trxring");
+    CHECK(has(o, "ringload: the ring is back from /Usb0/a.trxring") && has(o, "rewinding works again") &&
+          F.running);
+    mon("pause");
+    o = mon("ringload /Usb0/a.c64rering");
+    CHECK(has(o, "restored 1 anchor(s)") && !has(o, "the ring is back"));
+    a = call("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ringbuffer/restore\",\"params\":"
+             "{\"path\":\"/Usb0/a.c64rering\",\"entry\":\"here\"}}");
+    CHECK(has(a, "\"runState\":\"running\"") && !strcmp(F.ring_entry, "here"));
+    F.ring_native = 0;
+    a = call("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"ringbuffer/save\",\"params\":"
+             "{\"path\":\"/Usb0/b.trxring\"}}");
+    CHECK(has(a, "\"kind\":\"trxring\"") && has(a, "\"fileBytes\":4242424") && F.ring_native == 1 &&
+          !strcmp(F.ring_path, "/Usb0/b.trxring"));
+    a = call("{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ringbuffer/save\",\"params\":{}}");
+    CHECK(has(a, "path required"));
     o = mon("play");
     CHECK(has(o, "not available on this host"));
     F.ring_n = 0;
@@ -1127,7 +1159,7 @@ static void test_lens(void)
     F.session = 0;
 }
 
-/* ---- the instruction trace (T21 §4.11): chis, whowrote, triage, rstep from the trace --------- */
+/* ---- the instruction trace (T21 §4.11): chis, whowrote, triage, tracering, rstep from the trace --------- */
 
 static void test_trace(void)
 {
@@ -1227,12 +1259,38 @@ static void test_trace(void)
     CHECK(has(o, "fixed at 1 s"));
     a = call("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"runtime/set_reverse_depth\",\"params\":{\"seconds\":30}}");
     CHECK(has(a, "\"seconds\":1") && has(a, "\"discardedHistory\":false"));
-    /* M1 has no .c64retrace export (A13, TODO T66) */
+    /* tracering: a .c64retrace of the window (reported cycles), as trace/build_from_ring writes it */
+    mkdir("/tmp/trxmon_test", 0755);
     o = mon("tracering 5160000 5160030 /t.c64retrace");
-    CHECK(has(o, "unknown command: tracering"));
+    CHECK(has(o, "TRACE FROM RING") && has(o, "\"instruction_count\":4") && has(o, "\"event_count\":6"));
+    CHECK(has(o, "\"retrace_path\":\"/t.c64retrace\"") && has(o, "\"duckdb_path\":\"/t.duckdb\""));
+    CHECK(has(o, "\"run_id\":\"run_ring-dump_5160000_5160030\""));
+    {
+        FILE *f = fopen("/tmp/trxmon_test/t.c64retrace", "rb");
+        CHECK(f != NULL);
+        if (f) {
+            static uint8_t fb[4096];
+            size_t n = fread(fb, 1, sizeof(fb), f);
+            fclose(f);
+            CHECK(!memcmp(fb, "C64RETR1", 8) && fb[8] == 2 && fb[9] == 0);
+            uint32_t ml = fb[12] | (fb[13] << 8) | (fb[14] << 16) | ((uint32_t)fb[15] << 24);
+            CHECK(n == 16u + ml + 4 * 19 + 2 * 16);
+            const uint8_t *e = fb + 16 + ml;
+            double cyc;
+            memcpy(&cyc, e + 1, 8);
+            /* CPU_STEP: op 0x10, cycle f64, pc, opcode, a x y sp p, b1 b2 */
+            CHECK(e[0] == 0x10 && cyc == 5160000.0 && e[9] == 0xF0 && e[10] == 0xC2 && e[11] == 0xA9);
+            CHECK(e[12] == 1 && e[13] == 2 && e[14] == 3 && e[15] == 0xF6 && e[16] == 0x24 && e[17] == 1 && e[18] == 0);
+            /* RAM_WRITE: op 0x11, cycle, addr $01F5, new $34, pc, access (write, has old), old $12 */
+            const uint8_t *w = e + 19;
+            CHECK(w[0] == 0x11 && w[9] == 0xF5 && w[10] == 0x01 && w[11] == 0x34 && w[12] == 0xF0 && w[13] == 0xC2 &&
+                  w[14] == 0x81 && w[15] == 0x12);
+        }
+    }
     a = call("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"trace/build_from_ring\",\"params\":{\"cycle_start\":5160030,"
              "\"cycle_end\":5159000,\"output_path\":\"/u.c64retrace\"}}");
-    CHECK(has(a, "-32601") && has(a, "TODO T66"));
+    CHECK(has(a, "\"instruction_count\":4") && has(a, "\"cycle_start\":5159000") && has(a, "\"ring_cycle_span\""));
+    CHECK(has(a, "\"clipped\":true"));
 
     /* rstep per instruction from the trace */
     F.trace_n = 0;

@@ -3,7 +3,9 @@
  *
  * TRX64 sources: chis crates/trx64-daemon/src/main.rs (format_chis_from_ring),
  * whowrote and triage crates/trx64-monitor/src/verbs.rs, the triage chain
- * crates/trx64-core/src/crash_triage.rs, revdepth verbs.rs. Differences, all from the hardware:
+ * crates/trx64-core/src/crash_triage.rs, revdepth verbs.rs, tracering
+ * main.rs build_trace_from_ring and crates/trx64-trace write_delta_entry
+ * (the .c64retrace encoding). Differences, all from the hardware:
  *  - a record holds the registers BEFORE its instruction (TRX64's history ring
  *    holds them after): chis shows the next record's, the newest the live ones;
  *  - whowrote takes old and new from the write's own record (stream 0 has both);
@@ -145,6 +147,38 @@ static int vis_len(const char *s, int n)
         }
     }
     return cols;
+}
+
+static int parse_cycle(const char *t, uint64_t *out)
+{
+    if (*t == 'c') {
+        t++;
+    }
+    uint64_t v = 0;
+    int n = 0;
+    if ((t[0] == '$') || ((t[0] == '0') && (t[1] == 'x'))) {
+        t += (t[0] == '$') ? 1 : 2;
+        for (; *t; t++, n++) {
+            int d = (*t >= '0' && *t <= '9') ? *t - '0' : (*t >= 'a' && *t <= 'f') ? *t - 'a' + 10 :
+                    (*t >= 'A' && *t <= 'F') ? *t - 'A' + 10 : -1;
+            if (d < 0) {
+                return 0;
+            }
+            v = v * 16 + (uint64_t)d;
+        }
+    } else {
+        for (; *t; t++, n++) {
+            if ((*t < '0') || (*t > '9')) {
+                return 0;
+            }
+            v = v * 10 + (uint64_t)(*t - '0');
+        }
+    }
+    if (!n) {
+        return 0;
+    }
+    *out = v;
+    return 1;
 }
 
 static int all_digits(const char *t)
@@ -1049,8 +1083,300 @@ static int verb_trace(int argc, char **argv, sbuf_t *out)
     sb_put(out, ", lost ");
     sb_dec(out, st.lost);
     if (st.gap) {
-        sb_put(out, "\n  the history has a gap (a forward land past what the replays reached): the window across it is not contiguous");
+        sb_put(out, "\n  the history has a gap (a forward land past what the replays reached): tracering/ringdump leave "
+                    "the delta ring out for a window across it");
     }
+    return MON_OK;
+}
+
+/* ---- tracering: .c64retrace (crates/trx64-trace) -------------------------------------- */
+
+static uint64_t f64_bits(uint64_t v)
+{
+    if (!v) {
+        return 0;
+    }
+    int e = 63;
+    while (!((v >> e) & 1)) {
+        e--;
+    }
+    uint64_t mant = e > 52 ? v >> (e - 52) : v << (52 - e);
+    mant &= ((uint64_t)1 << 52) - 1;
+    return ((uint64_t)(e + 1023) << 52) | mant;
+}
+
+static uint8_t fbuf[1024];
+static int flen;
+static void *fh;
+static int ferr;
+
+static void f_flush(void)
+{
+    if (flen && fh && (plat_fwrite(fbuf, flen, fh) != flen)) {
+        ferr = 1;
+    }
+    flen = 0;
+}
+
+static void f_put(const void *p, int n)
+{
+    const uint8_t *s = (const uint8_t *)p;
+    while (n > 0) {
+        int c = (int)sizeof(fbuf) - flen;
+        if (c > n) {
+            c = n;
+        }
+        memcpy(fbuf + flen, s, (size_t)c);
+        flen += c;
+        s += c;
+        n -= c;
+        if (flen == (int)sizeof(fbuf)) {
+            f_flush();
+        }
+    }
+}
+
+static void f_u8(uint8_t v) { f_put(&v, 1); }
+
+static void f_u16(uint16_t v)
+{
+    uint8_t b[2] = { (uint8_t)v, (uint8_t)(v >> 8) };
+    f_put(b, 2);
+}
+
+static void f_u32(uint32_t v)
+{
+    uint8_t b[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
+    f_put(b, 4);
+}
+
+static void f_f64(uint64_t cycle)
+{
+    uint64_t v = f64_bits(cycle);
+    uint8_t b[8];
+    for (int i = 0; i < 8; i++) {
+        b[i] = (uint8_t)(v >> (8 * i));
+    }
+    f_put(b, 8);
+}
+
+typedef struct
+{
+    char retrace[160];
+    char duckdb[168];
+    uint64_t events;
+    uint32_t instrs;
+    uint32_t bytes;
+    uint64_t lo, hi;
+    uint64_t oldest, newest; /* of the history, reported cycles */
+    int have_span, clipped;
+} export_t;
+
+static void make_paths(const char *path, export_t *x)
+{
+    int n = m_strlen(path);
+    int dot = -1;
+    for (int i = n - 1; i >= 0 && path[i] != '/'; i--) {
+        if (path[i] == '.') {
+            dot = i;
+            break;
+        }
+    }
+    int base = dot >= 0 ? dot : n;
+    sbuf_t b;
+    sb_init(&b, x->retrace, sizeof(x->retrace));
+    sb_putn(&b, path, base);
+    sb_put(&b, ".c64retrace");
+    sb_str(&b);
+    sb_init(&b, x->duckdb, sizeof(x->duckdb));
+    sb_putn(&b, path, base);
+    sb_put(&b, ".duckdb");
+    sb_str(&b);
+}
+
+/* lo/hi: reported cycles. NULL, or why not. */
+static const char *do_export(uint64_t lo, uint64_t hi, const char *path, export_t *x)
+{
+    memset(x, 0, sizeof(*x));
+    if (lo > hi) {
+        uint64_t t = lo;
+        lo = hi;
+        hi = t;
+    }
+    x->lo = lo;
+    x->hi = hi;
+    if (!hw_trace_present() || (hist_open() < 0)) {
+        return NO_TRACE;
+    }
+    hw_trace_status_t st;
+    hw_trace_status(&st);
+    int64_t k = ring_cycle_offset();
+    if (s_total) {
+        x->have_span = 1;
+        x->oldest = (uint64_t)((int64_t)st.oldest_cycle + k);
+        x->newest = (uint64_t)((int64_t)st.newest_cycle + k);
+    }
+    x->clipped = !x->have_span || (lo < x->oldest) || (hi > x->newest);
+    make_paths(path, x);
+    uint32_t i0 = lower_bound((int64_t)lo - k);
+    uint32_t i1 = lower_bound((int64_t)hi - k + 1);
+    fh = plat_fopen(x->retrace, "wb");
+    if (!fh) {
+        return "the file could not be created";
+    }
+    flen = 0;
+    ferr = 0;
+    /* header: magic, version 2, flags, the meta JSON (the shape trace/build_from_ring writes) */
+    static char meta[1200];
+    sbuf_t m;
+    sb_init(&m, meta, sizeof(meta));
+    sb_put(&m, "{\"runId\":\"run_ring-dump_");
+    sb_dec(&m, lo);
+    sb_putc(&m, '_');
+    sb_dec(&m, hi);
+    sb_put(&m, "\",\"defId\":\"ring-dump\",\"defVersion\":1,\"defName\":\"delta-ring window dump\",\"defJson\":\"{"
+               "\\\"id\\\":\\\"live-capture\\\",\\\"version\\\":1,\\\"name\\\":\\\"live session capture\\\","
+               "\\\"domains\\\":[\\\"c64-cpu\\\",\\\"memory\\\"],\\\"triggers\\\":[{\\\"kind\\\":\\\"pc-range\\\","
+               "\\\"domain\\\":\\\"c64-cpu\\\",\\\"from\\\":0,\\\"to\\\":65535},{\\\"kind\\\":\\\"mem-access\\\","
+               "\\\"access\\\":\\\"any\\\",\\\"from\\\":0,\\\"to\\\":65535}],\\\"captures\\\":[{\\\"kind\\\":"
+               "\\\"cpu-row\\\",\\\"domain\\\":\\\"c64-cpu\\\"},{\\\"kind\\\":\\\"mem-row\\\"}],\\\"retention\\\":"
+               "\\\"evidence\\\",\\\"checkpointPolicy\\\":\\\"none\\\"}\",\"domains\":[\"c64-cpu\",\"memory\"],"
+               "\"cycleStart\":");
+    sb_dec(&m, lo);
+    sb_put(&m, ",\"createdAt\":\"\"}");
+    f_put("C64RETR1", 8);
+    f_u16(2);
+    f_u16(0);
+    f_u32((uint32_t)m.len);
+    f_put(m.p, m.len);
+    uint32_t bytes = 8 + 2 + 2 + 4 + (uint32_t)m.len;
+    for (uint32_t i = i0; i < i1 && !ferr; i++) {
+        hw_trace_rec_t r;
+        if (hist_get(i, &r) < 0) {
+            break;
+        }
+        uint64_t cyc = (uint64_t)((int64_t)r.cycle + k);
+        f_u8(0x10);
+        f_f64(cyc);
+        f_u16(r.pc);
+        f_u8(r.opcode);
+        f_u8(r.a);
+        f_u8(r.x);
+        f_u8(r.y);
+        f_u8(r.sp);
+        f_u8(r.p);
+        f_u8(r.b1);
+        f_u8(r.b2);
+        bytes += 19;
+        x->events++;
+        x->instrs++;
+        uint32_t left = r.write_count, at = r.write_start;
+        while (left && !ferr) {
+            hw_trace_write_t w[32];
+            uint32_t c = left > 32 ? 32 : left;
+            int got = hw_trace_writes(at, c, w);
+            if (got <= 0) {
+                break;
+            }
+            for (int j = 0; j < got; j++) {
+                int has_old = (w[j].addr >= 0x0002) && (w[j].addr < 0xD000);
+                f_u8(0x11);
+                f_f64(cyc);
+                f_u16(w[j].addr);
+                f_u8(w[j].new_value);
+                f_u16(r.pc);
+                f_u8((uint8_t)(1 | (has_old ? 0x80 : 0)));
+                f_u8(has_old ? w[j].old_value : 0);
+                bytes += 16;
+                x->events++;
+            }
+            left -= (uint32_t)got;
+            at = (at + (uint32_t)got) & 0x0FFFFFFFu;
+        }
+    }
+    f_flush();
+    plat_fclose(fh);
+    fh = 0;
+    if (ferr) {
+        return "the file could not be written";
+    }
+    x->bytes = bytes;
+    return 0;
+}
+
+static void export_json(jw_t *w, const export_t *x)
+{
+    jw_obj(w);
+    jw_kstr(w, "retrace_path", x->retrace);
+    jw_kstr(w, "duckdb_path", x->duckdb);
+    jw_ku64(w, "event_count", x->events);
+    jw_ku64(w, "instruction_count", x->instrs);
+    jw_ku64(w, "bytes_written", x->bytes);
+    jw_ku64(w, "cycle_start", x->lo);
+    jw_ku64(w, "cycle_end", x->hi);
+    char id[64];
+    sbuf_t b;
+    sb_init(&b, id, sizeof(id));
+    sb_put(&b, "run_ring-dump_");
+    sb_dec(&b, x->lo);
+    sb_putc(&b, '_');
+    sb_dec(&b, x->hi);
+    jw_kstr(w, "run_id", sb_str(&b));
+    if (x->have_span) {
+        jw_key(w, "ring_cycle_span");
+        jw_obj(w);
+        jw_ku64(w, "oldest", x->oldest);
+        jw_ku64(w, "newest", x->newest);
+        jw_end_obj(w);
+    }
+    if (x->clipped) {
+        jw_kbool(w, "clipped", 1);
+    }
+    jw_end_obj(w);
+}
+
+const char *trace_build_json(jw_t *w, uint64_t lo, uint64_t hi, const char *path)
+{
+    static export_t x;
+    char def[64];
+    sbuf_t d;
+    if (!path || !*path) {
+        sb_init(&d, def, sizeof(def));
+        sb_put(&d, "/USB1/ring_");
+        sb_dec(&d, lo < hi ? lo : hi);
+        sb_putc(&d, '_');
+        sb_dec(&d, lo < hi ? hi : lo);
+        path = sb_str(&d);
+    }
+    const char *e = do_export(lo, hi, path, &x);
+    if (e) {
+        return e;
+    }
+    export_json(w, &x);
+    return 0;
+}
+
+static int verb_tracering(int argc, char **argv, sbuf_t *out)
+{
+    uint64_t lo, hi;
+    if ((argc < 3) || !parse_cycle(argv[1], &lo) || !parse_cycle(argv[2], &hi)) {
+        sb_put(out, "tracering <startCycle> <endCycle> [path] " EM " build a .c64retrace from the ALWAYS-ON reverse ring, "
+                    "after the fact, for a window you did not arm a trace for. The window must still be IN the ring: "
+                    "`revdepth` reports how far back it reaches, and a start older than that is not an error you can "
+                    "see, it is a trace that starts where the ring does. Cycles take $hex, 0xhex, decimal or a c-prefix.");
+        return MON_OK;
+    }
+    static char body[1600];
+    sbuf_t b;
+    sb_init(&b, body, sizeof(body));
+    jw_t w;
+    jw_init(&w, &b);
+    const char *e = trace_build_json(&w, lo, hi, argc > 3 ? argv[3] : 0);
+    if (e) {
+        return fail(out, "tracering", e);
+    }
+    sb_put(out, "TRACE FROM RING " EM " ");
+    sb_putn(out, b.p, b.len);
     return MON_OK;
 }
 
@@ -1064,6 +1390,9 @@ int trace_verb(const char *op, int argc, char **argv, sbuf_t *out)
     }
     if (m_streq(op, "triage")) {
         return verb_triage(argc, argv, out);
+    }
+    if (m_streq(op, "tracering")) {
+        return verb_tracering(argc, argv, out);
     }
     if (m_streq(op, "revdepth")) {
         return verb_revdepth(argc, argv, out);

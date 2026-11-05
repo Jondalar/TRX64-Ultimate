@@ -18,6 +18,8 @@
 
 #include "trx_ring.h"
 #include "trx_ring_reu.h"
+#include "trx_c64re.h"
+#include "trx_trxring.h"
 #include "rtc.h"
 #include "filemanager.h"
 #include "itu.h"
@@ -351,6 +353,168 @@ static SubsysResultCode_e timewarp_action(SubsysCommand *cmd)
     return SSRET_OK;
 }
 
+// ---- "Save Timewarp Ring" / "Save Timewarp Frame" (T20 §17.4, T66) -------------------
+// The last 10 s of the ring as a .c64rering, or the newest whole frame as a .c64re, in
+// <volume>/timewarp/ (first of /Usb0, /Usb1, /SD that is there). The ring save takes about
+// 11 s: a progress box, then the result. Both files carry the chip block, so the browser's
+// "Load Snapshot" puts the machine back exactly (filetype_c64re.cc).
+struct SaveBox {
+    UserInterface *ui;
+    bool shown;
+};
+
+static void save_progress(int done, int total, void *ctx)
+{
+    SaveBox *b = (SaveBox *)ctx;
+    char msg[32];
+    if (done == 0) {
+        b->ui->show_progress("Saving the ring", total);
+        b->shown = true;
+        return;
+    }
+    sprintf(msg, "Saving the ring %d / %d", done, total);
+    b->ui->update_progress(msg, 1);
+}
+
+static bool save_dir(char *dir, int n)
+{
+    static const char *volumes[] = { "/Usb0", "/Usb1", "/SD" };
+    FileManager *fm = FileManager::getFileManager();
+    for (unsigned i = 0; i < sizeof(volumes) / sizeof(volumes[0]); i++) {
+        if (!fm->is_path_valid(volumes[i])) {
+            continue;
+        }
+        snprintf(dir, n, "%s/timewarp", volumes[i]);
+        if (!fm->is_path_valid(dir)) {
+            fm->create_dir(dir);
+        }
+        if (fm->is_path_valid(dir)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The name both saves use: ring-<frame>-<date>, the clock when it was set (T20 §10.3).
+static void save_path(char *path, int n, const char *dir, const TrxFrame &newest, const char *ext)
+{
+    int y, M, D, wd, h, m, s;
+    rtc.get_time(y, M, D, wd, h, m, s);
+    if (y >= 2024) {                // a clock that was set
+        snprintf(path, n, "%s/ring-%u-%04d%02d%02d-%02d%02d%02d.%s", dir,
+                 (unsigned)(newest.cycles / trx_ring_frame_cycles()), y, M, D, h, m, s, ext);
+    } else {
+        snprintf(path, n, "%s/ring-%u-t%u.%s", dir,
+                 (unsigned)(newest.cycles / trx_ring_frame_cycles()), (unsigned)(getMsTimer() / 1000), ext);
+    }
+}
+
+// What both saves need: the ring runs and holds a frame a save can read. Returns the
+// timeline index, or -1 after it put the reason on the screen.
+static int save_target(UserInterface *ui, TrxFrame *newest, char *dir, int dirlen)
+{
+    const char *off = trx_ring_reu_refusal();   // A08: no ring while the REU is on
+    if (off) {
+        ui->popup(TRX_REU_OFF_POPUP, BUTTON_OK);
+        return -1;
+    }
+    trx_ring_poll();
+    int target = trx_ring_target(0);
+    if (target < 0 || trx_ring_count() < 2 || !trx_ring_frame(target, newest)) {
+        ui->popup("The ring holds no frame yet.", BUTTON_OK);
+        return -1;
+    }
+    if (!save_dir(dir, dirlen)) {
+        ui->popup("No USB stick or SD card to save to.", BUTTON_OK);
+        return -1;
+    }
+    return target;
+}
+
+static SubsysResultCode_e save_ring_action(SubsysCommand *cmd)
+{
+    if (!cmd->user_interface) {
+        return SSRET_NO_USER_INTERFACE;
+    }
+    UserInterface *ui = cmd->user_interface;
+    TrxFrame newest;
+    char dir[32], path[96], msg[160];
+    if (save_target(ui, &newest, dir, sizeof(dir)) < 0) {
+        return SSRET_OK;
+    }
+    save_path(path, sizeof(path), dir, newest, "c64rering");
+    uint32_t bytes = 0;
+    int entries = 0;
+    SaveBox box = { ui, false };
+    const char *err = trx_c64rering_dump_ex(path, 10, 25, &bytes, &entries, save_progress, &box);
+    if (box.shown) {
+        ui->hide_progress();
+    }
+    if (err) {
+        snprintf(msg, sizeof(msg), "Saving the ring failed: %s", err);
+    } else {
+        snprintf(msg, sizeof(msg), "%d frames, %u KB written to %s", entries, (unsigned)(bytes / 1024), path);
+    }
+    ui->popup(msg, BUTTON_OK);
+    return SSRET_OK;
+}
+
+// One frame, the newest the ring can go to: the file the browser loads back exactly.
+static SubsysResultCode_e save_frame_action(SubsysCommand *cmd)
+{
+    if (!cmd->user_interface) {
+        return SSRET_NO_USER_INTERFACE;
+    }
+    UserInterface *ui = cmd->user_interface;
+    TrxFrame newest;
+    char dir[32], path[96], msg[160];
+    int target = save_target(ui, &newest, dir, sizeof(dir));
+    if (target < 0) {
+        return SSRET_OK;
+    }
+    save_path(path, sizeof(path), dir, newest, "c64re");
+    uint32_t bytes = 0;
+    const char *err = trx_c64re_dump(path, target, &bytes);
+    if (err) {
+        snprintf(msg, sizeof(msg), "Saving the frame failed: %s", err);
+    } else {
+        snprintf(msg, sizeof(msg), "%u KB written to %s", (unsigned)(bytes / 1024), path);
+    }
+    ui->popup(msg, BUTTON_OK);
+    return SSRET_OK;
+}
+
+// The ring itself, not a picture of it: a .trxring puts the whole timeline and
+// the undo log back, so after loading one you can rewind through the same
+// seconds again (T20 §10.2, T66 part 6). It is the biggest of the three files -
+// the log's records are in it as they are.
+static SubsysResultCode_e save_native_action(SubsysCommand *cmd)
+{
+    if (!cmd->user_interface) {
+        return SSRET_NO_USER_INTERFACE;
+    }
+    UserInterface *ui = cmd->user_interface;
+    TrxFrame newest;
+    char dir[32], path[96], msg[160];
+    if (save_target(ui, &newest, dir, sizeof(dir)) < 0) {
+        return SSRET_OK;
+    }
+    save_path(path, sizeof(path), dir, newest, "trxring");
+    uint32_t bytes = 0;
+    SaveBox box = { ui, false };
+    const char *err = trx_trxring_save(path, &bytes, save_progress, &box);
+    if (box.shown) {
+        ui->hide_progress();
+    }
+    if (err) {
+        snprintf(msg, sizeof(msg), "Saving the ring failed: %s", err);
+    } else {
+        snprintf(msg, sizeof(msg), "%u KB written to %s", (unsigned)(bytes / 1024), path);
+    }
+    ui->popup(msg, BUTTON_OK);
+    return SSRET_OK;
+}
+
 class TrxTimewarpMenu : public ObjectWithMenu {
 public:
     void create_task_items(void)
@@ -360,6 +524,9 @@ public:
         }
         TaskCategory *cat = TasksCollection::getCategory("C64 Machine", SORT_ORDER_C64);
         cat->append(new Action("Timewarp", timewarp_action, 0, 0));
+        cat->append(new Action("Save Timewarp Frame", save_frame_action, 0, 0));
+        cat->append(new Action("Save Timewarp Ring", save_ring_action, 0, 0));
+        cat->append(new Action("Save Timewarp Ring (native)", save_native_action, 0, 0));
     }
 };
 

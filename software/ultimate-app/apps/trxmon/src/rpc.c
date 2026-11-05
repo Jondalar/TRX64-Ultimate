@@ -1517,6 +1517,142 @@ static void m_reverse_step(void)
     finish(Qcid);
 }
 
+static int path_param(const char *method, char *path, int cap)
+{
+    if (json_str(Q, s_tok, param("path"), path, cap) <= 0) {
+        send_error(-32602, method, ": path required");
+        return 0;
+    }
+    return 1;
+}
+
+static void m_rb_dump(void)
+{
+    char path[256];
+    if (!ring_or_error() || !path_param("ringbuffer/dump", path, sizeof(path))) {
+        return;
+    }
+    uint64_t secs = 10, stride = 25;
+    param_u64("seconds", &secs);
+    param_u64("stride", &stride);
+    rpc_poll();
+    if (M.running) {
+        mach_pause();
+    }
+    uint32_t bytes = 0;
+    int entries = 0;
+    const char *er = hw_ring_save(path, (int)secs, (int)stride, &bytes, &entries);
+    if (er) {
+        send_error(-32001, "ringbuffer/dump: ", er);
+        return;
+    }
+    begin_result();
+    jw_obj(&W);
+    jw_kstr(&W, "path", path);
+    jw_ku64(&W, "anchors", (uint64_t)entries);
+    jw_ku64(&W, "deltaEntries", 0);
+    jw_ku64(&W, "cpuHistory", 0);
+    jw_ku64(&W, "fileBytes", bytes);
+    jw_end_obj(&W);
+    finish(Qcid);
+}
+
+/* The ring itself as a .trxring (T20 §10.2, T66 part 6): ringbuffer/restore
+ * takes such a file back, and then the timeline and the undo log are there
+ * again, not only the machine. */
+static void m_rb_save(void)
+{
+    char path[256];
+    if (!ring_or_error() || !path_param("ringbuffer/save", path, sizeof(path))) {
+        return;
+    }
+    rpc_poll();
+    if (M.running) {
+        mach_pause();
+    }
+    uint32_t bytes = 0;
+    const char *er = hw_ring_save_native(path, &bytes);
+    if (er) {
+        send_error(-32001, "ringbuffer/save: ", er);
+        return;
+    }
+    begin_result();
+    jw_obj(&W);
+    jw_kstr(&W, "path", path);
+    jw_ku64(&W, "fileBytes", bytes);
+    jw_kstr(&W, "kind", "trxring");
+    jw_end_obj(&W);
+    finish(Qcid);
+}
+
+static void m_load(const char *method)
+{
+    char path[256];
+    if (!ring_or_error() || !path_param(method, path, sizeof(path))) {
+        return;
+    }
+    rpc_poll();
+    sbuf_t t;
+    sb_init(&t, s_text, sizeof(s_text));
+    char cmd[300];
+    sbuf_t c;
+    sb_init(&c, cmd, sizeof(cmd));
+    sb_put(&c, m_streq(method, "ringbuffer/restore") ? "ringload " : "undump ");
+    sb_put(&c, path);
+    /* T66 part 3: "entry" names which anchor of a .c64rering to take; without
+     * it the file's own cursor. The verb takes it as a second word. */
+    char entry[64];
+    if (json_str(Q, s_tok, param("entry"), entry, sizeof(entry)) > 0) {
+        sb_put(&c, " ");
+        sb_put(&c, entry);
+    }
+    mon_pending_t mp;
+    if (mon_exec(sb_str(&c), &t, &mp) != MON_OK) {
+        send_error(-32001, sb_str(&t), 0);
+        return;
+    }
+    begin_result();
+    jw_obj(&W);
+    jw_kstr(&W, "path", path);
+    jw_ku64(&W, "anchors", 1);
+    jw_kstr(&W, "runState", "running");
+    jw_key(&W, "message");
+    jw_strn(&W, t.p, t.len);
+    jw_end_obj(&W);
+    finish(Qcid);
+}
+
+static void m_rb_restore(void) { m_load("ringbuffer/restore"); }
+static void m_snap_undump(void) { m_load("snapshot/undump"); }
+
+static void m_snap_dump(void)
+{
+    char path[256];
+    if (!ring_or_error() || !path_param("snapshot/dump", path, sizeof(path))) {
+        return;
+    }
+    rpc_poll();
+    sbuf_t t;
+    sb_init(&t, s_text, sizeof(s_text));
+    char cmd[300];
+    sbuf_t c;
+    sb_init(&c, cmd, sizeof(cmd));
+    sb_put(&c, "dump ");
+    sb_put(&c, path);
+    mon_pending_t mp;
+    if (mon_exec(sb_str(&c), &t, &mp) != MON_OK) {
+        send_error(-32001, sb_str(&t), 0);
+        return;
+    }
+    begin_result();
+    jw_obj(&W);
+    jw_kstr(&W, "path", path);
+    jw_key(&W, "message");
+    jw_strn(&W, t.p, t.len);
+    jw_end_obj(&W);
+    finish(Qcid);
+}
+
 static void m_quit(void)
 {
     s_quit = 1;
@@ -1581,6 +1717,31 @@ static void m_set_reverse_depth(void)
     trace_reply("runtime/set_reverse_depth: ", er, &b);
 }
 
+static void m_trace_build(void)
+{
+    uint64_t lo, hi;
+    if (!param_u64("cycle_start", &lo)) {
+        send_error(-32602, "trace/build_from_ring: cycle_start required (u64)", 0);
+        return;
+    }
+    if (!param_u64("cycle_end", &hi)) {
+        send_error(-32602, "trace/build_from_ring: cycle_end required (u64)", 0);
+        return;
+    }
+    char path[200];
+    int hp = json_str(Q, s_tok, param("output_path"), path, sizeof(path)) > 0;
+    rpc_poll();
+    if (M.running) {
+        mach_pause();
+    }
+    sbuf_t b;
+    sb_init(&b, s_tr, sizeof(s_tr));
+    jw_t w;
+    jw_init(&w, &b);
+    const char *er = trace_build_json(&w, lo, hi, hp ? path : 0);
+    trace_reply("trace/build_from_ring: ", er, &b);
+}
+
 static void m_debug_run_(void) { m_debug_run(0); }
 static void m_debug_continue_(void) { m_debug_run(1); }
 
@@ -1628,6 +1789,12 @@ static const struct
     { "runtime/who_wrote", m_who_wrote },
     { "runtime/crash_triage", m_crash_triage },
     { "runtime/set_reverse_depth", m_set_reverse_depth },
+    { "trace/build_from_ring", m_trace_build },
+    { "ringbuffer/dump", m_rb_dump },
+    { "ringbuffer/restore", m_rb_restore },
+    { "ringbuffer/save", m_rb_save },
+    { "snapshot/dump", m_snap_dump },
+    { "snapshot/undump", m_snap_undump },
 };
 
 static void put_method_names(jw_t *w)
@@ -1669,14 +1836,6 @@ static void not_offered(const char *m)
             send_error(-32601, m, ": not on the C64 Ultimate yet (a T20 part that is not built)");
             return;
         }
-    }
-    if (prefix(m, "ringbuffer/") || prefix(m, "snapshot/")) {
-        send_error(-32601, m, ": the M1 firmware writes and loads no .c64re or .c64rering files (TODO T66)");
-        return;
-    }
-    if (prefix(m, "trace/build_from_ring")) {
-        send_error(-32601, m, ": the M1 firmware writes no .c64retrace files (TODO T66)");
-        return;
     }
     if (prefix(m, "trace/") || prefix(m, "debug/memory_access_map")) {
         send_error(-32601, m, ": the trace store and its analyses are host-side: an export of a window to C64RE/TRX64 comes with TODO T66");

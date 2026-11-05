@@ -68,7 +68,8 @@ const char *ring_mark_name(int i);
 int ring_mark_entry(int i, ring_entry_t *e); /* 0, or -1: its frame left the ring */
 const char *ring_mark_of(uint32_t seq);
 
-/* monitor verbs: rstep reverse rewind frame goto mark marks unmark; -1 when op is none of them */
+/* monitor verbs: rstep reverse rewind frame goto mark marks unmark ringdump
+ * ringload dump undump; -1 when op is none of them */
 int ring_verb(const char *op, int argc, char **argv, sbuf_t *out);
 
 #endif

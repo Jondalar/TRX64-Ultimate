@@ -1,6 +1,6 @@
 /*
  * trace.h — the instruction trace as the monitor's history (T21 §4.11): TRX64's
- * chis, whowrote, triage, revdepth and trace over the firmware's
+ * chis, whowrote, triage, tracering, revdepth and trace over the firmware's
  * trace records (hw_trace_*), and the same as JSON-RPC results.
  *
  * Records are the instructions of the timeline the machine is on, oldest
@@ -18,13 +18,15 @@
 /* There are records to read: the bitstream has the former and the ring runs */
 int trace_present(void);
 
-/* monitor verbs: trace chis whowrote triage revdepth; -1 when op is none of them */
+/* monitor verbs: trace chis whowrote triage tracering revdepth; -1 when op is none of them */
 int trace_verb(const char *op, int argc, char **argv, sbuf_t *out);
 
 /* JSON-RPC results (the writer is inside "result"); NULL, or why not (-32001) */
 const char *trace_who_wrote_json(jw_t *w, uint16_t addr, int limit);
 const char *trace_triage_json(jw_t *w, int have_pc, uint16_t pc);
 const char *trace_depth_json(jw_t *w);
+/* trace/build_from_ring: writes the .c64retrace and the result object */
+const char *trace_build_json(jw_t *w, uint64_t lo, uint64_t hi, const char *path);
 
 /* The record n back from the stop at ring cycle `vp` (the count after the fetch edge of the
  * instruction the machine stands at: its own record is not written yet): 0 and the record,

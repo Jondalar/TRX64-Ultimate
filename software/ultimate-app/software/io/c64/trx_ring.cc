@@ -791,6 +791,15 @@ static bool replay_cart(const uint32_t *w, uint32_t *count)
     }
 }
 
+static bool turbo_pending;
+static uint32_t turbo_pack;
+
+void trx_ring_set_turbo(uint32_t pack)
+{
+    turbo_pack = pack;
+    turbo_pending = (ioRead8(TRX_CAPS2) & TRX_CAPS2_TURBO) != 0;
+}
+
 static bool stage_and_load(const uint32_t *w)
 {
     w32(SB_STATUS, 0);
@@ -806,10 +815,17 @@ static bool stage_and_load(const uint32_t *w)
     for (int k = 0; k < 12; k++) {
         w32(SB_DATA, w[W_CIA2H + k]);
     }
+    uint32_t mask = SB_LOAD_ALL;
+    if (turbo_pending) {                // chip 0 word 1: the turbo state, loaded with the rest (bit 0)
+        w32(SB_ADDR, (0 << 7) | 1);
+        w32(SB_DATA, turbo_pack);
+        mask |= 1;
+        turbo_pending = false;
+    }
     if (r32(SB_STATUS) & SB_REFUSED) {
         return false;
     }
-    w32(SB_LOAD, SB_LOAD_ALL);
+    w32(SB_LOAD, mask);
     return true;
 }
 
@@ -841,6 +857,52 @@ const char *trx_ring_error(int code)
     case E_REU:     return TRX_REU_OFF_TEXT;
     default:        return "error";
     }
+}
+
+// ---- the native ring copy (T20 §10.2, T66 part 6) --------------------------------
+uint32_t trx_ring_area_size(int s)
+{
+    return (s >= 0 && s < 3) ? area_size[s] : 0;
+}
+
+uint32_t trx_ring_rec_size(int s)
+{
+    return (s >= 0 && s < 3) ? rec_size[s] : 0;
+}
+
+void trx_ring_area_read(int s, uint32_t off, void *dst, uint32_t len)
+{
+    if (s < 0 || s >= 3 || off + len > area_size[s]) {
+        return;
+    }
+    eng_copy(area_base[s] + off, dst, len);
+}
+
+void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len)
+{
+    if (s < 0 || s >= 3 || off + len > area_size[s]) {
+        return;
+    }
+    // the mover's COPY takes two DDR2 byte addresses, and the app's own memory
+    // is in DDR2 too: the same call the other way round
+    w32(ENG_SRC, (uint32_t)src);
+    w32(ENG_DST, area_base[s] + off);
+    w32(ENG_LEN, len);
+    w32(ENG_CMD, 1);
+    uint16_t t0 = getMsTimer();
+    while (r32(ENG_CMD) & 1) {
+        if (uint16_t(getMsTimer() - t0) > 200) {
+            printf("[RING] COPY back did not finish: %u bytes to area %d + 0x%x\n", (unsigned)len, s,
+                   (unsigned)off);
+            break;
+        }
+    }
+    __asm__ volatile("fence" ::: "memory");
+}
+
+uint32_t trx_ring_stream2_pos(void)
+{
+    return p2 & M28;
 }
 
 // ---- APPLY (T20 §17.3) -----------------------------------------------------------
@@ -1711,6 +1773,105 @@ bool trx_ring_reachable(int index)
     return ok;
 }
 
+// ---- materialize -----------------------------------------------------------------
+// idx[] oldest first. From the head's copy back: the newest target first, each
+// older one from the one after it, so the records are walked once.
+static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **cols, uint8_t **carts)
+{
+    for (int i = 0; i < n; i++) {
+        if (idx[i] < 0 || idx[i] >= tl_n || (i && idx[i] < idx[i - 1])) {
+            return E_INDEX;
+        }
+    }
+    uint8_t *ram = (uint8_t *)malloc(65536);
+    uint8_t *col = (uint8_t *)malloc(1024);
+    uint8_t *cart = carts ? (uint8_t *)malloc(TRX_CART_RAM_BYTES) : NULL;
+    if (!ram || !col || (carts && !cart)) {
+        free(ram);
+        free(col);
+        free(cart);
+        return E_MEM;
+    }
+    // a pause (anywhere): RAM through the second port, colour RAM through the
+    // freeze session (answered without a C64 cycle)
+    uint32_t gate = r32(GATE_CTRL);
+    uint32_t sh = r32(SH_CTRL) & 3;
+    bool was = (gate & GATE_HALTED) != 0;
+    if (!was) {
+        w32(SH_CTRL, 2);
+        w32(GATE_CTRL, 1);
+        C64_STOP = 1;
+        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+        C64_MODE = C64_MODE_ULTIMAX;
+    }
+    drain();
+    uint8_t memonly = C64_DMA_MEMONLY;
+    C64_DMA_MEMONLY = 1;
+    for (int a = 0; a < 65536; a++) {
+        ram[a] = C64_MEM(a);
+    }
+    C64_DMA_MEMONLY = 0;
+    for (int a = 0; a < 1024; a++) {
+        col[a] = C64_MEM(0xD800 + a) & 0x0F;
+    }
+    C64_DMA_MEMONLY = memonly;
+    if (cart) {
+        // the cartridge's RAM window in DDR2 (cart_slot.v: 0xEF0000, 64 KB),
+        // read in the same pause as the memories
+        for (int a = 0; a < TRX_CART_RAM_BYTES; a++) {
+            cart[a] = *(volatile uint8_t *)(0x0EF0000 + a);
+        }
+    }
+    // the parse may drop entries from the front: find the targets again
+    uint32_t *seqs = (uint32_t *)malloc(n * sizeof(uint32_t));
+    int *at = (int *)malloc(n * sizeof(int));
+    for (int i = 0; seqs && i < n; i++) {
+        seqs[i] = ent(idx[i]).seq;
+    }
+    parse_locked();
+    for (int i = 0; seqs && at && i < n; i++) {
+        at[i] = -1;
+        for (int j = 0; j < tl_n; j++) {
+            if (ent(j).seq == seqs[i]) {
+                at[i] = j;
+                break;
+            }
+        }
+    }
+    if (!was) {
+        C64_MODE = MODE_NORMAL;
+        C64_STOP = 0;
+        w32(GATE_CTRL, gate & 1);
+        w32(SH_CTRL, sh);
+    }
+    int err = (seqs && at) ? E_NONE : E_MEM;
+    for (int i = 0; !err && i < n; i++) {
+        if (at[i] < 0 || !reachable(ent(at[i]))) {
+            err = E_GONE;
+        }
+    }
+    int hi = tl_n;
+    for (int i = n - 1; !err && i >= 0; i--) {
+        Coll cl = { 0, 0, 0 };
+        collect(at[i], hi, true, true, &cl);
+        each(ram_tch, 65536, ram_val, [ram](int a, uint8_t v) { ram[a] = v; });
+        each(col_tch, 1024, col_val, [col](int a, uint8_t v) { col[a] = v; });
+        memcpy(rams[i], ram, 65536);
+        memcpy(cols[i], col, 1024);
+        if (cart) {
+            each(cart_tch, TRX_CART_RAM_BYTES, cart_val, [cart](int a, uint8_t v) { cart[a] = v; });
+            memcpy(carts[i], cart, TRX_CART_RAM_BYTES);
+        }
+        hi = at[i];
+    }
+    free(seqs);
+    free(at);
+    free(ram);
+    free(col);
+    free(cart);
+    return err;
+}
+
 // ---- API -------------------------------------------------------------------------
 static void start_locked(void)
 {
@@ -1973,6 +2134,21 @@ bool trx_ring_scrubbing(void)
     return scrubbing;
 }
 
+int trx_ring_materialize(int index, uint8_t *ram, uint8_t *color, uint8_t *cart)
+{
+    return trx_ring_materialize_many(&index, 1, &ram, &color, cart ? &cart : NULL);
+}
+
+int trx_ring_materialize_many(const int *idx, int n, uint8_t **ram, uint8_t **color, uint8_t **carts)
+{
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    int err = materialize_locked(idx, n, ram, color, carts);
+    unlock();
+    return err;
+}
+
 void trx_ring_set_pending(int index)
 {
     pending = index;
@@ -2012,6 +2188,141 @@ void trx_ring_unfreeze(void)
         // the machine is released either way (put_back or the early exit)
         printf("[RING] rewind from the menu failed: %s\n", trx_ring_error(err));
     }
+}
+
+struct LoadCtx {
+    const TrxLoadMem *m;
+    uint32_t bus;
+};
+
+static void load_bus(void *ctx)
+{
+    LoadCtx *c = (LoadCtx *)ctx;
+    for (int a = 0; a < 1024; a++) {
+        C64_MEM(0xD800 + a) = c->m->col[a] & 0x0F;
+    }
+    c->bus += 1024;
+    bool cart_touched = false;
+    if (c->m->cart) {
+        // the cartridge RAM window in DDR2 - the same way restore_bus puts a
+        // ring entry's back (T66 part 5)
+        for (int a = 0; a < TRX_CART_RAM_BYTES; a++) {
+            *(volatile uint8_t *)(0x0EF0000 + a) = c->m->cart[a];
+        }
+        cart_touched = true;
+    }
+    if (c->m->rom && c->m->rom_len) {
+        // the cartridge's ROM / flash image, which a rewind never puts back (the
+        // log has no flash writes): a .c64re carries it, so a snapshot of a
+        // game that programmed its own flash comes back whole (T66 part 5)
+        uint8_t *dst = C64::get_cartridge_rom_addr();
+        uint32_t len = c->m->rom_len;
+        if (len > C64::get_cartridge_max_rom()) {
+            len = C64::get_cartridge_max_rom();
+        }
+        memcpy(dst, c->m->rom, len);
+        cart_touched = true;
+    }
+    if (cart_touched) {
+        __asm__ volatile("fence" ::: "memory");
+        ioWrite8(CART_CMD, CART_INVAL);         // the cartridge drops its cached lines
+    }
+}
+
+static void load_ram(void *ctx)
+{
+    LoadCtx *c = (LoadCtx *)ctx;
+    for (int a = 0; a < 65536; a++) {
+        C64_MEM(a) = c->m->ram[a];
+    }
+}
+
+int trx_ring_load_state(const TrxLoadMem *mem, const uint32_t *w, uint16_t x)
+{
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    if (dbg_handover()) {
+        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+    }
+    if (scrubbing) {
+        scrubbing = false;          // the file replaces whatever a land or scrub held
+    }
+    Saved sv;
+    stop_machine(&sv, true);
+    drain();
+    w32(LOG_CTRL, 0);
+    w32(CAP_CTRL, 0);
+    LoadCtx c = { mem, 0 };
+    int err = put_back(w, x, sv, load_bus, load_ram, &c, &c.bus);
+    start_locked();                 // a file replaces the machine: the ring starts over
+    w32(STOP_POS, POS_RELEASE);
+    unlock();
+    return err;
+}
+
+// A saved ring back into the engine and the machine (T20 §10.2, T66 part 6).
+// The order matters: the log goes off and its counters to 0 first, because the
+// caller's area writes have to land where those counters point (trx_ring.h
+// explains the rebase), then the timeline is installed, then the newest
+// entry's state goes into the machine the way a restore puts a ring entry, and
+// only then does the log run again - without a restart, so the records that
+// were just written back stay the ring's history.
+int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_area_fn areas, void *ctx)
+{
+    if (n < 1 || n > TL_CAP) {
+        return E_INDEX;
+    }
+    if (!ents[n - 1].block) {
+        return E_NOBLOCK;
+    }
+    if (trx_ring_reu_refusal()) {
+        return E_REU;
+    }
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    if (dbg_handover()) {
+        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+    }
+    if (scrubbing) {
+        scrubbing = false;
+    }
+    Saved sv;
+    stop_machine(&sv, true);
+    drain();
+    w32(LOG_CTRL, 0);
+    w32(CAP_CTRL, 0);
+    w32(LOG_CTRL, LOG_RESTART);     // counts, positions and lost counters to 0, log still off
+    int err = areas ? areas(ctx) : 0;
+    if (!err) {
+        tl_clear();
+        for (int i = 0; i < n; i++) {
+            tl[i] = ents[i];
+        }
+        tl_first = 0;
+        tl_n = n;
+        p2 = 0;                     // the newest entry's marker is the last record written back
+        ep_reset();
+        cyc_acc = ents[n - 1].cycles;
+        cyc_last = ents[n - 1].c24;
+        cyc_have = true;
+        resyncs = 0;
+        log_rd = 0;
+        LoadCtx c = { mem, 0 };
+        err = put_back(ents[n - 1].w, ents[n - 1].x, sv, load_bus, load_ram, &c, &c.bus);
+    }
+    if (!err) {
+        w32(CAP_CTRL, 1);
+        w32(LOG_CTRL, logctl(false));   // on, without a restart: the history stays
+        log_on = true;
+    } else {
+        tl_clear();                     // nothing half-installed stays reachable
+        start_locked();
+    }
+    w32(STOP_POS, POS_RELEASE);
+    unlock();
+    return err;
 }
 
 // ---- the instruction trace (T21 §4.11) ---------------------------------------------
@@ -2315,6 +2626,37 @@ int trx_ring_log_read(uint64_t *out, int max, uint32_t *lost)
 static inline bool s0_reach(uint32_t idx, uint32_t cnt0)
 {
     return ((cnt0 - idx) & M28) <= area_size[0] / rec_size[0] - SAFETY;
+}
+
+// stream 0 records by physical index (the writes of an instruction: write_start,
+// write_count); stops at the first one the area no longer holds
+int trx_ring_trace_writes(uint32_t start, uint32_t n, TrxWriteRec *out)
+{
+    if (!trace_ready() || !n || !lock()) {
+        return 0;
+    }
+    parse_locked();
+    uint32_t got = 0;
+    while (got < n) {
+        uint32_t idx = (start + got) & M28;
+        if (!s0_reach(idx, cnt_now[0])) {
+            break;
+        }
+        uint32_t m = n - got;
+        if (m > 8000) {
+            m = 8000;
+        }
+        const uint8_t *p = fetch(0, idx, m);
+        for (uint32_t j = 0; j < m; j++) {
+            uint32_t v = rec32(p + 4 * j);
+            out[got + j].addr = uint16_t(v);
+            out[got + j].old_value = uint8_t(v >> 16);
+            out[got + j].new_value = uint8_t(v >> 24);
+        }
+        got += m;
+    }
+    unlock();
+    return (int)got;
 }
 
 // The last writers of addr in the history, newest first. *exhausted: the scan reached the

@@ -479,6 +479,43 @@ void hw_ring_commit(void)
     }
 }
 
+const char *hw_ring_dump(const char *path, int index, uint32_t *bytes)
+{
+    return ring() ? ring()->dump(path, index, bytes) : "no frame ring (the bitstream has no engine, or the firmware no ring table)";
+}
+
+const char *hw_ring_save(const char *path, int seconds, int stride, uint32_t *bytes, int *entries)
+{
+    return ring() ? ring()->save(path, seconds, stride, bytes, entries) : "no frame ring (the bitstream has no engine, or the firmware no ring table)";
+}
+
+const char *hw_ring_load(const char *path) { return ring() ? ring()->load(path) : "no frame ring (the bitstream has no engine, or the firmware no ring table)"; }
+
+const char *hw_ring_save_native(const char *path, uint32_t *bytes)
+{
+    if (!ring()) {
+        return "no frame ring (the bitstream has no engine, or the firmware no ring table)";
+    }
+    if (!U2P_HAS(ring(), save_native)) {
+        return "this firmware cannot write a .trxring (no save_native in its ring table)";
+    }
+    return ring()->save_native(path, bytes);
+}
+
+const char *hw_ring_load_entry(const char *path, const char *entry)
+{
+    if (!ring()) {
+        return "no frame ring (the bitstream has no engine, or the firmware no ring table)";
+    }
+    if (!entry || !*entry) {
+        return ring()->load(path);
+    }
+    if (!U2P_HAS(ring(), load_entry)) {
+        return "this firmware loads only the file's own cursor (no load_entry in its ring table)";
+    }
+    return ring()->load_entry(path, entry);
+}
+
 /* ---- the video mode and the instruction trace ------------------------------ */
 
 void hw_video(hw_video_t *v)
@@ -536,6 +573,11 @@ int hw_trace_ctl(int on) { return tring() ? tring()->trace_ctl(on) : -1; }
 int hw_trace_read(uint32_t first, uint32_t n, hw_trace_rec_t *out)
 {
     return tring() ? tring()->trace_read(first, n, (u2p_trace_rec_t *)out) : 0;
+}
+
+int hw_trace_writes(uint32_t start, uint32_t n, hw_trace_write_t *out)
+{
+    return tring() ? tring()->trace_writes(start, n, (u2p_trace_write_t *)out) : 0;
 }
 
 int hw_trace_whowrote(uint16_t addr, int limit, hw_trace_hit_t *hits, int *exhausted)
