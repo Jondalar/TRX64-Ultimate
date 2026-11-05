@@ -1,6 +1,6 @@
 # T20 — Delta ring, dump, restore
 
-**Removed from M1 (A13, Alex 2026-10-06):** nothing in this document about `.c64re` or `.c64rering` files is built in M1: §9 (dump), §9.4 and §10 (load, ring save), §17.4 ("Save Timewarp Ring"), the REST routes `timewarp:dump/ringdump/load`, the monitor verbs `dump/undump/ringdump/ringload`, the ABI file slots (`u2p_ring_api_t` dump/save/load, now reserved NULL) and `trx_c64re.cc` are gone from the code (app commits on a13-no-dump-app). **The `apps/c64re` app is back since 2026-10-31** ([ADR-0061](../adr/0061-c64re-snapshot-app-back-in-the-release.md)): it writes the `.c64re` container itself over the app ABI and needs none of the removed firmware code, so it ships in the release again. Everything else in this paragraph stays removed. The sections stay as the design for the M2 rebuild (TODO T66); numbers measured with that code (§16.3) are history. M1 Timewarp is rewind and scrub.
+**The file sections are being built again (T66, [ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md), Alex 2026-11-05).** A13 had taken all of this out of M1 on 2026-10-06 ([ADR-0030](../adr/0030-timewarp-dump-and-trace-export-out-of-m1.md)): §9 (dump), §9.4 and §10 (load, ring save), §17.4, the REST routes `timewarp:dump/ringdump/load`, the monitor verbs `dump/undump/ringdump/ringload`, the ABI file slots and `trx_c64re.cc`. Since 2026-11-05 the firmware writer and the exact load are back and reachable from the file browser, REST and the menu (part 1 of the T66 table below); the monitor verbs, a TRX64 file's coarse load, the fuller node set, `.trxring`, the trace export and drive A are parts 2-9 and still open. **The `apps/c64re` app has been back since 2026-10-31** ([ADR-0061](../adr/0061-c64re-snapshot-app-back-in-the-release.md)): it writes the container itself over the app ABI, and what it writes stays inspection-only - the firmware's own file carries the chip block and resumes. Numbers measured with the pre-A13 code (§16.3) are history. M1 Timewarp was rewind and scrub.
 
 **Status:** draft spec, 2026-10-01. Nothing built. Depends on T12 B (machine pause,
 simulated). TODO.md T20 is the task; this document replaces its former bullet list as
@@ -418,6 +418,14 @@ from the `.c64re`'s extension node (§9.4), or built from the TRX64 nodes when t
 missing (partial, §9.3). The ring is discarded (a file replaces the machine), then a
 keyframe is taken at the first snap.
 
+**As built (T66 part 1, 2026-11-05).** `trx_ring_load_state(ram, color, w, x)` is this sequence: it
+takes the machine (`dbg_handover`, `stop_machine`), turns the log and the capture off, and calls the
+same `put_back()` a rewind calls - the chip block as its parameter, the memories as its two
+callbacks, here writing from the file's buffers instead of undoing records - then `start_locked()`,
+so the ring begins again from that state. `trx_c64re_stage()` and `trx_c64re_apply()` split the file
+side in two, because the file browser runs with the machine frozen: the file is read and checked when
+it is chosen and goes in when the menu closes (`C64::unfreeze()`), the way a pending rewind does.
+
 ### 8.3 Cost
 
 | Move | Work | Time |
@@ -434,7 +442,7 @@ the hardware step is the same order, so 50 steps/s backwards is affordable as th
 
 ## 9. Dump to `.c64re`
 
-> REMOVED FROM M1 (A13, Alex 2026-10-06): design for T66 (M2); no code in M1.
+> Built again since 2026-11-05 (T66 part 1, [ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md)): `trx_c64re_dump()` writes the container with the `trx64Hw` node. What §9.3 lists beyond it (SID, drive, cartridge, REU, media) is part 5 and not written yet.
 
 ### 9.1 Container (byte for byte TRX64's)
 
@@ -522,11 +530,20 @@ node should be ignored by TRX64. This is verified by a test before relying on it
 - Refused: wrong magic/version/hash, `machine.model` not `c64-pal`, a VIC position
   outside 312 × 63 (as TRX64's restore refuses).
 
+**As built (T66 part 1, 2026-11-05).** The first case works: magic, version and the sha256 of the
+body are checked, then the `trx64Hw` node's layout, the four arrays (`ram`, `block`, `ramUnderIo`,
+`colorRam`) and the snap position (96 ≤ x ≤ 504). A `.c64rering` loads through the same path by
+taking the entry whose `id` equals `current_id`. A `turbo` node goes in with the state when the
+bitstream has turbo (T29), and is reported as not applied when it does not. The second case - a
+TRX64 file - is still refused with "No trx64Hw node (not written by this board)" or, for a real
+deflate stream, by the stored-block reader: that is part 4, which needs an inflate on the RISC-V and
+the chip block built from the nodes.
+
 ---
 
 ## 10. Saving the ring
 
-> REMOVED FROM M1 (A13, Alex 2026-10-06): design for T66 (M2); no code in M1.
+> §10.1 is built again since 2026-11-05 (T66 part 1): `trx_c64rering_dump()` writes the file and the loader takes its current entry. §10.2 (`.trxring`) is part 6 and not built.
 
 ### 10.1 `.c64rering` (TRX64 opens it)
 
@@ -1228,7 +1245,7 @@ needed: the second synchronizer stage and words 5-7 are the cheap cuts.
 
 ### 17.4 Save the ring from the menu
 
-> REMOVED FROM M1 (A13, Alex 2026-10-06): the menu entry, `save_ring_action` and `trx_c64rering_dump_ex` are deleted; the text below describes what was built and removed.
+> Back since 2026-11-05 (T66 part 1), with a second entry beside it: "Save Timewarp Frame" writes one `.c64re` of the newest whole frame through `trx_c64re_dump()`, and "Load Snapshot" in the file browser puts either file back (`filetype_c64re.cc`). The text below describes the ring save as it was built in M1 and still works.
 
 The file format exists (§10.1, `trx_c64rering_dump`, REST `timewarp:ringdump`, measured §16.3). What
 is missing is a way to start it without REST. Entry **"Save Timewarp Ring"** in the freeze menu's
@@ -1440,14 +1457,34 @@ Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newe
 
 Timewarp ring and .c64re snapshot save/load, done properly
 
-Milestone M2, status ⏸. Open (one line, as in the TODO table): Ring save/load and the trace export are not built; the snapshot app is back
+Milestone M2, status 🔨 (since 2026-11-05). Open (one line, as in the TODO table): part 1 (exact write and load, browser, REST, menu) is in, parts 2-9 open.
 
-The `apps/c64re` snapshot app is out of T66 since 2026-10-31 ([ADR-0061](../adr/0061-c64re-snapshot-app-back-in-the-release.md)): it writes the `.c64re` file itself over the app ABI, so it needed none of the firmware code A13 removed, and it is in the release again. What T66 still holds: the ring save and load (`.c64rering`), the trace export (`.c64retrace`), the firmware's own `dump`/`undump`/`ringdump`/`ringload` verbs and the REST routes `timewarp:dump/ringdump/load`, and the drive-A state of the 2026-10-19 entry below.
+The `apps/c64re` snapshot app is out of T66 since 2026-10-31 ([ADR-0061](../adr/0061-c64re-snapshot-app-back-in-the-release.md)): it writes the `.c64re` file itself over the app ABI, so it needed none of the firmware code A13 removed, and it is in the release again. T66 is built in full by [ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md) (Alex, 2026-11-05), in these parts:
+
+| # | Part | State |
+|---|---|---|
+| 1 | Firmware writer and exact loader (`trx_c64re.cc`), the ring's `materialize` / `load_state` / `set_turbo`, the three ABI file slots, REST `timewarp:dump/ringdump/load`, the menu entries "Save Timewarp Frame" and "Save Timewarp Ring", and **"Load Snapshot" in the file browser** | built 2026-11-05, no compile and no board test yet |
+| 2 | Monitor verbs `dump` / `undump` / `ringdump` / `ringload`, RPC `snapshot/*` and `ringbuffer/*` (removed in app `c4a3afe9`) | open |
+| 3 | `ringload` from an entry of a `.c64rering` other than the cursor | open |
+| 4 | A TRX64 file: inflate on the RISC-V and the coarse load of §9.4 (chip block built from the nodes) | open |
+| 5 | The fuller node set of §9.3: SID, `iec`, `cpuIntStatus`, keyboard/joystick, drive, cartridge (`cartBytes`, `cartFlash`, `cartState`), REU, media payloads | open |
+| 6 | `.trxring`, the native ring copy (§10.2): ring **and** machine come back | open |
+| 7 | Trace export `.c64retrace` (`tracering`, `trace/build_from_ring`, the ABI call `trace_writes`) | open |
+| 8 | Drive A by way B (the 2026-10-19 entry below) | open |
+| 9 | Tests: a host bank for the container, e2e over REST, board tests | open |
 
 Decisions: [ADR-0061 The C64RE Snapshot app comes back into the release](../adr/0061-c64re-snapshot-app-back-in-the-release.md); [ADR-0030 No .c64re / ring dump or load and no trace export in M1 (A13)](../adr/0030-timewarp-dump-and-trace-export-out-of-m1.md); [ADR-0025 Ring and still-picture formats are free to optimise](../adr/0025-d07-ring-and-still-formats-free.md).
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-05: part 1 is built (app branch `t66-app`, host branch `t66`).** Alex: *"Gut, dann bau mal am \"laden\". mit dem Ring klappt es ja prima, dass ich zurück gehen und dann per Enter ab da weiter laufen lassen ... dann muss das Speichern und laden ja kein thema sein"*, and on how far to go: **"Ganz T66"** ([ADR-0064](../adr/0064-t66-built-in-full-load-is-exact.md)).
+  - Why a file can resume at all: every timeline entry carries the whole chip block (`TrxFrame.w[58]`), and `put_back()` (`trx_ring.cc`) takes that block as a parameter with the memories as callbacks. A load is therefore the same sequence as a rewind with the memories read from the file. No gateware change.
+  - `trx_c64re.cc` (992 lines) and `.h` are back from `a93920be^`, the state before A13 removed them. The word layout they were written against is unchanged (`W_CPU` 1, `W_VIC` 4, `W_CIA1` 16, `W_CIA2` 21, `W_CPUH` 27, `W_CIA1H` 34, `W_CIA2H` 46, 58 words), so they fit today's hardware as they are. The removed ring paths `trx_ring_materialize`, `trx_ring_materialize_many`, `trx_ring_load_state` and `trx_ring_set_turbo` are back too (they went in app `c4a3afe9`).
+  - **New in T66: the load is in two halves.** `trx_c64re_stage()` reads and checks a file and keeps its state; `trx_c64re_apply()` puts it in. The file browser needs that split, because it runs with the machine frozen and the menu puts its own backup back when it closes, which would undo a load made while it was up. A wrong file is answered at once in front of the user; a good one goes in from `C64::unfreeze()`, the path a pending rewind already takes. `trx_c64re_load()` is both halves for callers that have the machine (REST).
+  - **New: `software/filetypes/filetype_c64re.cc/.h`** - `.c64re` and `.c64rering` in the file browser with the action **"Load Snapshot"**. `FileInfo::extension` holds three characters, so both names arrive as `C64` and the name itself decides which it is. Without the engine (CAPS b2) the action is not offered; with the REU on it answers A08.
+  - **New: menu entry "Save Timewarp Frame"** beside the restored "Save Timewarp Ring" (§17.4): one `.c64re` of the newest whole frame, the exact counterpart of the loader, while what `apps/c64re` writes stays inspection-only ([ADR-0061](../adr/0061-c64re-snapshot-app-back-in-the-release.md)).
+  - The ABI's `reserved_files[3]` are `dump` / `save` / `load` again at the same offsets; `reserved_trace_writes` stays NULL until part 7. REST `timewarp:dump/ringdump/load` are back with their OpenAPI text: `tools/openapi/generate.py check` says "2 documents match the sources", and the 191 OpenAPI unit tests pass.
+  - Not verified: no compiler has seen any of it (no RISC-V toolchain and no Docker on the Mac, so the app build is CI's), and nothing has been on the board.
 - **2026-10-19 (Alex): drive A state comes from a stub on the drive's own CPU (way B), no gateware.** "Nehmen wir B in die Spec bitte" ("put B into the spec, please"). Rejected: A, read and write paths patched into Gideon's `c1541_drive` (estimate 200-400 LUT plus patch upkeep); C, resetting the drive on load (a game with a fastloader in drive RAM hangs). Drive RAM is already covered (`drive_mem.vhd`). What exists and B builds on: `drv_dbg.v` halts the drive at an instruction boundary, steps it, and reads its PC. Sketch, to be designed in full when T66 is built:
   - **Save.** Halt the drive. Its RAM is already in the snapshot, so a borrowed range can be put back byte for byte (borrow, execute, restore). Write a stub of about 100 bytes into drive RAM and send the CPU there. If PC is in RAM, put a `JMP stub` over the 3 bytes at PC. If PC is in the ROM idle loop, put job `$D0` (execute buffer) into the job queue. The stub starts with `PHP`/`SEI`, stores A, X, Y, S, P and every VIA1/VIA2 register into the borrowed range, and parks in a loop. The app halts the drive, reads the values, and restores the borrowed bytes and the 3 bytes at PC.
   - **Load.** Restore drive RAM with a stub in a borrowed range, enter it the same way, write the VIA registers and the CPU registers, and end in an `RTI` to the saved PC with the saved P. The stub restores its own bytes before that last step, or the app does so once the drive is halted after it.
