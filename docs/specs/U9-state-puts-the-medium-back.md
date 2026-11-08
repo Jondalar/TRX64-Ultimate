@@ -210,7 +210,7 @@ type and a byte count: `get_image_bytes()` would read 0, and **the next `Save St
 machine would write a cartridge state with no medium** - the exact thing D0 forbids, one turn
 later. So a state whose cartridge is not already in gets its `.crt` or nothing: `stage_v2()` opens
 the path from the header before a byte moves, and refuses by name if neither it nor the file beside
-the state (D3c) is there. The bytes of section 5 still win over the file's - the `.crt` supplies the
+the state (D3c) is there and the ask (D3d) brought nothing. The bytes of section 5 still win over the file's - the `.crt` supplies the
 geometry and the definition, the section supplies the content of the freeze. **§5 Q5** is what it
 would take to lift this.
 
@@ -219,7 +219,7 @@ would take to lift this.
 another machine names its medium by that machine's path - `/Users/...`, which no board has. So when
 `machineState.cartridge.source` cannot be opened, the same **file name** in the folder the `.c64re`
 itself lies in is tried, and the path that works replaces the one from the file, because the
-cartridge is inserted from that string later (`resolve_beside()` in `trx_c64re.cc`, called from
+cartridge is inserted from that string later (`resolve_medium()` in `trx_c64re.cc`, called from
 `stage_v2()` before anything moves).
 
 Nothing else is searched: not the media roots, not a walk of the card. One folder, one name. A
@@ -230,6 +230,38 @@ looked for beside it.
 
 The same rule applies to `machineState.drive.image`, where it is not a refusal: D6 reports a disk
 that could not be mounted once the machine runs again.
+
+**D3d - When the medium is in neither place, the load asks where it is.**
+*Alex, 2026-11-08:* "Wir koennten ja auch mit einem popup requster fragen 'wo ist das medium
+XYZ.crt / d64' und dann muss man dahin navigieren" - and, on how to build it: *"mach einfach was
+du willst ... oder einfach sinnvoll?"* So the shape below is mine and is open to being overruled;
+the idea is his.
+
+The name of the medium is in the file, so a refusal is not the only honest answer. D3c's one
+folder stays the only place the firmware looks **by itself**; when that misses, the load says
+*"This state needs 'wasteland_ef_v1.0.1.crt'. Look for it?"*, and on yes a modal picker opens in
+the folder the `.c64re` lies in. The chosen path is tried before the path in the file and before
+the name beside it, and the stage runs again - nothing has moved yet, so a second attempt costs
+one read of the header.
+
+That the **user** chooses is the whole of why this is allowed where a wider search was not (D3c):
+what goes in is *the* image, not *an* image of that name. The firmware guesses once, in one
+folder, and asks instead of guessing twice.
+
+- **A folder taken** in the picker means "that name, in here"; **a file taken** means that file
+  whatever it is called, which is the answer for an image that was renamed. A path can still be
+  typed: any printable key turns the picker into a text field.
+- The picker is `UIPathPicker` / `UserInterface::path_box()`, written for Copy/Move in PR 662 of
+  GideonZ/1541ultimate (branch `feature_ftpzip`, Alex's own) and brought in here. With a pattern
+  (`*.crt`) it lists the matching files beside the directories; the pattern is applied after
+  `get_directory()` and not handed to it, because there it is matched against directories as well
+  and `*.crt` would hide every folder.
+- **Declining is a refusal**, unchanged and naming both places. So is a cancelled picker.
+- **A load with no screen still refuses.** REST and the monitor pass no out-parameter and never
+  ask. The browser's own deferred load does ask, because the file is staged while the menu is up
+  and only `apply` waits for the unfreeze.
+- Only the cartridge asks. A disk is not a refusal (D6 reports it), so a question there would
+  stop a load that is otherwise fine.
 
 **D3 — One list of types, and it gates the save.** A single table says, per hardware cartridge
 type, whether a state of it can be put back whole: the banking registers (`replay_cart()`), the

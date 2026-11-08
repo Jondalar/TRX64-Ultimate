@@ -162,16 +162,49 @@ SubsysResultCode_e FileTypeC64re :: execute_st(SubsysCommand *cmd)
         sprintf(m, "Loading the state %d / %d", done, total);
         b->ui->update_progress(m, 1);
     };
+    const int cols = cmd->user_interface->get_screen()->get_size_x() - 6;
     TrxC64reStaged *staged = NULL;
-    const char *err = trx_c64re_stage_ex(path, &staged, bar, &box);
-    if (box.shown) {
-        cmd->user_interface->hide_progress();
+    TrxC64reMissing miss;
+    char chosen[160];
+    chosen[0] = 0;
+    const char *err = NULL;
+    for (;;) {
+        err = trx_c64re_stage_ask(path, &staged, bar, &box, &miss,
+                                  chosen[0] ? chosen : NULL);
+        if (box.shown) {
+            cmd->user_interface->hide_progress();
+            box.shown = false;
+        }
+        if (!err || !miss.base[0]) {
+            break;
+        }
+        // U9 D3d: the medium is neither where the file says nor beside it, and
+        // its name is known - so ask for it rather than only refuse. The user
+        // picking it is what makes this allowed where a wider search was not:
+        // it is the image, not an image of that name.
+        char line[256], q[352];
+        snprintf(line, sizeof(line), "This state needs '%s'.\nLook for it?", miss.base);
+        trx_c64re_wrap(q, sizeof(q), line, cols);
+        if (cmd->user_interface->popup(q, BUTTON_YES | BUTTON_NO) != BUTTON_YES) {
+            break;
+        }
+        char title[64], pat[40];
+        snprintf(title, sizeof(title), "Where is %s?", miss.base);
+        const char *dot = strrchr(miss.base, '.');
+        snprintf(pat, sizeof(pat), "*%s", (dot && dot[1]) ? dot : "");
+        // The box opens in the folder the .c64re lies in: a folder taken there
+        // means "that name, in here", a file means that file whatever it is
+        // called, and nothing matching the pattern can still be typed.
+        snprintf(chosen, sizeof(chosen), "%s", dir);
+        if (cmd->user_interface->path_box(chosen, sizeof(chosen), title, pat, dir) != 1) {
+            chosen[0] = 0;
+            break;
+        }
     }
     if (err) {
         char line[224], msg[320];
         snprintf(line, sizeof(line), "This file cannot be loaded:\n%s", err);
-        trx_c64re_wrap(msg, sizeof(msg), line,
-                       cmd->user_interface->get_screen()->get_size_x() - 6);
+        trx_c64re_wrap(msg, sizeof(msg), line, cols);
         cmd->user_interface->popup(msg, BUTTON_OK);
         return SSRET_CANNOT_OPEN_FILE;
     }

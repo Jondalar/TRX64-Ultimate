@@ -1692,6 +1692,8 @@ static void tok_copy(const char *js, const jsmntok_t *t, int i, char *dst, int c
 
 static trx_progress_fn g_stage_progress;    // the load's bar (U9): set for one stage_v2()
 static void *g_stage_ctx;
+static TrxC64reMissing *g_stage_miss;       // U9 D3d: filled when the medium is why it failed
+static const char *g_stage_medium;          // the answer to the last refusal, tried first
 
 static const char *base_of(const char *path)
 {
@@ -1699,44 +1701,82 @@ static const char *base_of(const char *path)
     return cut ? cut + 1 : path;
 }
 
-// U9 D3c (Alex, 2026-11-08): a file written on another machine names its medium
-// by that machine's path - TRX64 writes "/Users/...", which no board has. When
-// the path in the file is not there, the same file name beside the .c64re is the
-// medium: that is how the two reach the board, in one folder. The resolved path
-// replaces the one from the file, because build_cartridge() and build_drive()
-// mount by that string later, after the header's tokens are gone.
-static bool resolve_beside(char *want, int cap, const char *self)
+static bool is_there(const char *path)
 {
     FileManager *fm = FileManager::getFileManager();
     File *f = NULL;
-    if (!want[0]) {
-        return false;
-    }
-    if (fm->fopen(want, FA_READ, &f) == FR_OK) {
-        fm->fclose(f);
-        return true;
-    }
-    const char *base = base_of(want);
-    const char *cut = self ? strrchr(self, '/') : NULL;
-    if (!base[0] || !cut) {
-        return false;
-    }
-    char beside[192];
-    int dlen = int(cut - self);
-    int need = dlen + 1 + int(strlen(base));
-    if (need >= int(sizeof(beside)) || need >= cap) {
-        return false;
-    }
-    memcpy(beside, self, dlen);
-    beside[dlen] = '/';
-    strcpy(beside + dlen + 1, base);
-    if (fm->fopen(beside, FA_READ, &f) != FR_OK) {
+    if ((!path) || (!path[0]) || (fm->fopen(path, FA_READ, &f) != FR_OK)) {
         return false;
     }
     fm->fclose(f);
-    printf("[C64RE] '%s' is not there; '%s' is used instead\n", want, beside);
-    strcpy(want, beside);
     return true;
+}
+
+// dir + name, with exactly one '/' between them. False when it does not fit,
+// which is a path that could not be opened anyway.
+static bool join(char *dst, int cap, const char *dir, int dirlen, const char *name)
+{
+    while ((dirlen > 0) && (dir[dirlen - 1] == '/')) {
+        dirlen--;
+    }
+    int need = dirlen + 1 + int(strlen(name));
+    if (need >= cap) {
+        return false;
+    }
+    memcpy(dst, dir, dirlen);
+    dst[dirlen] = '/';
+    strcpy(dst + dirlen + 1, name);
+    return true;
+}
+
+// U9 D3c (Alex, 2026-11-08): a file written on another machine names its medium
+// by that machine's path - TRX64 writes "/Users/...", which no board has. Three
+// places are looked at, in this order: what the user last answered a refusal
+// with (D3d), the path in the file, and the same file name beside the .c64re -
+// that last one is how the two reach the board, in one folder. Nothing wider is
+// searched on its own: that would insert an image of that name rather than the
+// image. The path that holds replaces the one from the file, because
+// build_cartridge() and build_drive() mount by that string later, after the
+// header's tokens are gone. Only the cartridge is asked about, so only it reads
+// the answer and only it records what was missing.
+static bool resolve_medium(char *want, int cap, const char *self, bool cartridge)
+{
+    const char *base = base_of(want);
+    char tmp[192];
+
+    if (cartridge && g_stage_medium && g_stage_medium[0]) {
+        const char *chosen = g_stage_medium;
+        int clen = int(strlen(chosen));
+        bool folder = (clen > 0) && (chosen[clen - 1] == '/');
+        if (!folder && is_there(chosen) && (clen < cap)) {
+            printf("[C64RE] '%s' is used, as chosen\n", chosen);
+            strcpy(want, chosen);
+            return true;
+        }
+        // A folder was chosen, or a file that is gone again: the name from the
+        // state in the folder that was chosen.
+        if (base[0] && join(tmp, int(sizeof(tmp)), chosen, clen, base) &&
+            is_there(tmp) && (int(strlen(tmp)) < cap)) {
+            printf("[C64RE] '%s' is used, from the chosen folder\n", tmp);
+            strcpy(want, tmp);
+            return true;
+        }
+    }
+    if (want[0] && is_there(want)) {
+        return true;
+    }
+    const char *cut = self ? strrchr(self, '/') : NULL;
+    if (base[0] && cut && join(tmp, int(sizeof(tmp)), self, int(cut - self) + 1, base) &&
+        is_there(tmp) && (int(strlen(tmp)) < cap)) {
+        printf("[C64RE] '%s' is not there; '%s' is used instead\n", want, tmp);
+        strcpy(want, tmp);
+        return true;
+    }
+    if (cartridge && g_stage_miss) {
+        snprintf(g_stage_miss->want, sizeof(g_stage_miss->want), "%s", want);
+        snprintf(g_stage_miss->base, sizeof(g_stage_miss->base), "%s", base);
+    }
+    return false;
 }
 
 static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, const char *self,
@@ -1848,7 +1888,7 @@ static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, cons
     // could not describe, and the next Save State would write a cartridge
     // machine with no medium. D0 says refuse, and refuse before anything moves.
     if (!err && mw.present && mw.cart_type > 0) {
-        if (!resolve_beside(mw.cart_src, sizeof(mw.cart_src), self)) {
+        if (!resolve_medium(mw.cart_src, sizeof(mw.cart_src), self, true)) {
             static char msg[352];
             if (!mw.cart_src[0]) {
                 strcpy(msg, "The cartridge image is needed and the file does not name one");
@@ -1863,7 +1903,7 @@ static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, cons
     // The disk is not a refusal: build_drive() reports an image it could not
     // mount once the machine runs again (D6), so this only widens where it looks.
     if (!err && mw.present && mw.drive_img[0]) {
-        (void)resolve_beside(mw.drive_img, sizeof(mw.drive_img), self);
+        (void)resolve_medium(mw.drive_img, sizeof(mw.drive_img), self, false);
     }
     if (!err && !mw.present && mw.cart_type >= 0 &&
         mw.cart_type != int(C64_CARTRIDGE_TYPE)) {
@@ -2009,11 +2049,26 @@ const char *trx_c64re_stage(const char *path, TrxC64reStaged **out)
 const char *trx_c64re_stage_ex(const char *path, TrxC64reStaged **out,
                                trx_progress_fn progress, void *ctx)
 {
+    return trx_c64re_stage_ask(path, out, progress, ctx, NULL, NULL);
+}
+
+const char *trx_c64re_stage_ask(const char *path, TrxC64reStaged **out,
+                                trx_progress_fn progress, void *ctx,
+                                TrxC64reMissing *miss, const char *medium)
+{
+    if (miss) {
+        miss->want[0] = 0;
+        miss->base[0] = 0;
+    }
     g_stage_progress = progress;
     g_stage_ctx = ctx;
+    g_stage_miss = miss;
+    g_stage_medium = medium;
     const char *err = trx_c64re_stage_entry(path, NULL, out);
     g_stage_progress = NULL;
     g_stage_ctx = NULL;
+    g_stage_miss = NULL;
+    g_stage_medium = NULL;
     return err;
 }
 

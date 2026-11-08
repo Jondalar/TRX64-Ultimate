@@ -1399,7 +1399,11 @@ bool C64::capture_cpu_port_via_nmi(void)
     // poll: peek() on a running machine stops and resumes it for every access,
     // and stop() waits for a bad line, so a polling loop costs tens of
     // milliseconds per iteration and blanks the picture for as long as it runs.
-    wait_10us(400);                                 // 4 ms
+    // wait_10us() takes a uint8_t and its register holds (mult<<1)+1, so
+    // anything over 126 wraps: 400 became 144 and waited 0.16 ms, not 4.
+    for (int i = 0; i < 40; i++) {
+        wait_10us(100);                             // 40 x 1 ms = 4 ms
+    }
 
     bool stopped_again = begin_stopped_session();
     const bool ran = (peek(NMI_CAP_DONE) == 0x5A);

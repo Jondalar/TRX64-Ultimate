@@ -73,8 +73,13 @@ together before putting the state into it:
 If the `.crt` the file names is not where the file says, the same file name **in the folder the
 `.c64re` lies in** is used instead - a state written on another computer names its cartridge by that
 computer's path, so putting the two files in one folder is enough. Only that one folder is looked
-in; is the image in neither place, the load is refused naming both and the running machine is left
-alone. The disk image is found the same way. The state file is written beside the image it came
+in. Is the image in neither place, the load asks - *"This state needs 'wasteland.crt'. Look for
+it?"* - and opens a browser in the folder the state lies in: pick the folder it is in, or pick the
+file itself if it has been renamed, or type a path by just starting to type. Say no, or leave the
+browser with **RUN/STOP**, and the load is refused naming both places, with the running machine
+left alone. A load started over the network or from the monitor has no screen to ask on and
+refuses straight away. The disk image is found the same way, without the question: a disk that
+could not be mounted is named once the machine runs again. The state file is written beside the image it came
 from, so the two normally travel together. A state of one cartridge will not go into a machine holding another: it
 is refused with both types. Anything a load could not put back is named in a message once the
 machine is running again.

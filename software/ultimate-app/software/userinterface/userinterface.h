@@ -127,6 +127,11 @@ public:
     // UIStringEditPolicy. A NULL policy is the ordinary field above.
     virtual int  string_box(const char *msg, char *buffer, int maxlen, bool template_mode, bool uppercase,
                             const UIStringEditPolicy *policy); // blocking
+    // Blocking visual path picker. Without a pattern it returns a folder;
+    // with one ("*.crt") the matching files are listed too and one of them
+    // can be the answer. 1 taken, -1 cancelled.
+    int  path_box(char *buffer, int maxlen, const char *title = NULL,
+                  const char *pattern = NULL, const char *start = NULL);
     virtual void show_progress(const char *msg, int steps); // not blocking
     virtual void update_progress(const char *msg, int steps); // not blocking
     virtual void hide_progress(void); // not blocking (of course)

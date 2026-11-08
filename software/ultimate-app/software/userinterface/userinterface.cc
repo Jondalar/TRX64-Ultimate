@@ -1,4 +1,7 @@
 #include "userinterface.h"
+#ifndef RECOVERYAPP
+#include "path_picker.h"
+#endif
 #include "ui_mode.h"
 #include "product.h"
 #include <stdio.h>
@@ -937,6 +940,27 @@ int UserInterface :: string_box(const char *msg, char *buffer, int maxlen, bool 
     delete box;
     return ret;
 }
+
+#ifndef RECOVERYAPP
+int UserInterface :: path_box(char *buffer, int maxlen, const char *title,
+                              const char *pattern, const char *start)
+{
+    UIPathPicker *picker = new UIPathPicker(this, buffer, maxlen, title, pattern, start);
+    picker->init();
+    int ret;
+    do {
+        ret = picker->poll(0);
+        // The menu button gets out of here, as it does out of a string box;
+        // without this the box is the only way out of the menu.
+        if (!ret && pollMenuButtonPush()) {
+            ret = -1;
+        }
+    } while(!ret);
+    picker->deinit();
+    delete picker;
+    return ret;
+}
+#endif
 
 int UserInterface :: string_edit(char *buffer, int maxlen, Window *w, int x, int y, int max_chars)
 {

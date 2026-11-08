@@ -64,6 +64,20 @@ const char *trx_c64re_stage_entry(const char *path, const char *entry, TrxC64reS
 // Puts a staged state into the machine and lets it run; frees it either way.
 // NULL, or what the hardware said.
 const char *trx_c64re_apply(TrxC64reStaged *st);
+// U9 D3d: the medium a stage could not find. After a stage that failed,
+// base[] is the name to look for and want[] the path the file asks for;
+// base[] is empty when the stage failed for any other reason.
+struct TrxC64reMissing {
+    char want[144];
+    char base[72];
+};
+// Stage, and say when it was the medium that was missing (U9 D3d). "miss"
+// may be NULL. "medium" is tried before the path in the file and before the
+// name beside it: a file to use, or a folder to look in - what the user
+// answered the last refusal with. NULL for an ordinary stage.
+const char *trx_c64re_stage_ask(const char *path, TrxC64reStaged **out,
+                                trx_progress_fn progress, void *ctx,
+                                TrxC64reMissing *miss, const char *medium);
 // U9 D6: what the last load could not put back, or NULL. The browser shows it
 // after the machine is running again.
 const char *trx_c64re_missed(void);
@@ -98,6 +112,10 @@ static inline const char *trx_c64re_stage_ex(const char *, TrxC64reStaged **out,
 static inline const char *trx_c64re_stage_entry(const char *, const char *, TrxC64reStaged **out) { *out = 0; return "No frame ring"; }
 static inline const char *trx_c64re_load_entry(const char *, const char *) { return "No frame ring"; }
 static inline const char *trx_c64re_apply(TrxC64reStaged *) { return "No frame ring"; }
+struct TrxC64reMissing { char want[144]; char base[72]; };
+static inline const char *trx_c64re_stage_ask(const char *, TrxC64reStaged **out, trx_progress_fn,
+                                              void *, TrxC64reMissing *, const char *)
+{ *out = 0; return "No frame ring"; }
 static inline const char *trx_c64re_missed(void) { return 0; }
 static inline void trx_c64re_wrap(char *dst, int, const char *, int) { dst[0] = 0; }
 static inline void trx_c64re_discard(TrxC64reStaged *) { }
