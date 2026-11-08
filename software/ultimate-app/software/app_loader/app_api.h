@@ -416,7 +416,7 @@ typedef struct
  * the timeline the machine is on. cycle is the timeline's phi2 count after the edge that ended
  * the opcode fetch (u2p_ring_frame_t.cycles' coordinate); a, x, y, sp, p and pc are BEFORE the
  * instruction; b1/b2 are 0 where the opcode has no such byte. The instruction's writes are the
- * stream 0 records [write_start, write_start + write_count). */
+ * stream 0 records [write_start, write_start + write_count) (trace_writes). */
 typedef struct
 {
     uint64_t cycle;
@@ -425,6 +425,12 @@ typedef struct
     uint16_t write_count;
     uint8_t a, x, y, sp, p, opcode, b1, b2;
 } u2p_trace_rec_t;
+
+typedef struct
+{
+    uint16_t addr;
+    uint8_t old_value, new_value;
+} u2p_trace_write_t; /* TRX64 WriteRec */
 
 typedef struct
 {
@@ -466,9 +472,15 @@ typedef struct u2p_ring_api_s
     void (*commit)(void);
     const char *(*error)(int code);
 
-    /* Three slots that held the .c64re / .c64rering dump and load (removed in M1, TODO T66).
-     * They stay so the offsets of what follows do not move; always NULL. */
-    const void *reserved_files[3];
+    /* Files, through the firmware's file system: NULL, or what went wrong.
+     * dump: entry index as a .c64re; save: the newest seconds of the ring,
+     * one entry in every stride frames, as a .c64rering; load: a .c64re or
+     * the current entry of a .c64rering written by this board, into the
+     * machine (the ring starts over). Back since T66; they sat here as
+     * reserved NULLs while A13 held (ADR-0030, ADR-0064). */
+    const char *(*dump)(const char *path, int index, uint32_t *bytes);
+    const char *(*save)(const char *path, int seconds, int stride, uint32_t *bytes, int *entries);
+    const char *(*load)(const char *path);
 
     /* The instruction trace (appended, T21 §4.11): U2P_HAS(ring, trace_status) */
     /* on 1/0 sets the trace gate, -1 asks; returns the gate, or < 0 */
@@ -476,8 +488,8 @@ typedef struct u2p_ring_api_s
     int (*trace_status)(u2p_trace_status_t *st);
     /* records first.. (0 = oldest) of the history; returns the count read */
     int (*trace_read)(uint32_t first, uint32_t n, u2p_trace_rec_t *out);
-    /* was trace_writes (the .c64retrace export, removed in M1, TODO T66); always NULL, keeps the offset */
-    const void *reserved_trace_writes;
+    /* stream 0 records by physical index (a record's write_start); returns the count */
+    int (*trace_writes)(uint32_t start, uint32_t n, u2p_trace_write_t *out);
     /* the last writers of addr, newest first. *exhausted: bit 0, the scan reached the start of the
      * history with fewer than limit hits; bit 1 (value 2), addr is an I/O address ($D000-$DFFF), its
      * writers were found from the instruction records (the RAM write log has no I/O), and the
@@ -491,6 +503,20 @@ typedef struct u2p_ring_api_s
      * while the frame ring runs. max = 0 moves the reader to the present. *lost: records the area overwrote
      * before they were read. Returns the count. */
     int (*log_read)(uint64_t *out, int max, uint32_t *lost);
+
+    /* load(), with the entry of a .c64rering named (appended, T66 part 3:
+     * U2P_HAS(ring, load_entry)). entry NULL or "" is the file's own cursor,
+     * else an entry's id ("cp_<frame>_<seq>") or label, a frame number, or
+     * "#N" for the Nth entry in the file (0 = oldest). A .c64re ignores it. */
+    const char *(*load_entry)(const char *path, const char *entry);
+
+    /* The ring itself as a file (appended, T66 part 6: U2P_HAS(ring,
+     * save_native); T20 §10.2). save_native writes a .trxring - the timeline
+     * with every frame's chip block, the undo log it still reaches and the
+     * memories at the newest frame - which only this board and only this
+     * bitstream read back. load() and load_entry() take such a file too: they
+     * see its magic and bring the ring back with the machine. */
+    const char *(*save_native)(const char *path, uint32_t *bytes);
 } u2p_ring_api_t;
 
 /* NULL unless the bitstream's IO block (0x101A0000) reads "TRX2" and has

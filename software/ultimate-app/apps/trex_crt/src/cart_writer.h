@@ -1,45 +1,22 @@
 /*
  * cart_writer.h
  *
- *  Flash .CRT files to physical flash cartridges (EasyFlash, EasyFlash 3,
- *  GMod2, MegaByter, C64MegaCart) via the U64 cart slot. Port of the firmware
- *  CartWriter (software/io/c64/cart_writer.h).
+ *  Flash .CRT files to physical flash cartridges via the U64 cart slot. Which
+ *  cartridges those are is data: every type with a flash block in
+ *  tools/cart_descriptors/ (cart_flash.h). Port of the firmware CartWriter
+ *  (software/io/c64/cart_writer.h).
  */
 
 #ifndef CART_WRITER_H
 #define CART_WRITER_H
 
 #include "cart_base.h"
-#include "cart_screen.h"
+#include "cart_flash.h"
 
-// Flash mode control: how to enter Ultimax/flash mode
-typedef enum {
-    FLASH_MODE_DE02,   // MegaByter: $DE02=val
-    FLASH_MODE_DF00,   // C64MegaCart: $DF00=val
-    FLASH_MODE_DE00,   // GMod2: $DE00=$C0 (bit7+bit6)
-    FLASH_MODE_DE02_EF // EasyFlash: $DE02=$05 (MXG=101)
-} flash_mode_type_t;
-
-typedef struct
-{
-    const char *name;
-    uint16_t cmd_addr_1;  // unlock addr 1 (ROML chip)
-    uint16_t cmd_addr_2;  // unlock addr 2 (ROML chip)
-    uint16_t cmd_addr_h1; // unlock addr 1 for ROMH chip (EF only, 0=no ROMH)
-    uint16_t cmd_addr_h2; // unlock addr 2 for ROMH chip (EF only)
-    flash_mode_type_t mode_type;
-    uint8_t ultimax_val;
-    uint8_t normal_val;
-    int max_banks;
-    int total_size;
-    uint16_t crt_type;
-    bool has_romh; // true if cart has separate ROMH chip (EasyFlash)
-} flash_chip_info_t;
 
 typedef struct
 {
     cart_base_t base;
-    Window *window;
 
     // CRT file info
     char crt_path[256];
@@ -48,8 +25,8 @@ typedef struct
     uint32_t crt_size;
     bool crt_stream;   // the CRT is read from the file by every pass (our core, or too big for the heap)
 
-    // Detected cart
-    const flash_chip_info_t *chip;
+    // Detected cart: its profile, derived from the mapping descriptor (cart_flash.h, T95 D2)
+    const cart_flash_t *chip;
 
     // Bank map (separate arrays for ROML and ROMH chips)
     uint8_t bank_status_lo[MAX_CART_BANKS];
@@ -66,20 +43,23 @@ typedef struct
 
     int ef_current_bank; // target bank for EF byte programming
 
-    // Where each part of the screen goes
-    cart_layout_t layout;
+    int img_slot; // the slot of a type 90 image being written, -1 while none is
 } cart_writer_t;
 
 // Checks a CRT file before the writer opens on it (header, type, whole chip packets, banks, at least one chip).
 // NULL = ok, else the reason for a popup. Reads the file only.
 const char *cart_writer_check_crt(const char *path, const char *filename);
-// Opens the window, sets up the bus, detects the flash cart and reads the
-// CRT summary. An empty filename opens the scan-only view.
-void cart_writer_init(cart_writer_t *w, const char *path, const char *filename);
-// Restores the bus and closes the window
-void cart_writer_deinit(cart_writer_t *w);
-// Handles one keymapped key; returns MENU_CLOSE to leave
-int cart_writer_poll(cart_writer_t *w, int key);
-void cart_writer_redraw(cart_writer_t *w);
+
+// Sets up the bus, detects the flash cart, reads the CRT summary and scans the banks. An empty filename opens
+// the writer on the cartridge alone. Reports what it finds through cart_view.h.
+void cart_writer_open(cart_writer_t *w, const char *path, const char *filename);
+// Restores the bus and gives the heap back
+void cart_writer_close(cart_writer_t *w);
+
+// What a view can ask for. Each one reports its own progress and its own result; none of them knows a key.
+void cart_writer_scan(cart_writer_t *w);
+void cart_writer_write(cart_writer_t *w);
+void cart_writer_verify(cart_writer_t *w);
+void cart_writer_select(cart_writer_t *w); // EasyFlash 3: slot, full image, or erase the whole cart
 
 #endif

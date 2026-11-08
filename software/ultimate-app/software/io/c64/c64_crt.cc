@@ -155,6 +155,7 @@ void C64_CRT::initialize(uint8_t *mem, uint32_t max_size)
     total_read = 0;
     max_bank = 0xFF;
     highest_bank = 0;
+    image_banks = 0;
     a000_seen = false;
     bank_multiplier = 16 * 1024;
     source = "";
@@ -476,6 +477,7 @@ void C64_CRT::auto_mirror(void)
     if (size < chip_banks) {
         size = chip_banks;
     }
+    image_banks = size;     // what is content; everything above it is the mirror
     // mirror up to the end of the cart memory, which is what the FPGA can address
     int max_banks = max_cart / bank_multiplier;
     while(size < max_banks) {
@@ -960,6 +962,21 @@ uint32_t C64_CRT::get_baseline(void)
 void C64_CRT::set_baseline(uint32_t hash)
 {
     get_instance()->baseline_hash = hash;
+}
+
+// The bytes of the image that are content and not the mirror auto_mirror()
+// wrote: the whole chip for a flash cartridge, else the banks the file had
+// rounded up to a power of two. 0 when nothing is loaded. (T66 part 5: a
+// .c64re carries this much of the live window as its "cartFlash" node.)
+uint32_t C64_CRT::get_image_bytes(void)
+{
+    C64_CRT *crt = get_instance();
+    CrtLock lock(crt->mutex);
+    if (!crt->cart_memory || crt->image_banks <= 0) {
+        return 0;
+    }
+    uint32_t n = uint32_t(crt->image_banks) * uint32_t(crt->bank_multiplier);
+    return n > crt->max_cart ? crt->max_cart : n;
 }
 
 SubsysResultCode_e C64_CRT::save_crt(File *fo)

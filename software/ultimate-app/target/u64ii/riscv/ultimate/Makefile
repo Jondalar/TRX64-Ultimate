@@ -31,6 +31,8 @@ SRCS_C   =	itu.c \
 			time.c \
 			mdio.c \
 			sid_coeff.c \
+			trx_inflate.c \
+			trx_sha256.c \
 			riscv_main.c \
 			do_ctors.c \
 			malloc_lock.c \
@@ -79,6 +81,10 @@ SRCS_CC	 =  u64ii_init.cc \
 			trx_lv_port.cc \
 			trx_ui.cc \
 			trx_ring.cc \
+			trx_c64re.cc \
+			trx_c64re_nodes.cc \
+			trx_trxring.cc \
+			trx_drive.cc \
 			trx_lens_fw.cc \
 			trx_timewarp_ui.cc \
 			u64_machine.cc \
@@ -135,6 +141,7 @@ SRCS_CC	 =  u64ii_init.cc \
 			filetype_cfg.cc \
 			filetype_vpl.cc \
 			filetype_u2a.cc \
+			filetype_c64re.cc \
 			app_loader.cc \
 			app_api_impl.cc \
 			app_api_net.cc \

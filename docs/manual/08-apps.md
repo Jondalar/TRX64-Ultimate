@@ -78,7 +78,10 @@ gzip'd JSON.
 
 A real cartridge in the expansion port is not read reliably yet: the bus read the app uses can hang
 with one plugged in, and the dump can still name a cartridge image that is no longer the one in the
-machine. Loading a `.c64re` back into the machine is not in this firmware.
+machine. The browser does load a `.c64re` back (**Load State**), but a dump from this app carries no chip
+block, so it comes back coarse: its nodes are laid on the machine's own newest frame, which means
+the Timewarp ring has to be running, and the debug log lists what was not restored
+([7.](07-timewarp.md)).
 
 ## unzip
 

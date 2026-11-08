@@ -868,10 +868,18 @@ static void addr4(sbuf_t *out, uint16_t a)
 }
 
 /* the frame start at or before now (dump, capture) */
+static int entry_now(void)
+{
+    uint64_t v;
+    int cur = virt_now(&v);
+    return (cur < 0) ? -1 : target_at_or_before(v, cur + 1);
+}
+
 int ring_verb(const char *op, int argc, char **argv, sbuf_t *out)
 {
     static const char *const ours[] = { "rstep", "reverse", "rewind", "frame", "goto", "mark", "marks", "unmark",
-                                        0 };
+                                        "ringdump", "ringload", "ringsave", "dump", "snapshot", "undump",
+                                        "loadsnapshot", 0 };
     int known = 0;
     for (int i = 0; ours[i]; i++) {
         known |= m_streq(op, ours[i]);
@@ -1039,5 +1047,136 @@ int ring_verb(const char *op, int argc, char **argv, sbuf_t *out)
         sb_putc(out, ')');
         return MON_OK;
     }
-    return -1;
+    if (m_streq(op, "ringdump")) {
+        if (argc < 2) {
+            return fail(out, "ringdump", "usage: ringdump <path.c64rering> [seconds] [stride]");
+        }
+        uint32_t secs = 10, stride = 25;
+        if (argc > 2) {
+            m_parse_dec(argv[2], -1, &secs);
+        }
+        if (argc > 3) {
+            m_parse_dec(argv[3], -1, &stride);
+        }
+        if (M.running) {
+            mach_pause();
+        }
+        uint32_t bytes = 0;
+        int entries = 0;
+        const char *e = hw_ring_save(argv[1], (int)secs, (int)stride, &bytes, &entries);
+        if (e) {
+            return fail(out, "ringdump", e);
+        }
+        sb_put(out, "ringdump: ");
+        sb_dec(out, (uint64_t)entries);
+        sb_put(out, " anchor(s), 0 delta entr(ies), 0 cpu-history \xe2\x86\x92 ");
+        sb_put(out, argv[1]);
+        sb_put(out, "  (");
+        sb_dec(out, bytes);
+        sb_put(out, " bytes; the newest ");
+        sb_dec(out, secs);
+        sb_put(out, " s, one anchor in every ");
+        sb_dec(out, stride);
+        sb_put(out, " frames)");
+        return MON_OK;
+    }
+    if (m_streq(op, "ringsave")) {
+        /* the ring itself, not a picture of it: loading it back brings the
+         * timeline and the undo log with the machine (T20 §10.2) */
+        if (argc < 2) {
+            return fail(out, "ringsave", "usage: ringsave <path.trxring>");
+        }
+        if (M.running) {
+            mach_pause();
+        }
+        uint32_t bytes = 0;
+        const char *e = hw_ring_save_native(argv[1], &bytes);
+        if (e) {
+            return fail(out, "ringsave", e);
+        }
+        sb_put(out, "ringsave: the ring \xe2\x86\x92 ");
+        sb_put(out, argv[1]);
+        sb_put(out, "  (");
+        sb_dec(out, bytes);
+        sb_put(out, " bytes; timeline, undo log and the memories at the newest frame)");
+        return MON_OK;
+    }
+    if (m_streq(op, "dump") || m_streq(op, "snapshot")) {
+        if (argc < 2) {
+            return fail(out, op, "usage: dump <path.c64re>");
+        }
+        if (M.running) {
+            mach_pause();
+        }
+        int idx = entry_now();
+        if (idx < 0) {
+            return fail(out, op, "the ring holds no frame to write");
+        }
+        ring_entry_t en;
+        ring_entry(idx, &en);
+        uint32_t bytes = 0;
+        const char *e = hw_ring_dump(argv[1], idx, &bytes);
+        if (e) {
+            return fail(out, op, e);
+        }
+        sb_put(out, "dump: ");
+        sb_put(out, argv[1]);
+        sb_put(out, "  (");
+        sb_dec(out, bytes);
+        sb_put(out, " bytes) \xe2\x80\x94 the frame start at Cycle ");
+        sb_dec(out, en.cycles);
+        sb_put(out, " Frame ");
+        sb_dec(out, (uint64_t)idx + 1);
+        sb_put(out, " (this host writes frame starts from its ring)");
+        return MON_OK;
+    }
+    /* ringload, undump, loadsnapshot */
+    if (argc < 2) {
+        return fail(out, op, "usage: <verb> <path> [entry]");
+    }
+    if (M.running) {
+        mach_pause();
+    }
+    RG.landed = 0;
+    /* T66 part 3: a second word names which entry of a .c64rering to take (an
+     * id, a label, a frame number or "#N"); without it the file's own cursor. */
+    const char *e = hw_ring_load_entry(argv[1], argc > 2 ? argv[2] : 0);
+    if (e) {
+        return fail(out, op, e);
+    }
+    /* the machine runs from the file's state, the ring starts over; the load
+     * left run control with C64_STOP (taken again by the next run verb) */
+    M.owned = 0;
+    M.running = 1;
+    M.have_stop = 0;
+    M.frame++;
+    M.cyc_off = 0;
+    RG.mode = MD_LIVE;
+    RG.nmk = 0;
+    if (m_streq(op, "ringload")) {
+        int native = 0;
+        {   /* a .trxring is the one file that does refill the ring */
+            int n = 0;
+            while (argv[1][n]) {
+                n++;
+            }
+            native = n >= 8 && m_streq(argv[1] + n - 8, ".trxring");
+        }
+        if (native) {
+            sb_put(out, "ringload: the ring is back from ");
+            sb_put(out, argv[1]);
+            sb_put(out, "  (timeline and undo log restored; the machine runs from the newest frame, so"
+                        " rewinding works again from here)");
+        } else {
+            sb_put(out, "ringload: restored 1 anchor(s), 0 delta entr(ies), 0 cpu-history from ");
+            sb_put(out, argv[1]);
+            sb_put(out, "  (the file's current anchor; a .c64rering cannot refill the ring: it starts over"
+                        " and the machine runs)");
+        }
+    } else {
+        sb_put(out, "undump: ");
+        sb_put(out, argv[1]);
+        sb_put(out, " loaded; the machine runs from its state (the ring starts over)");
+    }
+    return MON_OK;
 }

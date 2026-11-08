@@ -86,6 +86,8 @@ program can bring its own settings.
 | .bin, .rom, .64c | Set as Char ROM (4 KB); Set as Kernal ROM, Set as Basic ROM, Load Kernal (8 KB); Load Drive ROM, Set as 1541 ROM (16/32 KB) |
 | .cfg | Load Settings |
 | .vpl | Apply Palette, Set as Default |
+| .c64re, .c64rering | Load State: puts the machine back at that moment, with its medium ([7.](07-timewarp.md)) |
+| .trxring | Load Ring: the whole timeline back, so it can be rewound again ([7.](07-timewarp.md)) |
 | .u2a | Run App ([8.](08-apps.md)) |
 | .cfw, .ue2 | Run Update ([INSTALL.md](../../INSTALL.md)); Run as Softboot (`softboot` app) |
 | .zip | Unzip to folder, Unzip here, Extract one file (`unzip` app) |

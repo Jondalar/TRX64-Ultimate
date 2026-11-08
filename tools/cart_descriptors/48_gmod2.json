@@ -71,6 +71,8 @@
    "0xA4"
   ],
   "id_ofs": 1,
+  "wmode": 3,
+  "rmode": 0,
   "size": "512K",
   "sectors": [
    {

@@ -235,7 +235,7 @@ uint8_t mock_trx_rd8(uint32_t off)
 {
     mock.trx_reads++;
     if (off < 4)
-        return (uint8_t)"TRX2"[off];
+        return s_dummy_regs[off]; // the ID the scenario configured ("TRX2", or bad_id)
     if (off == 4)
         return 0xFF;
     if (off >= 0x7000 && off < 0x7004)

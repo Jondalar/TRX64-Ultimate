@@ -17,7 +17,8 @@
 // Modified by TRX64 Ultimate (CERN-OHL-S v2 section 3.3 b), 2026-10-06: new file, split out of
 // sid_api.sv: pipelines for a parameter number of SIDs (NS), the envelope level RAM starts at 0;
 // 2026-10-07: both cutoff sources with LEGACY_FC = 2 (fc_sel per SID), filter bypass per SID, the
-// loadable curve table removed (T25.5). Details: docs/specs/T25.4-redip-ultisid.md,
+// loadable curve table removed (T25.5); 2026-11-07: FILTER_FRAC passed to sid_filter (U7).
+// Details: docs/specs/T25.4-redip-ultisid.md, docs/specs/U7-sid-filter-precision.md,
 // cores/icepi/ORIGIN.md and the git history of this file.
 // ----------------------------------------------------------------------------
 
@@ -35,6 +36,8 @@ module sid_core #(
     parameter LEGACY_FC = 2,
     parameter VARIANT_B = 1,
     parameter PULSE_FIX = 0,
+    // Fractional bits in the filter state; see sid_filter (U7). 0 = reDIP's own arithmetic.
+    parameter FILTER_FRAC = 0,
     localparam N = 3*NS,
     localparam FLAST = 5*NS + 5,
     localparam VLAST = (6*NS + 5 > FLAST + 7) ? 6*NS + 5 : FLAST + 7
@@ -245,8 +248,9 @@ module sid_core #(
     end
 
     sid_filter #(
-        .NS        (NS),
-        .LEGACY_FC (LEGACY_FC)
+        .NS          (NS),
+        .LEGACY_FC   (LEGACY_FC),
+        .FILTER_FRAC (FILTER_FRAC)
     ) filter (
         .clk        (clk),
         .cycle      (filter_cycle),

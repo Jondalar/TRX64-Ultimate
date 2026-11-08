@@ -8,6 +8,8 @@
 
 #include "ui_shim.h"
 
+#include "cart_port.h"
+
 #ifndef HOST_TEST // the host harness links the host's libc
 // =========================================================================
 //  Freestanding libc subset
@@ -159,141 +161,6 @@ int ui_run(void *obj, ui_poll_fn poll)
 }
 
 // =========================================================================
-//  Formatting
-// =========================================================================
-
-typedef struct
-{
-    char *buf;
-    int size;
-    int pos;
-} fmt_out_t;
-
-static void fmt_char(fmt_out_t *o, char c)
-{
-    if (o->pos < o->size - 1) {
-        o->buf[o->pos] = c;
-    }
-    o->pos++;
-}
-
-int ui_vsnprintf(char *buf, int size, const char *fmt, va_list ap)
-{
-    fmt_out_t o = { buf, size, 0 };
-    char digits[12];
-
-    while (*fmt) {
-        if (*fmt != '%') {
-            fmt_char(&o, *fmt++);
-            continue;
-        }
-        fmt++;
-
-        char pad = ' ';
-        int width = 0;
-        int precision = -1;
-        if (*fmt == '0') {
-            pad = '0';
-            fmt++;
-        }
-        while (*fmt >= '0' && *fmt <= '9') {
-            width = width * 10 + (*fmt++ - '0');
-        }
-        if (*fmt == '.') {
-            fmt++;
-            precision = 0;
-            while (*fmt >= '0' && *fmt <= '9') {
-                precision = precision * 10 + (*fmt++ - '0');
-            }
-        }
-
-        const char *str = digits;
-        int len = 0;
-        bool negative = false;
-
-        switch (*fmt) {
-        case 'd':
-        case 'u':
-        case 'x':
-        case 'X': {
-            unsigned int base = (*fmt == 'x' || *fmt == 'X') ? 16 : 10;
-            const char *hex = (*fmt == 'x') ? "0123456789abcdef" : "0123456789ABCDEF";
-            unsigned int value;
-            if (*fmt == 'd') {
-                int v = va_arg(ap, int);
-                negative = (v < 0);
-                value = negative ? (unsigned int)(-(v + 1)) + 1 : (unsigned int)v;
-            } else {
-                value = va_arg(ap, unsigned int);
-            }
-            char rev[12];
-            int n = 0;
-            do {
-                rev[n++] = hex[value % base];
-                value /= base;
-            } while (value);
-            if (negative) {
-                digits[len++] = '-';
-            }
-            while (n) {
-                digits[len++] = rev[--n];
-            }
-            break;
-        }
-        case 's':
-            str = va_arg(ap, const char *);
-            if (!str) {
-                str = "(null)";
-            }
-            while (str[len] && (precision < 0 || len < precision)) {
-                len++;
-            }
-            break;
-        case 'c':
-            digits[0] = (char)va_arg(ap, int);
-            len = 1;
-            break;
-        case 0:
-            continue; // format ends after '%'
-        default:
-            fmt_char(&o, '%');
-            digits[0] = *fmt;
-            len = 1;
-            break;
-        }
-        fmt++;
-
-        // A zero-padded negative number keeps its sign in front of the zeros
-        if (negative && pad == '0') {
-            fmt_char(&o, '-');
-            str++;
-            len--;
-            width--;
-        }
-        for (int i = len; i < width; i++) {
-            fmt_char(&o, pad);
-        }
-        for (int i = 0; i < len; i++) {
-            fmt_char(&o, str[i]);
-        }
-    }
-
-    if (size > 0) {
-        o.buf[(o.pos < size) ? o.pos : size - 1] = 0;
-    }
-    return o.pos;
-}
-
-int ui_snprintf(char *buf, int size, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int ret = ui_vsnprintf(buf, size, fmt, ap);
-    va_end(ap);
-    return ret;
-}
-
-// =========================================================================
 //  Hex input (CartInspector::hex_input)
 // =========================================================================
 
@@ -327,28 +194,12 @@ int ui_hex_input(const char *prompt, int max_digits)
 //  Files
 // =========================================================================
 
-void *file_open(const char *path, const char *name, const char *mode)
-{
-    char full[256];
-    int n = 0;
-    while (path[n] && n < 250) {
-        full[n] = path[n];
-        n++;
-    }
-    if (n > 0 && full[n - 1] != '/') {
-        full[n++] = '/';
-    }
-    for (int i = 0; name[i] && n < 255; i++) {
-        full[n++] = name[i];
-    }
-    full[n] = 0;
-    return g_api->fs->fopen(full, mode);
-}
-
-int file_read(void *f, void *buf, int len) { return g_api->fs->fread(buf, 1, len, f); }
-int file_write(void *f, const void *buf, int len) { return g_api->fs->fwrite(buf, 1, len, f); }
-int file_seek(void *f, long offset) { return g_api->fs->fseek(f, offset, 0); }
-void file_close(void *f) { g_api->fs->fclose(f); }
+// The platform's files (cart_port.h); the dialogs below share them with the tools
+void *file_open(const char *path, const char *name, const char *mode) { return g_port->fopen(path, name, mode); }
+int file_read(void *f, void *buf, int len) { return g_port->fread(f, buf, len); }
+int file_write(void *f, const void *buf, int len) { return g_port->fwrite(f, buf, len); }
+int file_seek(void *f, long offset) { return g_port->fseek(f, offset); }
+void file_close(void *f) { g_port->fclose(f); }
 
 // ---- File name helpers, same rules as components/pattern.cc ----
 
@@ -414,7 +265,7 @@ static int fix_filename(char *buffer)
 
 static FRESULT create_file_ask_if_exists(const char *path, const char *filename, void **f)
 {
-    if (g_api->fs->exists(path, filename)) {
+    if (g_port->fexists(path, filename)) {
         if (u2p_ui_popup_buttons("File already exists. Overwrite?", BUTTON_YES | BUTTON_NO) != BUTTON_YES) {
             return FR_EXIST;
         }

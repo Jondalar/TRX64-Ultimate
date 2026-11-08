@@ -77,6 +77,7 @@ class C64_CRT
     e_known_cart local_type;
     uint8_t      max_bank;
     uint8_t      highest_bank;
+    int          image_banks;   // banks of content (the rest of the window is the mirror)
     uint32_t     total_read;
 
     // CRT File Structure
@@ -129,6 +130,9 @@ public:
     static bool is_valid(void);
     static void set_source(const char *path, const char *filename);
     static const char *get_source(void);
+
+    // The bytes of the live image that are content, not the mirror (T66 part 5).
+    static uint32_t get_image_bytes(void);
 
     // Change detection. The hash covers what save_crt() would write; the baseline is the state of
     // the file, set when the image is loaded and by every successful save.

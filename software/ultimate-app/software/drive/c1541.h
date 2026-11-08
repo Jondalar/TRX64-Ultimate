@@ -195,6 +195,9 @@ public:
     void set_rom_config(int idx, const char *fname);
 
     void get_last_mounted_file(mstring& path, mstring& name);
+    // The mode the image was mounted with: 0, MENU_1541_READ_ONLY or
+    // MENU_1541_UNLINKED. A .c64re carries it so a load mounts it the same way (U9 D1).
+    int  get_mount_mode(void) { return mount_mode; }
 };
 
 extern C1541 *c1541_A;

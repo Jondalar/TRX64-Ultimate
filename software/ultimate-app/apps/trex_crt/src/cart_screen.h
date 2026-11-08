@@ -5,9 +5,9 @@
  *  tool and the cartridge, the EasyFlash 3 slot, the CRT file, one bank map
  *  per chip with a legend beside the first, a status line and the keys.
  *
- *  The layout is the one drawn in tools/ui_editor (screens/cart_writer.json):
- *  chip names at column 1, row labels at 6, the sixteen cells at 10 to 25,
- *  the legend at 31, inside a frame one column in from the screen edge.
+ *  The layout: chip names at column 1, row labels at 6, the sixteen cells at
+ *  10 to 25, the legend at 31, inside a frame one column in from the screen
+ *  edge. Drawn by cart_view_text.c, its only caller (T95 D5).
  */
 
 #ifndef CART_SCREEN_H

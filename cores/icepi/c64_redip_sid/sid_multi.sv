@@ -27,6 +27,11 @@ module sid_multi #(
     // 0: the final mix-in of the 8580 waveform of the last voices of each group of two
     // SIDs reads the pulse of the wrong voice, as in reDIP (bit-exact bench); 1: corrected
     parameter PULSE_FIX = 0,   // Alex 2026-10-07: the original reDIP sound for any number of SIDs
+    // Fractional bits in the filter state (U7, docs/specs/U7-sid-filter-precision.md). reDIP's own
+    // 16 bit state loses integrator steps below one LSB, which at a low cutoff stops the filter
+    // (measured -32.6 dBFS worst error, SNR -23.8 dB, 45 % of the steps). 6 reaches the floor of
+    // the 16 bit output grid; the equivalence builds against the original reDIP pass 0.
+    parameter FILTER_FRAC = 6,
     parameter MEMDIR = "."
 ) (
     input  wire        clk,
@@ -119,7 +124,8 @@ wire        audio_valid;
 wire [NS*8-1:0] osc3, env3, dbus;
 wire        tick_ms;
 
-sid_core #(.NS(NS), .LEGACY_FC(LEGACY_FC), .VARIANT_B(VARIANT_B), .PULSE_FIX(PULSE_FIX)) core (
+sid_core #(.NS(NS), .LEGACY_FC(LEGACY_FC), .VARIANT_B(VARIANT_B), .PULSE_FIX(PULSE_FIX),
+          .FILTER_FRAC(FILTER_FRAC)) core (
     .clk(clk), .start(start_i), .res(res_q),
     .op_valid(op_valid_i), .op_we(op_we_i), .op_all(op_all_i), .op_sid(op_sid_i), .op_reg(op_reg_i),
     .op_data(op_wdata_i), .op_rdata(op_rdata_i),

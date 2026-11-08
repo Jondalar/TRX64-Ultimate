@@ -6,47 +6,16 @@
  *  in the launch context. A plain "Run App" shows a chooser first.
  */
 
-#include "cart_dumper.h"
-#include "cart_inspector.h"
-#include "cart_writer.h"
+#include "cart_base.h"
+#include "cart_view_text.h"
+#include "ui_shim.h"
 
 const u2p_api_t *g_api;
 
-static int poll_dumper(void *obj, int key) { return cart_dumper_poll((cart_dumper_t *)obj, key); }
-static int poll_writer(void *obj, int key) { return cart_writer_poll((cart_writer_t *)obj, key); }
-static int poll_inspector(void *obj, int key) { return cart_inspector_poll((cart_inspector_t *)obj, key); }
-
-static void run_dumper(void)
-{
-    cart_dumper_t dumper;
-    cart_dumper_init(&dumper);
-    ui_run(&dumper, poll_dumper);
-    cart_dumper_deinit(&dumper);
-}
-
-static void run_writer(const char *path, const char *filename)
-{
-    // A CRT is looked at before the screen opens: a file the writer could not use never gets a writer screen
-    if (filename[0]) {
-        const char *bad = cart_writer_check_crt(path, filename);
-        if (bad) {
-            cart_notify(bad);
-            return;
-        }
-    }
-    cart_writer_t writer;
-    cart_writer_init(&writer, path, filename);
-    ui_run(&writer, poll_writer);
-    cart_writer_deinit(&writer);
-}
-
-static void run_inspector(void)
-{
-    cart_inspector_t inspector;
-    cart_inspector_init(&inspector);
-    ui_run(&inspector, poll_inspector);
-    cart_inspector_deinit(&inspector);
-}
+// The tools run on the character screen of this app (cart_view_text.c); the cores behind it know no screen
+#define run_dumper    cart_view_text_dumper
+#define run_writer    cart_view_text_writer
+#define run_inspector cart_view_text_inspector
 
 // Same entries as the task menu of the manifest
 static void run_chooser(void)
@@ -92,6 +61,7 @@ int app_main(const u2p_api_t *api, const u2p_app_context_t *ctx)
 {
     g_api = api;
     u2p_ui_init(api);
+    cart_port_set(cart_port_platform()); // the machine under the tools, before anything touches it
     core_detect();
 
     const char *action = NULL;

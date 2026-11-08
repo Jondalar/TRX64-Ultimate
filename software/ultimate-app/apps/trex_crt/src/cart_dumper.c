@@ -7,14 +7,15 @@
  */
 
 #include "cart_dumper.h"
+
+#include "cart_fmt.h"
+#include "cart_view.h"
 #include "eapi_drivers.h"
+
+#include <string.h>
 
 static const uint8_t crt_signature[16] = { 0x43, 0x36, 0x34, 0x20, 0x43, 0x41, 0x52, 0x54,
                                            0x52, 0x49, 0x44, 0x47, 0x45, 0x20, 0x20, 0x20 };
-
-static void draw_header(cart_dumper_t *d);
-static void draw_status(cart_dumper_t *d, const char *msg);
-static void draw_footer(cart_dumper_t *d);
 
 // =========================================================================
 //  Cart type detection (probe via DMA banking tests)
@@ -218,8 +219,8 @@ static int select_cart_type(cart_dumper_t *d, const cart_probe_result_t *probe)
     if (u64_native) {
         // Auto-detected type works on U64 — just confirm
         char msg[80];
-        ui_snprintf(msg, sizeof(msg), "Detected: %s\nDump as type %d?", probe->type_name, probe->hw_type);
-        if (u2p_ui_popup_buttons(msg, BUTTON_YES | BUTTON_NO) == BUTTON_YES) {
+        cart_snprintf(msg, sizeof(msg), "Detected: %s\nDump as type %d?", probe->type_name, probe->hw_type);
+        if (cart_confirm(msg)) {
             return probe->hw_type;
         }
         // User said no — show full list
@@ -229,9 +230,9 @@ static int select_cart_type(cart_dumper_t *d, const cart_probe_result_t *probe)
     // Ask which CRT type to write in the file header.
     char header[80];
     if (!u64_native) {
-        ui_snprintf(header, sizeof(header), "%s (not U64-native) Save as:", probe->type_name);
+        cart_snprintf(header, sizeof(header), "%s (not U64-native) Save as:", probe->type_name);
     } else {
-        ui_snprintf(header, sizeof(header), "Save as CRT type:");
+        cart_snprintf(header, sizeof(header), "Save as CRT type:");
     }
 
     if (is_8k) {
@@ -242,17 +243,17 @@ static int select_cart_type(cart_dumper_t *d, const cart_probe_result_t *probe)
             "Normal 8K (0)"     // universal
         };
         static const int types[] = { 19, 5, 86, 0 };
-        int choice = u2p_ui_menu(header, opts, 4);
+        int choice = cart_choice(header, opts, 4);
         return (choice < 0) ? -1 : types[choice];
     } else if (is_16k) {
         static const char *opts[] = { "Normal 16K (0)", "Ocean 16K (5)", "Super Games (8)" };
         static const int types[] = { 0, 5, 8 };
-        int choice = u2p_ui_menu(header, opts, 3);
+        int choice = cart_choice(header, opts, 3);
         return (choice < 0) ? -1 : types[choice];
     } else {
         static const char *opts[] = { "Normal Ultimax (0)", "EasyFlash (32)" };
         static const int types[] = { 0, 32 };
-        int choice = u2p_ui_menu(header, opts, 2);
+        int choice = cart_choice(header, opts, 2);
         return (choice < 0) ? -1 : types[choice];
     }
 }
@@ -318,7 +319,7 @@ typedef struct
 static void sink_free_blocks(crt_sink_t *k)
 {
     for (int i = 0; i < k->nblk; i++)
-        g_api->mem->free(k->blk[i]);
+        g_port->mem_free(k->blk[i]);
     k->nblk = 0;
 }
 
@@ -329,7 +330,7 @@ static bool sink_alloc_blocks(crt_sink_t *k)
     if (need > STAGE_MAXBLK)
         return false;
     while (k->nblk < need) {
-        uint8_t *b = (uint8_t *)g_api->mem->malloc(STAGE_BLOCK);
+        uint8_t *b = (uint8_t *)g_port->mem_alloc(STAGE_BLOCK);
         if (!b)
             break;
         k->blk[k->nblk++] = b;
@@ -361,7 +362,7 @@ static bool sink_put(crt_sink_t *k, const void *data, int len)
         }
         return true;
     }
-    if (file_write(k->f, data, len) != len)
+    if (g_port->fwrite(k->f, data, len) != len)
         return false;
     k->pos += (uint32_t)len;
     return true;
@@ -411,18 +412,6 @@ static FRESULT write_chip(crt_sink_t *k, int bank, uint16_t load, uint16_t size,
 //  Dump operation
 // =========================================================================
 
-// Every dialog leaves the screen it found, not this one; the SDK dialogs call
-// this when they close. Open the frame again, which clears the whole screen,
-// and draw everything.
-static void rebuild(void *ctx)
-{
-    cart_dumper_t *d = (cart_dumper_t *)ctx;
-    if (d->window)
-        window_close(d->window);
-    d->window = cart_screen_open();
-    cart_dumper_redraw(d);
-}
-
 static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char *fname, const char *crt_name);
 
 static FRESULT do_dump(cart_dumper_t *d)
@@ -430,10 +419,9 @@ static FRESULT do_dump(cart_dumper_t *d)
     // Ask user for CRT type (only now, at save time). The whole EasyFlash 3 is one type 90 file: nothing to choose
     int save_type;
     if (d->base.ef3_whole) {
-        if (u2p_ui_popup_buttons("Dump the full EasyFlash 3?\n"
-                                 "8 slots incl. the system area\n"
-                                 "as ONE type 90 CRT (8 MB).",
-                                 BUTTON_YES | BUTTON_NO) != BUTTON_YES)
+        if (!cart_confirm("Dump the full EasyFlash 3?\n"
+                          "8 slots incl. the system area\n"
+                          "as ONE type 90 CRT (8 MB)."))
             return FR_OK; // cancelled
         save_type = CRT_TYPE_EF3;
     } else {
@@ -452,7 +440,7 @@ static FRESULT do_dump(cart_dumper_t *d)
     const bool ef3_named = d->base.is_ef3 && d->base.ef3_name[0];
     void *f = NULL;
     FRESULT res = FR_OK;
-    if (u2p_ui_path_input(dest_path, sizeof(dest_path)) < 0 || !dest_path[0])
+    if (!cart_path(dest_path, sizeof(dest_path)))
         return FR_OK; // cancelled
     LOG("[CartDumper] Save path: '%s'\n", dest_path);
 
@@ -461,14 +449,13 @@ static FRESULT do_dump(cart_dumper_t *d)
         strncpy(name_buf, d->base.ef3_name, 22);
         name_buf[22] = 0;
     }
-    res = create_user_file("Save CRT as..", ".crt", dest_path, &f, name_buf);
+    char fname[32] = "";
+    res = cart_save_file("Save CRT as..", ".crt", dest_path, &f, name_buf, sizeof(name_buf), fname, sizeof(fname));
     if (res != FR_OK || !f)
         return FR_OK; // cancelled
     LOG("[CartDumper] Saving as type %d to: '%s/%s.crt'\n", d->crt_hw_type, dest_path, name_buf);
-    ui_snprintf(d->file, sizeof(d->file), "%s.crt", name_buf);
-    cart_dumper_redraw(d); // with the file name
-    char fname[32];
-    user_file_name(name_buf, ".crt", fname);
+    cart_snprintf(d->file, sizeof(d->file), "%s.crt", name_buf);
+    cart_redraw(); // with the file name
     return dump_run(d, f, dest_path, fname, d->base.ef3_whole ? "EASYFLASH 3" : ef3_named ? d->base.ef3_name : name_buf);
 }
 
@@ -484,14 +471,14 @@ static FRESULT dump_bank(cart_dumper_t *d, crt_sink_t *f, int slot, int slots, i
     d->bank_status_lo[bank] = BANK_WRITING;
     if (d->has_romh)
         d->bank_status_hi[bank] = BANK_WRITING;
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
+    cart_banks(d->bank_status_lo, d->bank_status_hi);
 
     char msg[40];
     if (slots > 1)
-        ui_snprintf(msg, sizeof(msg), "Slot %d bank %d/%d...", slot, bank + 1, det_banks);
+        cart_snprintf(msg, sizeof(msg), "Slot %d bank %d/%d...", slot, bank + 1, det_banks);
     else
-        ui_snprintf(msg, sizeof(msg), "Dumping bank %d/%d...", bank + 1, det_banks);
-    draw_status(d, msg);
+        cart_snprintf(msg, sizeof(msg), "Dumping bank %d/%d...", bank + 1, det_banks);
+    cart_status(msg);
 
     if (d->crt_hw_type == 32 || d->crt_hw_type == CRT_TYPE_EF3) {
         // EasyFlash: ROML + ROMH at $E000 (saved as $A000 in CRT)
@@ -520,7 +507,7 @@ static FRESULT dump_bank(cart_dumper_t *d, crt_sink_t *f, int slot, int slots, i
         d->bank_status_lo[bank] = (res == FR_OK) ? BANK_VERIFIED : BANK_ERROR;
     }
 
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
+    cart_banks(d->bank_status_lo, d->bank_status_hi);
     return res;
 }
 
@@ -546,37 +533,37 @@ static bool copy_out(const crt_sink_t *k, const char *path, const char *fname, b
     int piece_len = sizeof(small);
     void *src = NULL;
     if (from_temp) {
-        src = file_open(TEMP_DIR, fname, "rb");
+        src = g_port->fopen(TEMP_DIR, fname, "rb");
         if (!src)
             return false;
-        uint8_t *big = (uint8_t *)g_api->mem->malloc(COPY_PIECE);
+        uint8_t *big = (uint8_t *)g_port->mem_alloc(COPY_PIECE);
         if (big) {
             piece = big;
             piece_len = COPY_PIECE;
         }
     }
     bool ok = false;
-    void *f = file_open(path, fname, "wb");
+    void *f = g_port->fopen(path, fname, "wb");
     if (f) {
         ok = true;
         if (from_temp) {
             for (uint32_t pos = 0; pos < k->pos && ok; pos += (uint32_t)piece_len) {
                 int chunk = (k->pos - pos > (uint32_t)piece_len) ? piece_len : (int)(k->pos - pos);
-                ok = file_read(src, piece, chunk) == chunk && file_write(f, piece, chunk) == chunk;
+                ok = g_port->fread(src, piece, chunk) == chunk && g_port->fwrite(f, piece, chunk) == chunk;
             }
         } else {
             for (uint32_t pos = 0; pos < k->pos && ok; pos += COPY_PIECE) {
                 int chunk = (k->pos - pos > COPY_PIECE) ? COPY_PIECE : (int)(k->pos - pos);
                 const uint8_t *p = k->blk[pos / STAGE_BLOCK] + pos % STAGE_BLOCK;
-                ok = file_write(f, p, chunk) == chunk; // a piece never crosses a block: 64 KB is a multiple of 16 KB
+                ok = g_port->fwrite(f, p, chunk) == chunk; // a piece never crosses a block: 64 KB is a multiple of 16 KB
             }
         }
-        file_close(f);
+        g_port->fclose(f);
     }
     if (src)
-        file_close(src);
+        g_port->fclose(src);
     if (piece != small)
-        g_api->mem->free(piece);
+        g_port->mem_free(piece);
     return ok;
 }
 
@@ -585,12 +572,12 @@ static bool copy_out(const crt_sink_t *k, const char *path, const char *fname, b
 static FRESULT save_image(cart_dumper_t *d, const crt_sink_t *k, const char *path, const char *fname, bool from_temp)
 {
     for (;;) {
-        draw_status(d, "Saving to file...");
+        cart_status("Saving to file...");
         if (copy_out(k, path, fname, from_temp))
             return FR_OK;
         LOG("[CartDumper] Writing '%s/%s' failed\n", path, fname);
-        draw_status(d, "Saving failed.");
-        if (u2p_ui_popup_buttons("Saving failed. Retry?", BUTTON_YES | BUTTON_NO) != BUTTON_YES)
+        cart_status("Saving failed.");
+        if (!cart_confirm("Saving failed. Retry?"))
             return FR_DISK_ERR;
     }
 }
@@ -612,10 +599,10 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
     sink.ef1_eapi = ef3_slot_as_ef(d);
     bool from_temp = false;
     if (sink_alloc_blocks(&sink)) {
-        file_close(f); // created to see that the drive takes it; opened again to save
+        g_port->fclose(f); // created to see that the drive takes it; opened again to save
         LOG("[CartDumper] Staging in RAM\n");
-    } else if ((sink.f = file_open(TEMP_DIR, fname, "wb")) != NULL) {
-        file_close(f);
+    } else if ((sink.f = g_port->fopen(TEMP_DIR, fname, "wb")) != NULL) {
+        g_port->fclose(f);
         from_temp = true;
         LOG("[CartDumper] Staging in %s/%s\n", TEMP_DIR, fname);
     } else {
@@ -630,8 +617,8 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
     if (!sink_put(&sink, hdr, 0x40)) {
         sink_free_blocks(&sink);
         if (sink.f)
-            file_close(sink.f);
-        draw_status(d, "Write error (header).");
+            g_port->fclose(sink.f);
+        cart_status("Write error (header).");
         return FR_DISK_ERR;
     }
 
@@ -644,10 +631,9 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
             C64_POKE(EF3_SLOT_REG, (uint8_t)slot);
             memset(d->bank_status_lo, BANK_UNKNOWN, sizeof(d->bank_status_lo));
             memset(d->bank_status_hi, BANK_UNKNOWN, sizeof(d->bank_status_hi));
-            char sl[CART_SCREEN_COLS + 1];
-            ui_snprintf(sl, sizeof(sl), "Slot %d of 8%s", slot, slot == 0 ? ": system area" : "");
-            cart_screen_line(d->window, d->layout.y_slot, 15, sl);
-            cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
+            d->slot_shown = slot;
+            cart_header();
+            cart_banks(d->bank_status_lo, d->bank_status_hi);
         }
         for (int bank = 0; bank < det_banks && res == FR_OK; bank++)
             res = dump_bank(d, &sink, slot, slots, bank, det_banks);
@@ -657,12 +643,12 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
 
     // If GMod2: read EEPROM and append as CHIP packet with load=$DE00
     if (res == FR_OK && d->crt_hw_type == 60) {
-        draw_status(d, "Reading EEPROM...");
+        cart_status("Reading EEPROM...");
         uint8_t eeprom_buf[2048];
         if (cart_read_gmod2_eeprom(eeprom_buf)) {
             write_chip(&sink, 0, 0xDE00, 2048, 0, eeprom_buf);
             LOG("[CartDumper] EEPROM data written to CRT (2KB)\n");
-            draw_status(d, "EEPROM saved.");
+            cart_status("EEPROM saved.");
         } else {
             LOG("[CartDumper] No EEPROM data to save\n");
         }
@@ -672,18 +658,18 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
     // The EEPROM packet is missing when the cartridge had none: the file ends where the image does
     if (staged) {
         if (from_temp)
-            file_close(sink.f);
+            g_port->fclose(sink.f);
         if (res == FR_OK)
             res = save_image(d, &sink, path, fname, from_temp);
         if (from_temp && res == FR_OK) {
             // There is no delete in the app API: an empty file gives the RAM disk its space back
-            void *t = file_open(TEMP_DIR, fname, "wb");
+            void *t = g_port->fopen(TEMP_DIR, fname, "wb");
             if (t)
-                file_close(t);
+                g_port->fclose(t);
         }
         sink_free_blocks(&sink);
     } else {
-        file_close(f);
+        g_port->fclose(f);
     }
 
     uint16_t bank_size =
@@ -693,118 +679,41 @@ static FRESULT dump_run(cart_dumper_t *d, void *f, const char *path, const char 
 
     if (res == FR_OK) {
         char msg[60];
-        ui_snprintf(msg, sizeof(msg), "Done: %d bank%s, %dKB saved.", all_banks, all_banks == 1 ? "" : "s",
+        cart_snprintf(msg, sizeof(msg), "Done: %d bank%s, %dKB saved.", all_banks, all_banks == 1 ? "" : "s",
                     total_kb);
-        draw_status(d, msg);
+        cart_status(msg);
     } else {
-        draw_status(d, "DUMP ERROR!");
+        cart_status("DUMP ERROR!");
     }
     return res;
 }
 
 // =========================================================================
-//  Drawing
+//  open / close and the operations a view asks for
 // =========================================================================
 
-static void draw_header(cart_dumper_t *d)
-{
-    if (!d->window)
-        return;
-    cart_layout_compute(&d->layout, d->det_banks > 0 ? d->det_banks : 1, d->has_romh, d->base.is_ef3);
-
-    uint16_t bank_size = d->has_romh ? 0x4000 : 0x2000;
-    int total_kb = (d->det_banks * bank_size * (d->base.ef3_whole ? EF3_NUM_SLOTS : 1)) / 1024;
-    const char *name = d->probe_result.type_name ? d->probe_result.type_name : "Cart";
-    char line[CART_SCREEN_COLS + 1];
-    ui_snprintf(line, sizeof(line), "TREX Cart Dumper - %s (%dKB)", name, total_kb);
-    cart_screen_line(d->window, d->layout.y_header, 1, line);
-
-    // EasyFlash 3: the slot to dump
-    if (d->base.is_ef3) {
-        if (d->base.ef3_whole) {
-            ui_snprintf(line, sizeof(line), "All slots, system area first");
-        } else if (d->base.ef3_slot) {
-            ui_snprintf(line, sizeof(line), "Slot %d%s%s", d->base.ef3_slot, d->base.ef3_name[0] ? ": " : "",
-                        d->base.ef3_name);
-        } else {
-            ui_snprintf(line, sizeof(line), "No slot selected");
-        }
-        cart_screen_line(d->window, d->layout.y_slot, 15, line);
-    }
-    cart_screen_file(d->window, &d->layout, d->file);
-}
-
-static void draw_status(cart_dumper_t *d, const char *msg)
-{
-    cart_screen_status(d->window, &d->layout, msg);
-}
-
-static void draw_footer(cart_dumper_t *d)
-{
-    static const char *const keys[] = { "F1", "Scan", "F3", "Dump", "F5", "Inspect", "R/S", "Exit" };
-    static const char *const slot_keys[] = { "F7", "Select slot/full" };
-    if (!d->window)
-        return;
-    cart_screen_keys(d->window, d->layout.y_keys, keys, 4);
-    if (d->base.is_ef3)
-        cart_screen_keys(d->window, d->layout.y_keys2, slot_keys, 1);
-}
-
-void cart_dumper_redraw(cart_dumper_t *d)
-{
-    if (!d->window)
-        return;
-    window_clear(d->window);
-    draw_header(d);
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
-    draw_footer(d);
-}
-
-// Scans all banks again (EasyFlash 3: of the picked slot) and shows done when finished
-static void rescan(cart_dumper_t *d, const char *done)
-{
-    draw_status(d, "Scanning...");
-    memset(d->bank_status_lo, BANK_UNKNOWN, sizeof(d->bank_status_lo));
-    memset(d->bank_status_hi, BANK_UNKNOWN, sizeof(d->bank_status_hi));
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
-    cart_ef3_select_slot(&d->base);
-    cart_scan_all_banks(d->bank_status_lo, d->bank_status_hi, d->det_banks, d->has_romh, d->romh_addr);
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
-    draw_status(d, done);
-}
-
-// =========================================================================
-//  init / deinit / poll
-// =========================================================================
-
-void cart_dumper_init(cart_dumper_t *d)
+void cart_dumper_open(cart_dumper_t *d)
 {
     memset(d, 0, sizeof(*d));
     d->romh_addr = 0xA000;
-
-    d->window = cart_screen_open();
-    window_clear(d->window);
-    u2p_ui_set_redraw(rebuild, d);
+    d->slot_shown = -1;
 
     if (!cart_session_open(true)) {
-        draw_header(d);
-        draw_footer(d);
-        draw_status(d, cart_session_status());
+        cart_header();
+        cart_status(cart_session_status());
         return;
     }
 
     if (!cart_detect_present(&d->base)) {
-        draw_header(d);
-        draw_footer(d);
-        draw_status(d, "No cartridge detected.");
+        cart_header();
+        cart_status("No cartridge detected.");
         cart_notify_no_cartridge();
         return;
     }
 
     if (!cart_check_dma_access()) {
-        draw_header(d);
-        draw_footer(d);
-        draw_status(d, "No cart access: set Cart Pref Internal");
+        cart_header();
+        cart_status("No cart access: set Cart Pref Internal");
         return;
     }
 
@@ -834,68 +743,70 @@ void cart_dumper_init(cart_dumper_t *d)
         cart_ef3_pick_slot(&d->base, EF3_PICK_WHOLE);
     }
 
-    // Show UI and scan
-    draw_header(d);
-    draw_status(d, "Scanning...");
-    draw_footer(d);
+    cart_header();
+    cart_status("Scanning...");
     if (d->base.is_ef3 && !d->base.ef3_slot && !d->base.ef3_whole) {
-        draw_status(d, "No slot selected. F7=Select slot");
+        cart_status("No slot selected. F7=Select slot");
         return;
     }
     cart_ef3_select_slot(&d->base);
     cart_scan_all_banks(d->bank_status_lo, d->bank_status_hi, d->det_banks, d->has_romh, d->romh_addr);
-    cart_draw_bank_map(d->window, &d->layout, d->bank_status_lo, d->bank_status_hi);
+    cart_banks(d->bank_status_lo, d->bank_status_hi);
 
     char msg[60];
-    ui_snprintf(msg, sizeof(msg), "%s - F3=Dump", d->probe_result.type_name);
-    draw_status(d, msg);
+    cart_snprintf(msg, sizeof(msg), "%s - F3=Dump", d->probe_result.type_name);
+    cart_status(msg);
 }
 
-void cart_dumper_deinit(cart_dumper_t *d)
+void cart_dumper_close(cart_dumper_t *d)
 {
-    u2p_ui_set_redraw(NULL, NULL);
     cart_ef3_restore_slot(&d->base);
     cart_session_close();
-    window_close(d->window);
-    d->window = NULL;
 }
 
-int cart_dumper_poll(cart_dumper_t *d, int c)
+// Scans all banks again (EasyFlash 3: of the picked slot) and shows done when finished
+static void rescan(cart_dumper_t *d, const char *done)
 {
-    switch (c) {
-    case KEY_F1:
-        if (d->base.is_ef3 && !d->base.ef3_slot && !d->base.ef3_whole) {
-            draw_status(d, "No slot selected. F7=Select slot");
-        } else if (d->det_banks > 0) {
-            rescan(d, "Scan complete.");
-        }
-        break;
+    cart_status("Scanning...");
+    memset(d->bank_status_lo, BANK_UNKNOWN, sizeof(d->bank_status_lo));
+    memset(d->bank_status_hi, BANK_UNKNOWN, sizeof(d->bank_status_hi));
+    cart_banks(d->bank_status_lo, d->bank_status_hi);
+    cart_ef3_select_slot(&d->base);
+    cart_scan_all_banks(d->bank_status_lo, d->bank_status_hi, d->det_banks, d->has_romh, d->romh_addr);
+    cart_banks(d->bank_status_lo, d->bank_status_hi);
+    cart_status(done);
+}
 
-    case KEY_F3:
-        if (d->base.is_ef3 && !d->base.ef3_slot && !d->base.ef3_whole) {
-            draw_status(d, "No slot selected. F7=Select slot");
-        } else if (d->det_banks > 0) {
-            do_dump(d);
-        }
-        break;
+// An EasyFlash 3 with neither a slot nor the whole image picked: there is nothing to read
+static bool no_slot(const cart_dumper_t *d)
+{
+    return d->base.is_ef3 && !d->base.ef3_slot && !d->base.ef3_whole;
+}
 
-    case KEY_F5:
-        if (d->det_banks > 0) {
-            draw_status(d, "Use Cart Inspector from menu.");
-        }
-        break;
-
-    case KEY_F7:
-        if (d->base.is_ef3 && cart_ef3_pick_slot(&d->base, EF3_PICK_WHOLE) != EF3_PICKED_NONE) {
-            cart_dumper_redraw(d);
-            rescan(d, "EasyFlash 3 - F3=Dump");
-        }
-        break;
-
-    case KEY_ESCAPE:
-    case KEY_BACK:
-    case KEY_BREAK:
-        return MENU_CLOSE;
+void cart_dumper_scan(cart_dumper_t *d)
+{
+    if (no_slot(d)) {
+        cart_status("No slot selected. F7=Select slot");
+    } else if (d->det_banks > 0) {
+        rescan(d, "Scan complete.");
     }
-    return 0;
+}
+
+void cart_dumper_dump(cart_dumper_t *d)
+{
+    if (no_slot(d)) {
+        cart_status("No slot selected. F7=Select slot");
+    } else if (d->det_banks > 0) {
+        do_dump(d);
+    }
+}
+
+// The EasyFlash 3 entry: which slot to dump, or the whole image
+void cart_dumper_select(cart_dumper_t *d)
+{
+    if (d->base.is_ef3 && cart_ef3_pick_slot(&d->base, EF3_PICK_WHOLE) != EF3_PICKED_NONE) {
+        d->slot_shown = -1;
+        cart_redraw();
+        rescan(d, "EasyFlash 3 - F3=Dump");
+    }
 }

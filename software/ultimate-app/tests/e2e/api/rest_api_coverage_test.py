@@ -134,6 +134,10 @@ HAPPY_ELSEWHERE: dict[Key, str] = {
     ("POST", "/v1/machine:input"): "input",
     ("GET", "/v1/apps/{id}"): "app-rest",
     ("PUT", "/v1/apps/{id}:run"): "app-rest",
+    ("PUT", "/v1/timewarp:dump"): "timewarp-files",
+    ("PUT", "/v1/timewarp:ringdump"): "timewarp-files",
+    ("PUT", "/v1/timewarp:ringsave"): "timewarp-files",
+    ("PUT", "/v1/timewarp:load"): "timewarp-files",
 }
 
 # Operations with no happy path anywhere, and why. Printed on every run, so the
@@ -149,6 +153,11 @@ NEGATIVE_ONLY: dict[Key, str] = {
     ("POST", "/v1/runners:sidplay"): "as the PUT form",
     ("POST", "/v1/runners:modplay"): "as the PUT form",
     ("POST", "/v1/runners:run_crt"): "as the PUT form",
+    ("PUT", "/v1/timewarp:rewind"):
+        "puts the running machine back in time, which is not something to do to "
+        "whatever the bench left running",
+    ("PUT", "/v1/timewarp:scrub"): "as rewind, and it needs the freeze menu up",
+    ("PUT", "/v1/timewarp:scrubend"): "as scrub",
 }
 
 # Maps an API_CALL handler to the operation path the contract gives it, for the
@@ -892,6 +901,67 @@ def _streams_cases() -> list[Case]:
     return c
 
 
+def _timewarp_cases() -> list[Case]:
+    """The frame ring (T20, T66).
+
+    Every one of these answers 503 on a bitstream without the engine and while
+    the REU is on (A08), so each case takes that as an answer: the point here
+    is that the route is served and says something sane, not that this bench
+    has a ring. What the routes do when there is one is the timewarp-files
+    suite's business (HAPPY_ELSEWHERE) and the Timewarp UI's.
+    """
+    c: list[Case] = []
+
+    def case(key, name, kind, fn, exclusive=False):
+        c.append(Case(key, name, kind, fn, exclusive=exclusive))
+
+    def answer(ctx: Ctx, method: str, verb: str, params=None, ok=(200,),
+               also=(400, 404, 409, 422, 503)) -> dict:
+        code, _, body = ctx.api.rest.request(method, f"/v1/timewarp:{verb}", params=params,
+                                             idempotent=(method == "GET"))
+        if code not in ok and code not in also:
+            raise Failure(f"timewarp:{verb} answered HTTP {code}: {body[:160]!r}")
+        return rest_lib.json_object(f"timewarp:{verb}", body) if body else {}
+
+    def _status(ctx: Ctx) -> None:
+        answer(ctx, "GET", "status")
+    case(("GET", "/v1/timewarp:status"), "says whether the ring runs", "happy", _status)
+
+    def _frame(ctx: Ctx) -> None:
+        answer(ctx, "GET", "frame", {"frames": 0})
+    case(("GET", "/v1/timewarp:frame"), "describes the newest frame", "happy", _frame)
+
+    def _frame_far(ctx: Ctx) -> None:
+        answer(ctx, "GET", "frame", {"frames": 1000000}, ok=())
+    case(("GET", "/v1/timewarp:frame"), "refuses a frame that far back", "negative", _frame_far)
+
+    def _start(ctx: Ctx) -> None:
+        answer(ctx, "PUT", "start")
+    case(("PUT", "/v1/timewarp:start"), "starts the ring", "happy", _start)
+
+    def _stop(ctx: Ctx) -> None:
+        answer(ctx, "PUT", "stop")
+        answer(ctx, "PUT", "start")             # leave it as it was found: running
+    case(("PUT", "/v1/timewarp:stop"), "stops the ring and starts it again", "happy", _stop)
+
+    # The three that move the running machine are called with a parameter no
+    # ring can have, so the route is proven without rewinding whatever runs.
+    for verb, params in (("rewind", {"frames": 1000000}), ("scrub", {"frames": 1000000}),
+                         ("scrubend", {"frames": 1000000})):
+        def _move(ctx: Ctx, verb=verb, params=params) -> None:
+            answer(ctx, "PUT", verb, params, ok=())
+        case(("PUT", f"/v1/timewarp:{verb}"), "refuses a frame that far back", "negative", _move)
+
+    # The file routes: without a path they have to refuse rather than write
+    # something, and nothing is left behind either way.
+    for verb in ("dump", "ringdump", "ringsave", "load"):
+        def _nopath(ctx: Ctx, verb=verb) -> None:
+            answer(ctx, "PUT", verb, {}, ok=())
+        case(("PUT", f"/v1/timewarp:{verb}"), "refuses a call without a path", "negative", _nopath)
+
+    return c
+
+
 def _protocol_cases() -> list[Case]:
     """The # ---- protocol routes."""
     c: list[Case] = []
@@ -966,6 +1036,7 @@ CASE_FAMILIES = (
     _drives_cases,
     _runners_cases,
     _streams_cases,
+    _timewarp_cases,
     _apps_cases,
     _protocol_cases,
 )

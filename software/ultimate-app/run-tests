@@ -308,6 +308,13 @@ SUITES: Sequence[Suite] = (
     # fail for a reason that is not its own.
     Suite("e2e", "create-disk-image", "tests/e2e/api/create_disk_image_test.py",
           "-H @HOST@ -p @PASS@ -t @TIMEOUT@", profile=profiles.QUICK),
+    # The Timewarp files of T66: a .c64re, a .c64rering and a .trxring written
+    # and loaded again over REST. The check no host test can make is that a
+    # .trxring brings the timeline back while a .c64re leaves the ring starting
+    # over. It skips itself on a bitstream without the frame ring and while the
+    # REU is on (A08).
+    Suite("e2e", "timewarp-files", "tests/e2e/api/timewarp_file_test.py",
+          "-H @HOST@ -p @PASS@ -t @TIMEOUT@", profile=profiles.STANDARD),
     # Reads physical track 81 through a real emulated 1581, then mounts an
     # oversized D81 and proves the bounded layout leaves the device usable.
     Suite("e2e", "d81-track-bounds", "tests/e2e/drive/d81_track_bounds_test.py",

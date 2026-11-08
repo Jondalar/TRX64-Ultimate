@@ -292,11 +292,15 @@ static void help(sbuf_t *out)
            "    frame [-N|+N]    move N anchors (forward at the head runs N frames)\n"
            "    goto <frame|c<cycle>|mark>  land on an anchor\n"
            "    mark <name> | marks | unmark <name>\n"
+           "    ringdump <p> [s] [stride]  .c64rering;  ringload <p> [entry]  an anchor\n"
+           "    ringsave <p.trxring>  the ring itself (ringload brings it back whole)\n"
+           "    dump <p> | undump <p>      .c64re of the frame start / load one\n"
            "  TRACE (the instruction trace: the last second of the machine, engine stream 3)\n"
            "    trace [on|off|status]   the trace gate (it runs with the ring)\n"
            "    chis [cycles] | chis <c1> <c2>   cpu history: PC, opcode, registers after\n"
            "    whowrote <addr> [n]     the last n writers of an address (PC, cycle, values)\n"
            "    triage [pc]             causal chain to a wild PC: RTS/RTI/JMP, stack slot\n"
+           "    tracering <c1> <c2> [path]   a .c64retrace of the window (C64RE indexes it)\n"
            "    revdepth                the trace's depth (fixed: 1 s)\n"
            "  NOT AVAILABLE ON THIS HOST (C64 Ultimate hardware, trxmon)\n"
            "    obs ... do mark|trace\n"
@@ -304,7 +308,7 @@ static void help(sbuf_t *out)
            "    georam, uci, folder, bitmap, reset, power, warp, turbo,\n"
            "    mount, eject, swapcrt, savecrt\n"
            "    tracedb, traceindex, map, taint, swimlane (analyses on the host:\n"
-           "    a trace export to C64RE comes with TODO T66); diff, play, cadence, window,\n"
+           "    export with tracering, run them in C64RE); diff, play, cadence, window,\n"
            "    rawframe\n"
            "  Media, machine and input: the Ultimate's REST API (/v1/...), not trxmon.");
 }
@@ -3065,7 +3069,7 @@ int mon_exec(const char *cmd, sbuf_t *out, mon_pending_t *p)
         return MON_ERR;
     }
     if (is_one_of(op, trace)) {
-        err(out, k.t[0], ": not available on this host " "\xe2\x80\x94" " an analysis over a trace on the host: a trace export to C64RE/TRX64 is not in M1 (TODO T66)");
+        err(out, k.t[0], ": not available on this host " "\xe2\x80\x94" " an analysis over a trace on the host: export the window with `tracering` and run it in C64RE/TRX64");
         return MON_ERR;
     }
     if (is_one_of(op, na)) {

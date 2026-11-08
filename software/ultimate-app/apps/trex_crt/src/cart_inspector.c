@@ -7,6 +7,7 @@
  */
 
 #include "cart_inspector.h"
+#include "ui_shim.h"
 
 #define LINES_VISIBLE  21
 #define BYTES_PER_LINE 8
@@ -45,10 +46,10 @@ static void draw_header(cart_inspector_t *t)
     int len;
     if (t->ef3) {
         // $DE01 reads back the slot on an EF3: read it for every header, so a write to $DE01 with F3 shows up
-        len = ui_snprintf(buf, sizeof(buf), "EasyFlash 3 S%d G=%d E=%d $01=%02X B=%02X", C64_PEEK(EF3_SLOT_REG) & 7,
+        len = cart_snprintf(buf, sizeof(buf), "EasyFlash 3 S%d G=%d E=%d $01=%02X B=%02X", C64_PEEK(EF3_SLOT_REG) & 7,
                           det_game, det_exrom, cpu_port, t->bank_reg);
     } else {
-        len = ui_snprintf(buf, sizeof(buf), "Cart:G=%d E=%d (%s) $01=%02X B=%02X", det_game, det_exrom, cart_type,
+        len = cart_snprintf(buf, sizeof(buf), "Cart:G=%d E=%d (%s) $01=%02X B=%02X", det_game, det_exrom, cart_type,
                           cpu_port, t->bank_reg);
     }
 
@@ -67,10 +68,10 @@ static void draw_line(cart_inspector_t *t, int y, uint16_t addr)
     char buf[41];
     char asc[9];
 
-    int pos = ui_snprintf(buf, sizeof(buf), "%04X: ", addr);
+    int pos = cart_snprintf(buf, sizeof(buf), "%04X: ", addr);
     for (int i = 0; i < BYTES_PER_LINE; i++) {
         uint8_t b = C64_PEEK((uint16_t)(addr + i));
-        pos += ui_snprintf(buf + pos, (int)sizeof(buf) - pos, "%02X ", b);
+        pos += cart_snprintf(buf + pos, (int)sizeof(buf) - pos, "%02X ", b);
         asc[i] = petscii_printable(b);
     }
     asc[BYTES_PER_LINE] = 0;

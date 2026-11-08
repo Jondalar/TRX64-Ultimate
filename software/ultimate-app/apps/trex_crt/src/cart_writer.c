@@ -2,62 +2,21 @@
  * cart_writer.c
  *
  *  Flash .CRT files to physical flash cartridges via the U64 cart slot.
- *  Supported: EasyFlash (AM29F040 x2), EasyFlash 3 (MX29LV640EB, one slot
- *  at a time), GMod2 (AM29F040), MegaByter (MX29F800CB, 1MB), C64MegaCart
- *  (M29F160FT, 2MB).
+ *  Which cartridges, which flash part, which command addresses and which
+ *  register opens the write window is data: the type's mapping descriptor
+ *  (one JSON per type in tools/cart_descriptors) through cart_flash.h. T95 D2.
+ *  EasyFlash 3 (one slot at a time) and GMod2 keep their own programming
+ *  sequence - the slot container is T95 D7, GMod2's EEPROM dance D4.
  *  Port of the firmware CartWriter (software/io/c64/cart_writer.cc).
  */
 
 #include "cart_writer.h"
+
+#include "cart_fmt.h"
+#include "cart_view.h"
 #include "eapi_drivers.h"
 
-// ---- Flash chip definitions ----
-
-static const flash_chip_info_t megabyter_info = {
-    "MegaByter",
-    0x8AAA, 0x8555, // ROML unlock addrs
-    0,      0,      // no ROMH
-    FLASH_MODE_DE02, 0x03, 0x00,
-    128,    1024 * 1024, 86, false
-};
-
-static const flash_chip_info_t megacart_info = {
-    "C64MegaCart",
-    0xEAAA, 0xE555, // through ROMH
-    0,      0,      // single chip
-    FLASH_MODE_DF00, 0xC0, 0x00,
-    256,    2 * 1024 * 1024, 88, false // T33: 88 = C64MegaCart
-};
-
-static const flash_chip_info_t gmod2_info = {
-    "GMod2",
-    // AM29F040: chip addresses $5555/$2AAA, reached through the bank register (gmod2_flash_cycle)
-    0x5555, 0x2AAA,
-    0,      0,      // no ROMH chip
-    FLASH_MODE_DE00, 0xC0, 0x00,
-    64,     512 * 1024, 60, false
-};
-
-static const flash_chip_info_t easyflash_info = {
-    "EasyFlash",
-    // AM29F040: unlock addresses $555 and $2AA (from skoe's EAPI source)
-    // Bank 0 must be selected. Only lower 11 bits matter for unlock.
-    // ROML ($8000 base): $8000+$555=$8555, $8000+$2AA=$82AA
-    0x8555, 0x82AA, // ROML chip unlock addresses
-    // ROMH ($E000 base): $E000+$555=$E555, $E000+$2AA=$E2AA
-    0xE555, 0xE2AA,                 // ROMH chip unlock addresses
-    FLASH_MODE_DE02_EF, 0x05, 0x05, // $05=Ultimax (both flash and read mode)
-    64,     1024 * 1024, 32, true
-};
-
-static const flash_chip_info_t ef3_info = {
-    "EasyFlash 3",
-    // MX29LV640EB: commands to $8AAA/$8555 in slot 0, bank 0, for ROML and ROMH alike (eapi-mx29640b.s)
-    0x8AAA, 0x8555,
-    0,      0,                      // ROML and ROMH are the same chip
-    FLASH_MODE_DE02_EF, 0x05, 0x05, // $05=Ultimax (both flash and read mode)
-    64,     1024 * 1024, 32, true   // one slot
-};
+#include <string.h>
 
 static const uint8_t crt_signature[16] = { 0x43, 0x36, 0x34, 0x20, 0x43, 0x41, 0x52, 0x54,
                                            0x52, 0x49, 0x44, 0x47, 0x45, 0x20, 0x20, 0x20 };
@@ -68,10 +27,6 @@ static uint8_t s_chip_buf[0x2000];
 // GMod2 EEPROM contents from the CRT (load $DE00), all $FF when it has none
 static uint8_t s_eeprom[GMOD2_EEPROM_SIZE];
 
-static void draw_header(cart_writer_t *w);
-static void draw_status(cart_writer_t *w, const char *msg);
-static void draw_footer(cart_writer_t *w);
-static void rebuild(void *ctx);
 static void flash_reset_chips(cart_writer_t *w);
 
 // Where the CRT comes from. On Gideon's core it is read from the stick once, when the writer opens on it, and written
@@ -106,7 +61,7 @@ static crt_reader_t *crt_open(const cart_writer_t *w)
     }
     if (!w->crt_stream)
         return NULL;
-    s_reader.fh = file_open(w->crt_path, w->crt_filename, "rb");
+    s_reader.fh = g_port->fopen(w->crt_path, w->crt_filename, "rb");
     return s_reader.fh ? &s_reader : NULL;
 }
 
@@ -118,14 +73,14 @@ static crt_reader_t *crt_open_file(const char *path, const char *name)
     s_reader.pos = 0;
     s_reader.path = path;
     s_reader.name = name;
-    s_reader.fh = file_open(path, name, "rb");
+    s_reader.fh = g_port->fopen(path, name, "rb");
     return s_reader.fh ? &s_reader : NULL;
 }
 
 static void crt_close(crt_reader_t *f)
 {
     if (f && f->fh)
-        file_close(f->fh);
+        g_port->fclose(f->fh);
     if (f)
         f->fh = NULL;
 }
@@ -135,7 +90,7 @@ static int crt_read(crt_reader_t *f, void *buf, uint32_t len)
     if (f->fh) {
         uint32_t got = 0;
         while (got < len) {
-            int n = file_read(f->fh, (uint8_t *)buf + got, (int)(len - got));
+            int n = g_port->fread(f->fh, (uint8_t *)buf + got, (int)(len - got));
             if (n <= 0)
                 break;
             got += (uint32_t)n;
@@ -163,8 +118,8 @@ static bool crt_seek(crt_reader_t *f, uint32_t pos)
         return ok;
     }
     if (pos < f->pos) {
-        file_close(f->fh);
-        f->fh = file_open(f->path, f->name, "rb");
+        g_port->fclose(f->fh);
+        f->fh = g_port->fopen(f->path, f->name, "rb");
         f->pos = 0;
         if (!f->fh)
             return false;
@@ -210,34 +165,34 @@ static int next_chip(crt_reader_t *f, uint8_t ch[0x10])
 // the writer streams the file instead. False only when the file cannot be opened.
 static bool load_crt(cart_writer_t *w)
 {
-    void *f = file_open(w->crt_path, w->crt_filename, "rb");
+    void *f = g_port->fopen(w->crt_path, w->crt_filename, "rb");
     if (!f)
         return false;
     if (is_trx()) {
-        file_close(f);
+        g_port->fclose(f);
         w->crt_stream = true;
         LOG("[CartWriter] CRT is streamed from the file\n");
         return true;
     }
     uint32_t cap = 0x10000, size = 0;
-    uint8_t *data = (uint8_t *)g_api->mem->malloc(cap);
+    uint8_t *data = (uint8_t *)g_port->mem_alloc(cap);
     while (data) {
         if (size == cap) {
-            uint8_t *more = (uint8_t *)g_api->mem->realloc(data, cap * 2);
+            uint8_t *more = (uint8_t *)g_port->mem_realloc(data, cap * 2);
             if (!more) {
-                g_api->mem->free(data);
+                g_port->mem_free(data);
                 data = NULL;
                 break;
             }
             data = more;
             cap *= 2;
         }
-        int got = file_read(f, data + size, (int)(cap - size));
+        int got = g_port->fread(f, data + size, (int)(cap - size));
         if (got <= 0)
             break;
         size += (uint32_t)got;
     }
-    file_close(f);
+    g_port->fclose(f);
     if (!data) {
         LOG("[CartWriter] No memory for the CRT, streaming it from the file\n");
         w->crt_stream = true;
@@ -278,7 +233,7 @@ static uint16_t eeprom_word(int address) { return (uint16_t)((s_eeprom[2 * addre
 //  Flash cart detection
 // =========================================================================
 
-static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
+static const cart_flash_t *detect_flash_cart(cart_writer_t *w)
 {
     if (!cart_detect_present(&w->base))
         return NULL;
@@ -293,10 +248,10 @@ static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
         // EasyFlash 3: slot register at $DE01
         if (cart_detect_ef3(&w->base)) {
             LOG("[CartWriter] EasyFlash 3 detected\n");
-            return &ef3_info;
+            return cart_flash_by_cart_type(0x12);
         }
         LOG("[CartWriter] EasyFlash detected\n");
-        return &easyflash_info;
+        return cart_flash_by_cart_type(0x11);
     }
 
     // Check $DE00 banking (the remaining flash carts all use it)
@@ -329,7 +284,7 @@ static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
         C64_POKE(0xDE02, 0x00);
         if (memcmp(e000_before, e000_after, 16) != 0) {
             LOG("[CartWriter] MegaByter confirmed (%d banks)\n", banks);
-            return &megabyter_info;
+            return cart_flash_by_cart_type(0x0F);
         }
     }
 
@@ -342,7 +297,7 @@ static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
         C64_POKE(0xDF00, 0x00);
         if (memcmp(e000_before, e000_after, 16) != 0) {
             LOG("[CartWriter] C64MegaCart confirmed (%d banks)\n", banks);
-            return &megacart_info;
+            return cart_flash_by_cart_type(0x68);
         }
     }
 
@@ -351,7 +306,7 @@ static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
     if (banks <= 128) {
         if (cart_detect_gmod2()) {
             LOG("[CartWriter] GMod2 confirmed\n");
-            return &gmod2_info;
+            return cart_flash_by_cart_type(0x48);
         }
     }
 
@@ -363,46 +318,42 @@ static const flash_chip_info_t *detect_flash_cart(cart_writer_t *w)
 //  Flash programming primitives
 // =========================================================================
 
+// The write window of this cartridge: $DE02 = $05 on an EasyFlash, $DF00 = $C0 on a C64MegaCart,
+// $DE00 = $C0 on a GMod2 - all three out of the descriptor's rules and its MODE field (trx_flash_geom.h).
 static void enter_flash_mode(cart_writer_t *w)
 {
-    switch (w->chip->mode_type) {
-    case FLASH_MODE_DE02:
-        C64_POKE(0xDE02, w->chip->ultimax_val);
-        break;
-    case FLASH_MODE_DE02_EF:
-        C64_POKE(0xDE02, w->chip->ultimax_val);
-        break;
-    case FLASH_MODE_DF00:
-        C64_POKE(0xDF00, w->chip->ultimax_val);
-        break;
-    case FLASH_MODE_DE00:
-        C64_POKE(0xDE00, w->chip->ultimax_val);
-        break;
-    }
+    C64_POKE(w->chip->mode_addr, w->chip->wval);
 }
 
 static void exit_flash_mode(cart_writer_t *w)
 {
-    switch (w->chip->mode_type) {
-    case FLASH_MODE_DE02:
-        C64_POKE(0xDE02, w->chip->normal_val);
-        break;
-    case FLASH_MODE_DE02_EF:
-        C64_POKE(0xDE02, w->chip->normal_val);
-        break;
-    case FLASH_MODE_DF00:
-        C64_POKE(0xDF00, w->chip->normal_val);
-        break;
-    case FLASH_MODE_DE00:
-        C64_POKE(0xDE00, w->chip->normal_val);
-        break;
-    }
+    C64_POKE(w->chip->mode_addr, w->chip->rval);
+}
+
+// Where a chip address is reached from the C64 side. `chip` picks the part of a two-chip board (0 ROML,
+// 1 ROMH). The command addresses are the data sheet's ($555 / $2AA of an AM29F040, $AAA / $555 of an
+// MX29F800), never a CPU address: which window and which bank they land in is the descriptor's business.
+static uint16_t flash_addr(cart_writer_t *w, uint32_t chip_addr, int chip, bool write)
+{
+    return trx_flash_cmd(w->chip->desc, chip_addr, chip, write).off;
+}
+
+// One command cycle. A part that decodes more address bits than one window holds (GMod2's AM29F040: 15)
+// needs the bank of the command address selected, the others take the cycle where they stand.
+static void flash_cmd(cart_writer_t *w, uint32_t chip_addr, int chip, uint8_t val)
+{
+    C64_POKE(flash_addr(w, chip_addr, chip, true), val);
+}
+
+static void flash_unlock_chip(cart_writer_t *w, int chip)
+{
+    flash_cmd(w, w->chip->part->magic1, chip, 0xAA);
+    flash_cmd(w, w->chip->part->magic2, chip, 0x55);
 }
 
 static void flash_unlock(cart_writer_t *w)
 {
-    C64_POKE(w->chip->cmd_addr_1, 0xAA);
-    C64_POKE(w->chip->cmd_addr_2, 0x55);
+    flash_unlock_chip(w, 0);
 }
 
 static bool flash_poll(uint16_t addr, uint8_t expected)
@@ -430,53 +381,64 @@ static bool flash_poll(uint16_t addr, uint8_t expected)
 //  with the flash writable, 0x 8K with the flash readable at $8000, 10 off.
 //  Bit 6 is also the EEPROM chip select, bits 5 and 4 its clock and data in
 //  (VICE gmod2.c). The flash only reads in 8K mode, so polling and verify
-//  switch to $80|bank. Command cycles go to the AM29F040 chip addresses
-//  $5555/$2AAA through the bank register and the $E000 window, where VICE
-//  takes Ultimax writes to the flash; an AM29F040B decodes the low 11 bits
-//  of the same addresses. A bank change in flash mode passes $80|bank first,
-//  so the EEPROM is deselected while its clock and data bits change.
+//  switch to the read mode. Command cycles go to the AM29F040 chip addresses
+//  $5555/$2AAA, which that part decodes to 15 bits, so the bank register is
+//  part of the command address - all of that comes out of the descriptor
+//  (trx_flash_cmd, T95 D1). What stays here is the sequence: a bank change in
+//  flash mode passes the read mode first, so the EEPROM is deselected while
+//  its clock and data bits change (T95 D4).
 // =========================================================================
 
-#define GMOD2_MODE_FLASH         0xC0 // Ultimax, flash writable (EEPROM selected)
-#define GMOD2_MODE_READ          0x80 // 8K, flash readable, EEPROM deselected
 #define GMOD2_PROGRAM_TIMEOUT_MS 50
 #define GMOD2_ERASE_TIMEOUT_S    120
 
+// The flash mode with the EEPROM's chip select low. The CS pin is one of the mode bits (descriptor byte
+// 33, pin 6 of a GMod2 register whose MODE field starts at bit 6), so clearing it is one bit of the mode.
+static uint8_t gmod2_mode_read(cart_writer_t *w)
+{
+    const trx_cart_desc_t *d = w->chip->desc;
+    int cs = d->desc[33] & 7;                           // the EEPROM's chip select pin in the register
+    int mode = d->flash->wmode & ~(1 << (cs - trx_desc_mode(d).lsb));
+    return trx_desc_reg_value(d, trx_desc_mode(d).reg, 0, mode);
+}
+
 // Selects bank in flash mode, deselecting the EEPROM first
-static void gmod2_flash_bank(int bank)
+static void gmod2_flash_bank(cart_writer_t *w, int bank)
 {
-    C64_POKE(0xDE00, (uint8_t)(GMOD2_MODE_READ | bank));
-    C64_POKE(0xDE00, (uint8_t)(GMOD2_MODE_FLASH | bank));
+    C64_POKE(w->chip->bank_addr, (uint8_t)(gmod2_mode_read(w) | bank));
+    C64_POKE(w->chip->bank_addr, (uint8_t)(w->chip->wval | bank));
 }
 
-// One write cycle to a chip address: bank = address / 8K, offset through $E000
-static void gmod2_flash_cycle(uint32_t chip_addr, uint8_t val)
+// One write cycle to a chip address: its bank through the bank register, its offset through the window
+// the part is programmed in ($E000, Ultimax)
+static void gmod2_flash_cycle(cart_writer_t *w, uint32_t chip_addr, uint8_t val)
 {
-    gmod2_flash_bank((int)(chip_addr >> 13));
-    C64_POKE((uint16_t)(0xE000 | (chip_addr & 0x1FFF)), val);
+    trx_chip_access_t a = trx_flash_cmd(w->chip->desc, chip_addr, 0, true);
+    gmod2_flash_bank(w, a.bank);
+    C64_POKE(a.off, val);
 }
 
-// $AA to $5555, $55 to $2AAA, cmd to $5555
-static void gmod2_flash_command(uint8_t cmd)
+// $AA to magic1, $55 to magic2, cmd to magic1 ($5555 / $2AAA on this part)
+static void gmod2_flash_command(cart_writer_t *w, uint8_t cmd)
 {
-    gmod2_flash_cycle(0x5555, 0xAA);
-    gmod2_flash_cycle(0x2AAA, 0x55);
-    gmod2_flash_cycle(0x5555, cmd);
+    gmod2_flash_cycle(w, w->chip->part->magic1, 0xAA);
+    gmod2_flash_cycle(w, w->chip->part->magic2, 0x55);
+    gmod2_flash_cycle(w, w->chip->part->magic1, cmd);
 }
 
 // Back to read mode after an error, then 8K bank 0
-static void gmod2_flash_reset(void)
+static void gmod2_flash_reset(cart_writer_t *w)
 {
-    gmod2_flash_cycle(0x0000, 0xF0);
-    C64_POKE(0xDE00, 0x00);
+    gmod2_flash_cycle(w, 0x0000, 0xF0);
+    C64_POKE(w->chip->bank_addr, w->chip->rval);
 }
 
 // Reads the byte in 8K mode until it holds expected; DQ5 set on a byte that still differs is a failed program
-static bool gmod2_flash_poll(int bank, uint16_t offset, uint8_t expected)
+static bool gmod2_flash_poll(cart_writer_t *w, int bank, uint16_t offset, uint8_t expected)
 {
-    C64_POKE(0xDE00, (uint8_t)(GMOD2_MODE_READ | bank));
-    uint16_t addr = 0x8000 | offset;
-    uint32_t start = g_api->sys->tick_ms();
+    C64_POKE(w->chip->bank_addr, (uint8_t)(gmod2_mode_read(w) | bank));
+    uint16_t addr = (uint16_t)(flash_addr(w, 0, 0, false) | offset);
+    uint32_t start = g_port->tick_ms();
     for (;;) {
         uint8_t val = C64_PEEK(addr);
         if (val == expected)
@@ -488,7 +450,7 @@ static bool gmod2_flash_poll(int bank, uint16_t offset, uint8_t expected)
             LOG("[CartWriter] GMod2 program error bank %d $%04X: $%02X vs $%02X\n", bank, addr, val, expected);
             return false;
         }
-        if ((g_api->sys->tick_ms() - start) > GMOD2_PROGRAM_TIMEOUT_MS) {
+        if ((g_port->tick_ms() - start) > GMOD2_PROGRAM_TIMEOUT_MS) {
             LOG("[CartWriter] GMod2 program timeout bank %d $%04X: $%02X vs $%02X\n", bank, addr, val, expected);
             return false;
         }
@@ -497,68 +459,69 @@ static bool gmod2_flash_poll(int bank, uint16_t offset, uint8_t expected)
 
 static FRESULT gmod2_chip_erase(cart_writer_t *w)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     LOG("[CartWriter] === GMOD2 CHIP ERASE ===\n");
-    draw_status(w, "Erasing flash...");
+    cart_status("Erasing flash...");
     memset(w->bank_status_lo, BANK_ERASING, chip->max_banks);
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
 
-    gmod2_flash_command(0x80);
-    gmod2_flash_cycle(0x5555, 0xAA);
-    gmod2_flash_cycle(0x2AAA, 0x55);
-    gmod2_flash_cycle(0x5555, 0x10);
+    gmod2_flash_command(w, 0x80);
+    gmod2_flash_cycle(w, chip->part->magic1, 0xAA);
+    gmod2_flash_cycle(w, chip->part->magic2, 0x55);
+    gmod2_flash_cycle(w, chip->part->magic1, 0x10);
 
     // DQ7 reads 0 until the whole chip is erased
-    C64_POKE(0xDE00, GMOD2_MODE_READ);
-    uint32_t start = g_api->sys->tick_ms();
+    C64_POKE(chip->bank_addr, gmod2_mode_read(w));
+    uint16_t dq7 = flash_addr(w, 0, 0, false);
+    uint32_t start = g_port->tick_ms();
     uint32_t shown = 0;
     bool done = false;
     while (!done) {
-        done = (C64_PEEK(0x8000) == 0xFF);
-        uint32_t secs = (g_api->sys->tick_ms() - start) / 1000;
+        done = (C64_PEEK(dq7) == 0xFF);
+        uint32_t secs = (g_port->tick_ms() - start) / 1000;
         if (!done && secs >= GMOD2_ERASE_TIMEOUT_S)
             break;
         if (secs != shown) {
             shown = secs;
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Erasing flash... %ds", (int)secs);
-            draw_status(w, msg);
+            cart_snprintf(msg, sizeof(msg), "Erasing flash... %ds", (int)secs);
+            cart_status(msg);
         }
     }
 
     if (!done) {
-        gmod2_flash_reset();
+        gmod2_flash_reset(w);
         memset(w->bank_status_lo, BANK_ERROR, chip->max_banks);
-        cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+        cart_banks(w->bank_status_lo, w->bank_status_hi);
         LOG("[CartWriter] GMod2 ERASE FAILED\n");
-        draw_status(w, "ERASE FAILED!");
+        cart_status("ERASE FAILED!");
         return FR_DISK_ERR;
     }
 
-    C64_POKE(0xDE00, 0x00);
-    LOG("[CartWriter] GMod2 erase done after %d ms\n", (int)(g_api->sys->tick_ms() - start));
+    C64_POKE(chip->bank_addr, chip->rval);
+    LOG("[CartWriter] GMod2 erase done after %d ms\n", (int)(g_port->tick_ms() - start));
     memset(w->bank_status_lo, BANK_EMPTY, chip->max_banks);
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, "Erase complete.");
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status("Erase complete.");
     return FR_OK;
 }
 
-static FRESULT gmod2_write_bank(int bank, const uint8_t *data, uint16_t size)
+static FRESULT gmod2_write_bank(cart_writer_t *w, int bank, const uint8_t *data, uint16_t size)
 {
     uint16_t len = (size > 0x2000) ? 0x2000 : size;
     for (uint16_t i = 0; i < len; i++) {
         if (data[i] == 0xFF)
             continue;
-        gmod2_flash_command(0xA0);
-        gmod2_flash_cycle(((uint32_t)bank << 13) | i, data[i]);
-        if (!gmod2_flash_poll(bank, i, data[i])) {
-            gmod2_flash_reset();
+        gmod2_flash_command(w, 0xA0);
+        gmod2_flash_cycle(w, ((uint32_t)bank << 13) | i, data[i]);
+        if (!gmod2_flash_poll(w, bank, i, data[i])) {
+            gmod2_flash_reset(w);
             LOG("[CartWriter] FAIL bank %d offset $%04X\n", bank, i);
             return FR_DISK_ERR;
         }
     }
-    C64_POKE(0xDE00, 0x00);
+    C64_POKE(w->chip->bank_addr, w->chip->rval);
     LOG("[CartWriter] Bank %d: OK\n", bank);
     return FR_OK;
 }
@@ -566,7 +529,7 @@ static FRESULT gmod2_write_bank(int bank, const uint8_t *data, uint16_t size)
 // Compares the EEPROM with s_eeprom
 static FRESULT gmod2_verify_eeprom(cart_writer_t *w)
 {
-    draw_status(w, "Verifying EEPROM...");
+    cart_status("Verifying EEPROM...");
     int errors = 0;
     for (int addr = 0; addr < GMOD2_EEPROM_WORDS; addr++) {
         uint16_t got = cart_gmod2_eeprom_read_word(addr);
@@ -576,12 +539,12 @@ static FRESULT gmod2_verify_eeprom(cart_writer_t *w)
             errors++;
         }
     }
-    C64_POKE(0xDE00, 0x00);
+    C64_POKE(w->chip->bank_addr, w->chip->rval);
 
     if (errors) {
         char msg[40];
-        ui_snprintf(msg, sizeof(msg), "EEPROM VERIFY FAILED: %d words!", errors);
-        draw_status(w, msg);
+        cart_snprintf(msg, sizeof(msg), "EEPROM VERIFY FAILED: %d words!", errors);
+        cart_status(msg);
         return FR_DISK_ERR;
     }
     LOG("[CartWriter] EEPROM verified\n");
@@ -598,7 +561,7 @@ static FRESULT gmod2_write_eeprom(cart_writer_t *w)
 
     cart_gmod2_eeprom_write_enable(true);
 
-    draw_status(w, "Reading EEPROM...");
+    cart_status("Reading EEPROM...");
     for (int addr = 0; addr < GMOD2_EEPROM_WORDS; addr++)
         words[addr] = cart_gmod2_eeprom_read_word(addr);
 
@@ -609,8 +572,8 @@ static FRESULT gmod2_write_eeprom(cart_writer_t *w)
             continue;
         if ((written & 15) == 0) {
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Writing EEPROM word %d...", addr);
-            draw_status(w, msg);
+            cart_snprintf(msg, sizeof(msg), "Writing EEPROM word %d...", addr);
+            cart_status(msg);
         }
         if (cart_gmod2_eeprom_write_word(addr, eeprom_word(addr)))
             written++;
@@ -621,7 +584,7 @@ static FRESULT gmod2_write_eeprom(cart_writer_t *w)
     cart_gmod2_eeprom_write_enable(false);
     LOG("[CartWriter] EEPROM: %d words written\n", written);
     if (res != FR_OK) {
-        draw_status(w, "EEPROM WRITE FAILED!");
+        cart_status("EEPROM WRITE FAILED!");
         return res;
     }
     return gmod2_verify_eeprom(w);
@@ -630,20 +593,20 @@ static FRESULT gmod2_write_eeprom(cart_writer_t *w)
 // Reads addr for up to one second until it reads $FF (erase done); the last value read goes to *sample
 static bool poll_erased_for_a_second(uint16_t addr, uint8_t *sample)
 {
-    uint32_t start = g_api->sys->tick_ms();
+    uint32_t start = g_port->tick_ms();
     do {
         *sample = C64_PEEK(addr);
         if (*sample == 0xFF)
             return true;
-    } while ((g_api->sys->tick_ms() - start) < 1000);
+    } while ((g_port->tick_ms() - start) < 1000);
     return false;
 }
 
 static FRESULT flash_chip_erase(cart_writer_t *w)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
-    if (chip == &gmod2_info)
+    if (chip->eeprom)
         return gmod2_chip_erase(w);
 
     // An EasyFlash 3 is erased by slot (ef3_erase_slot) or whole (ef3_erase_cart), never here
@@ -651,13 +614,13 @@ static FRESULT flash_chip_erase(cart_writer_t *w)
         return FR_DENIED;
 
     LOG("[CartWriter] === CHIP ERASE ===\n");
-    draw_status(w, "Erasing flash...");
+    cart_status("Erasing flash...");
     for (int i = 0; i < chip->max_banks; i++) {
         w->bank_status_lo[i] = BANK_ERASING;
         if (chip->has_romh)
             w->bank_status_hi[i] = BANK_ERASING;
     }
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
 
     enter_flash_mode(w);
     cart_switch_bank(0, 0); // unlock sequence requires bank 0
@@ -665,58 +628,56 @@ static FRESULT flash_chip_erase(cart_writer_t *w)
     // Erase ROML chip
     LOG("[CartWriter] Erasing ROML chip...\n");
     flash_unlock(w);
-    C64_POKE(chip->cmd_addr_1, 0x80);
+    flash_cmd(w, chip->part->magic1, 0, 0x80);
     flash_unlock(w);
-    C64_POKE(chip->cmd_addr_1, 0x10);
+    flash_cmd(w, chip->part->magic1, 0, 0x10);
 
     bool done = false;
     for (int sec = 0; sec < 120 && !done; sec++) {
         uint8_t sample = 0;
-        done = poll_erased_for_a_second(chip->cmd_addr_1, &sample);
+        done = poll_erased_for_a_second(flash_addr(w, chip->part->magic1, 0, true), &sample);
         if (sec < 5 || (sec % 10) == 0)
             LOG("[CartWriter] ROML erase: %ds, read=$%02X %s\n", sec + 1, sample, done ? "DONE" : "...");
 
         int erased = (sec * chip->max_banks) / 120;
         for (int b = 0; b < erased && b < chip->max_banks; b++)
             w->bank_status_lo[b] = BANK_EMPTY;
-        cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+        cart_banks(w->bank_status_lo, w->bank_status_hi);
 
         char msg[40];
-        ui_snprintf(msg, sizeof(msg), "Erasing ROML... %ds", sec + 1);
-        draw_status(w, msg);
+        cart_snprintf(msg, sizeof(msg), "Erasing ROML... %ds", sec + 1);
+        cart_status(msg);
     }
 
     if (!done) {
         exit_flash_mode(w);
         LOG("[CartWriter] ROML ERASE FAILED\n");
-        draw_status(w, "ROML ERASE FAILED!");
+        cart_status("ROML ERASE FAILED!");
         return FR_DISK_ERR;
     }
 
     // Erase ROMH chip (EasyFlash only — separate chip)
-    if (chip->has_romh && chip->cmd_addr_h1) {
+    if (chip->has_romh && chip->part->chips > 1) {
         LOG("[CartWriter] Erasing ROMH chip...\n");
-        C64_POKE(chip->cmd_addr_h1, 0xAA);
-        C64_POKE(chip->cmd_addr_h2, 0x55);
-        C64_POKE(chip->cmd_addr_h1, 0x80);
-        C64_POKE(chip->cmd_addr_h1, 0xAA);
-        C64_POKE(chip->cmd_addr_h2, 0x55);
-        C64_POKE(chip->cmd_addr_h1, 0x10);
+        flash_unlock_chip(w, 1);
+        flash_cmd(w, chip->part->magic1, 1, 0x80);
+        flash_unlock_chip(w, 1);
+        flash_cmd(w, chip->part->magic1, 1, 0x10);
 
         done = false;
         for (int sec = 0; sec < 120 && !done; sec++) {
             uint8_t sample = 0;
-            done = poll_erased_for_a_second(chip->cmd_addr_h1, &sample);
+            done = poll_erased_for_a_second(flash_addr(w, chip->part->magic1, 1, true), &sample);
             if (sec < 5 || (sec % 10) == 0)
                 LOG("[CartWriter] ROMH erase: %ds, $%02X %s\n", sec + 1, sample, done ? "DONE" : "...");
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Erasing ROMH... %ds", sec + 1);
-            draw_status(w, msg);
+            cart_snprintf(msg, sizeof(msg), "Erasing ROMH... %ds", sec + 1);
+            cart_status(msg);
         }
         if (!done) {
             exit_flash_mode(w);
             LOG("[CartWriter] ROMH ERASE FAILED\n");
-            draw_status(w, "ROMH ERASE FAILED!");
+            cart_status("ROMH ERASE FAILED!");
             return FR_DISK_ERR;
         }
     }
@@ -733,8 +694,8 @@ static FRESULT flash_chip_erase(cart_writer_t *w)
         if (chip->has_romh)
             w->bank_status_hi[i] = BANK_EMPTY;
     }
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, "Erase complete.");
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status("Erase complete.");
     return FR_OK;
 }
 
@@ -743,18 +704,16 @@ static FRESULT flash_program_byte(cart_writer_t *w, uint16_t addr, uint8_t val)
     if (val == 0xFF)
         return FR_OK;
 
-    // For EasyFlash: unlock sequence must run on bank 0,
-    // then switch to target bank for the actual data write.
-    // (From skoe's EAPI: "bank 0 must have been selected" for unlock)
-    if (w->chip->mode_type == FLASH_MODE_DE02_EF) {
-        cart_switch_bank(0, 0);
+    // The EasyFlash family wants the command cycles in bank 0 and the data byte in the target bank
+    // (skoe's EAPI: "bank 0 must have been selected"); flash.unlock_bank says so per type.
+    if (w->chip->part->unlock_bank >= 0) {
+        cart_switch_bank(w->chip->part->unlock_bank, 0);
     }
 
     flash_unlock(w);
-    C64_POKE(w->chip->cmd_addr_1, 0xA0); // program command
+    flash_cmd(w, w->chip->part->magic1, 0, 0xA0); // program command
 
-    // Switch to target bank before writing the data byte
-    if (w->chip->mode_type == FLASH_MODE_DE02_EF) {
+    if (w->chip->part->unlock_bank >= 0) {
         cart_switch_bank(w->ef_current_bank, 0);
     }
 
@@ -819,11 +778,11 @@ static void ef3_reset_flash(int bank)
 // EAPI's cmpByte loop: true once addr reads expected. Reads at least min_reads times and for timeout_ms.
 static bool ef3_poll(uint16_t addr, uint8_t expected, int min_reads, uint32_t timeout_ms)
 {
-    uint32_t start = g_api->sys->tick_ms();
+    uint32_t start = g_port->tick_ms();
     for (int reads = 1;; reads++) {
         if (C64_PEEK(addr) == expected)
             return true;
-        if (reads >= min_reads && (g_api->sys->tick_ms() - start) > timeout_ms)
+        if (reads >= min_reads && (g_port->tick_ms() - start) > timeout_ms)
             return false;
     }
 }
@@ -908,11 +867,11 @@ static FRESULT ef3_erase_slot_any(cart_writer_t *w, int slot)
         uint8_t *status = romh ? w->bank_status_hi : w->bank_status_lo;
         for (int bank = 0; bank < 64 && res == FR_OK; bank += EF3_SECTOR_BANKS) {
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Erasing slot %d %s %02X-%02X...", slot, romh ? "ROMH" : "ROML", bank,
+            cart_snprintf(msg, sizeof(msg), "Erasing slot %d %s %02X-%02X...", slot, romh ? "ROMH" : "ROML", bank,
                         bank + EF3_SECTOR_BANKS - 1);
-            draw_status(w, msg);
+            cart_status(msg);
             memset(status + bank, BANK_ERASING, EF3_SECTOR_BANKS);
-            cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+            cart_banks(w->bank_status_lo, w->bank_status_hi);
             if (slot == 0 && bank == 0 && !romh) {
                 for (int k = 0; k < EF3_SECTOR_BANKS && res == FR_OK; k++)
                     res = ef3_erase_boot_sector(k);
@@ -920,7 +879,7 @@ static FRESULT ef3_erase_slot_any(cart_writer_t *w, int slot)
                 res = ef3_erase_sector(slot, bank, romh != 0);
             }
             memset(status + bank, (res == FR_OK) ? BANK_EMPTY : BANK_ERROR, EF3_SECTOR_BANKS);
-            cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+            cart_banks(w->bank_status_lo, w->bank_status_hi);
         }
     }
     return res;
@@ -936,8 +895,8 @@ static FRESULT ef3_erase_cart(cart_writer_t *w)
     LOG("[CartWriter] === EF3 WHOLE CART CHIP ERASE ===\n");
     memset(w->bank_status_lo, BANK_ERASING, sizeof(w->bank_status_lo));
     memset(w->bank_status_hi, BANK_ERASING, sizeof(w->bank_status_hi));
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, "Erasing the whole cart...");
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status("Erasing the whole cart...");
 
     enter_flash_mode(w);
     ef3_unlock();
@@ -946,7 +905,7 @@ static FRESULT ef3_erase_cart(cart_writer_t *w)
     C64_POKE(0x8555, 0x55);
     C64_POKE(0x8AAA, 0x10);
 
-    uint32_t start = g_api->sys->tick_ms(), shown = 0;
+    uint32_t start = g_port->tick_ms(), shown = 0;
     int ff = 0;
     bool done = false;
     while (!done) {
@@ -955,14 +914,14 @@ static FRESULT ef3_erase_cart(cart_writer_t *w)
             done = true;
             break;
         }
-        uint32_t ms = g_api->sys->tick_ms() - start;
+        uint32_t ms = g_port->tick_ms() - start;
         if (ms > EF3_CHIP_ERASE_TIMEOUT_MS)
             break;
         if (ms / 1000 != shown) {
             shown = ms / 1000;
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Erasing the whole cart... %ds", (int)shown);
-            draw_status(w, msg);
+            cart_snprintf(msg, sizeof(msg), "Erasing the whole cart... %ds", (int)shown);
+            cart_status(msg);
         }
     }
     if (!done) {
@@ -972,7 +931,7 @@ static FRESULT ef3_erase_cart(cart_writer_t *w)
         cart_ef3_select_slot(&w->base);
         memset(w->bank_status_lo, BANK_ERROR, sizeof(w->bank_status_lo));
         memset(w->bank_status_hi, BANK_ERROR, sizeof(w->bank_status_hi));
-        draw_status(w, "WHOLE ERASE FAILED!");
+        cart_status("WHOLE ERASE FAILED!");
         return FR_DISK_ERR;
     }
 
@@ -994,21 +953,21 @@ static FRESULT ef3_erase_cart(cart_writer_t *w)
     cart_ef3_select_slot(&w->base);
     memset(w->bank_status_lo, bad ? BANK_ERROR : BANK_EMPTY, sizeof(w->bank_status_lo));
     memset(w->bank_status_hi, bad ? BANK_ERROR : BANK_EMPTY, sizeof(w->bank_status_hi));
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
     if (bad) {
         LOG("[CartWriter] EF3 chip erase: %d bytes not $FF in the spot check\n", bad);
-        draw_status(w, "ERASE CHECK FAILED!");
+        cart_status("ERASE CHECK FAILED!");
         return FR_DISK_ERR;
     }
-    LOG("[CartWriter] EF3 chip erase done after %d ms\n", (int)(g_api->sys->tick_ms() - start));
-    draw_status(w, "Whole cart erased.");
+    LOG("[CartWriter] EF3 chip erase done after %d ms\n", (int)(g_port->tick_ms() - start));
+    cart_status("Whole cart erased.");
     return FR_OK;
 }
 
 // eraseSlot() of EasyProg: every 64K sector of the picked slot, ROML first, then ROMH
 static FRESULT ef3_erase_slot(cart_writer_t *w)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
     int slot = w->base.ef3_slot;
     if (slot < 1 || slot >= EF3_NUM_SLOTS)
         return FR_DENIED;
@@ -1020,21 +979,21 @@ static FRESULT ef3_erase_slot(cart_writer_t *w)
         uint8_t *status = romh ? w->bank_status_hi : w->bank_status_lo;
         for (int bank = 0; bank < chip->max_banks && res == FR_OK; bank += EF3_SECTOR_BANKS) {
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Erasing slot %d %s %02X-%02X...", slot, romh ? "ROMH" : "ROML", bank,
+            cart_snprintf(msg, sizeof(msg), "Erasing slot %d %s %02X-%02X...", slot, romh ? "ROMH" : "ROML", bank,
                         bank + EF3_SECTOR_BANKS - 1);
-            draw_status(w, msg);
+            cart_status(msg);
             memset(status + bank, BANK_ERASING, EF3_SECTOR_BANKS);
-            cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+            cart_banks(w->bank_status_lo, w->bank_status_hi);
 
             res = ef3_erase_sector(slot, bank, romh);
             memset(status + bank, (res == FR_OK) ? BANK_EMPTY : BANK_ERROR, EF3_SECTOR_BANKS);
-            cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+            cart_banks(w->bank_status_lo, w->bank_status_hi);
         }
     }
     exit_flash_mode(w);
     cart_ef3_select_slot(&w->base);
 
-    draw_status(w, (res == FR_OK) ? "Erase complete." : "SLOT ERASE FAILED!");
+    cart_status((res == FR_OK) ? "Erase complete." : "SLOT ERASE FAILED!");
     return res;
 }
 
@@ -1093,11 +1052,11 @@ static FRESULT ef3_save_slot_name(cart_writer_t *w, const char *name)
         char def[EF3_NAME_LEN + 1];
         cart_ascii_to_petscii(dir, "EF-Directory V1:", EF3_DIR_SIGN_LEN);
         for (int s = 1; s < EF3_DIR_SLOTS; s++) {
-            ui_snprintf(def, sizeof(def), "Slot %d", s);
+            cart_snprintf(def, sizeof(def), "Slot %d", s);
             cart_ascii_to_petscii(dir + EF3_DIR_SIGN_LEN + s * EF3_NAME_LEN, def, EF3_NAME_LEN);
         }
         for (int k = 0; k < EF3_DIR_KERNALS; k++) {
-            ui_snprintf(def, sizeof(def), "KERNAL %d", k + 1);
+            cart_snprintf(def, sizeof(def), "KERNAL %d", k + 1);
             cart_ascii_to_petscii(dir + EF3_DIR_SIGN_LEN + (EF3_DIR_SLOTS + k) * EF3_NAME_LEN, def, EF3_NAME_LEN);
         }
     }
@@ -1139,12 +1098,12 @@ static FRESULT ef3_name_slot(cart_writer_t *w)
     // The string box edits in place, also when cancelled: a cancel keeps the offered name
     char edit[32];
     strcpy(edit, name);
-    if (u2p_ui_string_input("Cartridge Name", edit, EF3_NAME_LEN) > 0) {
+    if (cart_text("Cartridge Name", edit, EF3_NAME_LEN)) {
         strncpy(name, edit, EF3_NAME_LEN);
         name[EF3_NAME_LEN] = 0;
     }
 
-    draw_status(w, "Writing EF-Directory...");
+    cart_status("Writing EF-Directory...");
     // The directory sector is the only flash this writes outside do_write_crt: the guard is open for it alone
     if (!slot_wr_open()) {
         cart_notify("Cannot unlock cartridge writes.\nNothing was written.");
@@ -1156,26 +1115,26 @@ static FRESULT ef3_name_slot(cart_writer_t *w)
     slot_wr_close();
     if (res == FR_OK) {
         strcpy(w->base.ef3_name, name);
-        draw_header(w);
+        cart_header();
     }
     return res;
 }
 
 static FRESULT flash_write_bank(cart_writer_t *w, int bank, const uint8_t *data, uint16_t size)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     if (w->base.is_ef3)
         return ef3_write_bank(w, bank, data, size);
-    if (chip == &gmod2_info)
-        return gmod2_write_bank(bank, data, size);
+    if (chip->eeprom)
+        return gmod2_write_bank(w, bank, data, size);
 
     w->ef_current_bank = bank;
     cart_switch_bank(bank, 0);
     enter_flash_mode(w);
 
-    // ROML chip: data at $8000 (MegaByter, GMod2, EF) or $E000 (MegaCart)
-    uint16_t roml_base = (chip->mode_type == FLASH_MODE_DF00) ? 0xE000 : 0x8000;
+    // Where the flash takes writes: $8000 on most, $E000 where only ROMH is writable (C64MegaCart)
+    uint16_t roml_base = flash_addr(w, 0, 0, true);
     uint16_t roml_size = (size > 0x2000) ? 0x2000 : size;
 
     int non_ff = 0;
@@ -1204,18 +1163,17 @@ static FRESULT flash_write_bank(cart_writer_t *w, int bank, const uint8_t *data,
         for (uint16_t i = 0; i < romh_size; i++)
             if (romh_data[i] != 0xFF)
                 non_ff++;
-        LOG("[CartWriter] Bank %d ROMH: %d/%d bytes at $E000\n", bank, non_ff, romh_size);
+        uint16_t romh_base = flash_addr(w, 0, 1, true);
+        LOG("[CartWriter] Bank %d ROMH: %d/%d bytes at $%04X\n", bank, non_ff, romh_size, romh_base);
 
-        // For ROMH, use the ROMH unlock addresses
+        // The ROMH half: on a two-chip board its own chip, with its own command cycles
         for (uint16_t i = 0; i < romh_size; i++) {
             if (romh_data[i] == 0xFF)
                 continue;
-            // ROMH unlock sequence
-            C64_POKE(chip->cmd_addr_h1, 0xAA);
-            C64_POKE(chip->cmd_addr_h2, 0x55);
-            C64_POKE(chip->cmd_addr_h1, 0xA0);
-            C64_POKE(0xE000 + i, romh_data[i]);
-            if (!flash_poll(0xE000 + i, romh_data[i])) {
+            flash_unlock_chip(w, 1);
+            flash_cmd(w, chip->part->magic1, 1, 0xA0);
+            C64_POKE(romh_base + i, romh_data[i]);
+            if (!flash_poll(romh_base + i, romh_data[i])) {
                 exit_flash_mode(w);
                 LOG("[CartWriter] FAIL bank %d ROMH offset $%04X\n", bank, i);
                 return FR_DISK_ERR;
@@ -1230,14 +1188,17 @@ static FRESULT flash_write_bank(cart_writer_t *w, int bank, const uint8_t *data,
 
 static FRESULT flash_verify_bank(cart_writer_t *w, int bank, const uint8_t *data, uint16_t size)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     cart_ef3_select_slot(&w->base); // EasyFlash 3: the picked slot
 
-    // For EasyFlash: use Ultimax ($DE02=$05) for verify.
-    // ROML at $8000, ROMH at $E000 — no PLA/BASIC ROM conflicts.
-    if (chip->mode_type == FLASH_MODE_DE02_EF) {
-        C64_POKE(0xDE02, 0x05); // Ultimax: ROML@$8000, ROMH@$E000
+    // A cartridge whose ROMH half is read in Ultimax ($E000) needs that mode asserted: the EasyFlash
+    // family reads in the same mode it is written in. A TwoMegabyter reads its ROMH at $A000 in 16K mode
+    // and an 8K cartridge has no ROMH at all, so neither needs this.
+    uint16_t romh_read = trx_window_cpu(chip->desc, chip->part->rmode, 1, false);
+    bool romh_ultimax = chip->has_romh && romh_read == 0xE000;
+    if (romh_ultimax) {
+        C64_POKE(chip->mode_addr, chip->rval);
         for (volatile int d = 0; d < 100; d++) {
         }
     }
@@ -1269,7 +1230,7 @@ static FRESULT flash_verify_bank(cart_writer_t *w, int bank, const uint8_t *data
     // Verify ROMH ($E000 in Ultimax) if EasyFlash with >8K data
     if (chip->has_romh && size > 0x2000) {
         uint16_t romh_size = size - 0x2000;
-        C64_READ(0xE000, s_chip_buf, romh_size);
+        C64_READ(romh_read, s_chip_buf, romh_size);
         for (uint16_t i = 0; i < romh_size; i++) {
             if (s_chip_buf[i] != data[0x2000 + i]) {
                 if (mismatches < 5)
@@ -1281,8 +1242,8 @@ static FRESULT flash_verify_bank(cart_writer_t *w, int bank, const uint8_t *data
     }
 
     // Restore to cart-off after verify
-    if (chip->mode_type == FLASH_MODE_DE02_EF) {
-        C64_POKE(0xDE02, chip->normal_val);
+    if (romh_ultimax) {
+        C64_POKE(chip->mode_addr, chip->rval);
     }
 
     if (mismatches) {
@@ -1303,17 +1264,17 @@ static void flash_reset_chips(cart_writer_t *w)
 {
     if (!is_trx() || !w->chip)
         return;
-    if (w->chip == &gmod2_info) {
-        gmod2_flash_reset();
+    if (w->chip->eeprom) {
+        gmod2_flash_reset(w);
         return;
     }
     enter_flash_mode(w);
     if (w->base.is_ef3)
         C64_POKE(EF3_SLOT_REG, 0);
-    C64_POKE(0xDE00, 0);
-    C64_POKE(w->chip->mode_type == FLASH_MODE_DF00 ? 0xE000 : 0x8000, 0xF0);
+    C64_POKE(w->chip->bank_addr, 0);
+    flash_cmd(w, 0, 0, 0xF0);
     if (w->chip->has_romh)
-        C64_POKE(0xE000, 0xF0);
+        C64_POKE(flash_addr(w, 0, 1, true), 0xF0);
     exit_flash_mode(w);
     cart_ef3_select_slot(&w->base);
 }
@@ -1345,13 +1306,13 @@ static FRESULT writer_guarded(cart_writer_t *w)
 static FRESULT write_bank_with_map(cart_writer_t *w, int bank, const uint8_t *data, uint16_t size, const char *msg,
                                    int *banks_written)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     w->bank_status_lo[bank] = BANK_WRITING;
     if (chip->has_romh)
         w->bank_status_hi[bank] = BANK_WRITING;
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, msg);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status(msg);
 
     FRESULT res = flash_write_bank(w, bank, data, size);
     uint8_t st = (res == FR_OK) ? BANK_FILLED : BANK_ERROR;
@@ -1360,13 +1321,13 @@ static FRESULT write_bank_with_map(cart_writer_t *w, int bank, const uint8_t *da
         w->bank_status_hi[bank] = st;
     if (res == FR_OK)
         (*banks_written)++;
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
     return res;
 }
 
 static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
     w->ef_name[0] = 0;
 
     uint8_t hdr[0x40];
@@ -1427,7 +1388,7 @@ static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
     // For EasyFlash: 16KB per bank (ROML 8K + ROMH 8K)
     // For others: 8KB per bank (ROML only)
     int buf_size = chip->has_romh ? 0x4000 : 0x2000;
-    uint8_t *bank_buf = (uint8_t *)g_api->mem->malloc(buf_size);
+    uint8_t *bank_buf = (uint8_t *)g_port->mem_alloc(buf_size);
     if (!bank_buf)
         return FR_NOT_ENOUGH_CORE;
     memset(bank_buf, 0xFF, buf_size);
@@ -1472,7 +1433,7 @@ static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
             // ROMH-only bank after a ROML-only bank (banks 37 and 63 of a test CRT) otherwise merged into one.
             if (last_bank >= 0 && bank != last_bank) {
                 char msg[40];
-                ui_snprintf(msg, sizeof(msg), "Bank %d/%d", last_bank, chip->max_banks);
+                cart_snprintf(msg, sizeof(msg), "Bank %d/%d", last_bank, chip->max_banks);
                 res = write_bank_with_map(w, last_bank, bank_buf, 0x4000, msg, &banks_written);
                 memset(bank_buf, 0xFF, buf_size);
                 last_bank = -1;
@@ -1492,7 +1453,7 @@ static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
             // If this is ROMH, the bank is complete — flush immediately
             if (offset == 0x2000) {
                 char msg[40];
-                ui_snprintf(msg, sizeof(msg), "Bank %d/%d", bank, chip->max_banks);
+                cart_snprintf(msg, sizeof(msg), "Bank %d/%d", bank, chip->max_banks);
                 res = write_bank_with_map(w, bank, bank_buf, 0x4000, msg, &banks_written);
                 memset(bank_buf, 0xFF, buf_size);
                 last_bank = -1; // no pending data
@@ -1507,7 +1468,7 @@ static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
             }
 
             char msg[40];
-            ui_snprintf(msg, sizeof(msg), "Bank %d/%d ($%04X)", bank, w->crt_num_chips, load);
+            cart_snprintf(msg, sizeof(msg), "Bank %d/%d ($%04X)", bank, w->crt_num_chips, load);
             res = write_bank_with_map(w, bank, bank_buf, size, msg, &banks_written);
         }
     }
@@ -1515,24 +1476,24 @@ static FRESULT do_write_crt_from(cart_writer_t *w, crt_reader_t *f)
     // Flush last pending EasyFlash bank (ROML without following ROMH)
     if (res == FR_OK && chip->has_romh && last_bank >= 0) {
         char msg[40];
-        ui_snprintf(msg, sizeof(msg), "Bank %d/%d (final)", last_bank, chip->max_banks);
+        cart_snprintf(msg, sizeof(msg), "Bank %d/%d (final)", last_bank, chip->max_banks);
         res = write_bank_with_map(w, last_bank, bank_buf, 0x4000, msg, &banks_written);
     }
 
-    g_api->mem->free(bank_buf);
+    g_port->mem_free(bank_buf);
 
     // The validation walked the whole file; a write that stopped anywhere else has not programmed the CRT, however
     // quietly it stopped (a reader that lost its place once ended it after the first packet and reported success)
     if (res == FR_OK && (!clean_end || done_packets != packets || banks_written == 0)) {
         LOG("[CartWriter] write ended after %d of %d packets, %d banks\n", done_packets, packets, banks_written);
-        draw_status(w, "WRITE INCOMPLETE: CRT not read to its end!");
+        cart_status("WRITE INCOMPLETE: CRT not read to its end!");
         res = FR_DISK_ERR;
     }
 
     if (res == FR_OK) {
         char msg[40];
-        ui_snprintf(msg, sizeof(msg), "%d banks written.", banks_written);
-        draw_status(w, msg);
+        cart_snprintf(msg, sizeof(msg), "%d banks written.", banks_written);
+        cart_status(msg);
     }
     return res;
 }
@@ -1551,11 +1512,11 @@ static FRESULT do_write_crt(cart_writer_t *w)
 static void verify_bank_with_map(cart_writer_t *w, int bank, const uint8_t *data, uint16_t size, int *verified,
                                  int *errors)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     char msg[40];
-    ui_snprintf(msg, sizeof(msg), "Verify bank %d...", bank);
-    draw_status(w, msg);
+    cart_snprintf(msg, sizeof(msg), "Verify bank %d...", bank);
+    cart_status(msg);
 
     uint8_t st;
     if (flash_verify_bank(w, bank, data, size) == FR_OK) {
@@ -1568,12 +1529,12 @@ static void verify_bank_with_map(cart_writer_t *w, int bank, const uint8_t *data
     w->bank_status_lo[bank] = st;
     if (chip->has_romh)
         w->bank_status_hi[bank] = st;
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
 }
 
 static FRESULT do_verify_crt_from(cart_writer_t *w, crt_reader_t *f)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
 
     uint8_t hdr[0x40];
     if (crt_read(f, hdr, 0x40) != 0x40 || memcmp(hdr, crt_signature, 16) != 0 ||
@@ -1582,7 +1543,7 @@ static FRESULT do_verify_crt_from(cart_writer_t *w, crt_reader_t *f)
 
     // For EasyFlash: collect ROML+ROMH into 16K buffer (same as write)
     int buf_size = chip->has_romh ? 0x4000 : 0x2000;
-    uint8_t *bank_buf = (uint8_t *)g_api->mem->malloc(buf_size);
+    uint8_t *bank_buf = (uint8_t *)g_port->mem_alloc(buf_size);
     if (!bank_buf)
         return FR_NOT_ENOUGH_CORE;
     // A bank the CRT has only one half of is compared against erased flash in the other half, as the write left it
@@ -1650,16 +1611,16 @@ static FRESULT do_verify_crt_from(cart_writer_t *w, crt_reader_t *f)
         verify_bank_with_map(w, last_bank, bank_buf, buf_size, &verified, &errors);
     }
 
-    g_api->mem->free(bank_buf);
+    g_port->mem_free(bank_buf);
 
     if (verified == 0)
         errors++; // nothing was compared: no verify
     char msg[60];
     if (errors == 0)
-        ui_snprintf(msg, sizeof(msg), "Verify OK: %d banks.", verified);
+        cart_snprintf(msg, sizeof(msg), "Verify OK: %d banks.", verified);
     else
-        ui_snprintf(msg, sizeof(msg), "VERIFY FAILED: %d OK, %d errors!", verified, errors);
-    draw_status(w, msg);
+        cart_snprintf(msg, sizeof(msg), "VERIFY FAILED: %d OK, %d errors!", verified, errors);
+    cart_status(msg);
     return (errors == 0) ? FR_OK : FR_DISK_ERR;
 }
 
@@ -1739,7 +1700,7 @@ static FRESULT ef3_image_each_bank(cart_writer_t *w, crt_reader_t *f, ef3_bank_f
     uint8_t hdr[0x40];
     if (!crt_seek(f, 0) || crt_read(f, hdr, 0x40) != 0x40 || !crt_seek(f, cart_get_dword(hdr + 0x10)))
         return FR_DISK_ERR;
-    uint8_t *buf = (uint8_t *)g_api->mem->malloc(0x4000);
+    uint8_t *buf = (uint8_t *)g_port->mem_alloc(0x4000);
     if (!buf)
         return FR_NOT_ENOUGH_CORE;
     memset(buf, 0xFF, 0x4000);
@@ -1766,39 +1727,34 @@ static FRESULT ef3_image_each_bank(cart_writer_t *w, crt_reader_t *f, ef3_bank_f
     }
     if (res == FR_OK && cur >= 0)
         res = fn(w, cur >> 6, cur & 63, buf);
-    g_api->mem->free(buf);
+    g_port->mem_free(buf);
     return res;
 }
 
-static int s_img_slot = -1;
 
 // The map shows the slot being worked on
 static void ef3_image_slot_shown(cart_writer_t *w, int slot)
 {
-    if (slot == s_img_slot)
+    if (slot == w->img_slot)
         return;
-    s_img_slot = slot;
     memset(w->bank_status_lo, BANK_UNKNOWN, sizeof(w->bank_status_lo));
     memset(w->bank_status_hi, BANK_UNKNOWN, sizeof(w->bank_status_hi));
-    if (w->window) {
-        char line[CART_SCREEN_COLS + 1];
-        ui_snprintf(line, sizeof(line), "Image: slot %d%s", slot, slot == 0 ? " (system area)" : "");
-        cart_screen_line(w->window, w->layout.y_slot, 15, line);
-    }
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    w->img_slot = slot;
+    cart_header();
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
 }
 
 static FRESULT ef3_image_write_bank(cart_writer_t *w, int slot, int bank, const uint8_t *data)
 {
     ef3_image_slot_shown(w, slot);
     char msg[40];
-    ui_snprintf(msg, sizeof(msg), "Slot %d bank %d/64", slot, bank + 1);
+    cart_snprintf(msg, sizeof(msg), "Slot %d bank %d/64", slot, bank + 1);
     w->bank_status_lo[bank] = w->bank_status_hi[bank] = BANK_WRITING;
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, msg);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status(msg);
     FRESULT res = ef3_write_bank_slot(w, slot, bank, data, 0x4000);
     w->bank_status_lo[bank] = w->bank_status_hi[bank] = (res == FR_OK) ? BANK_FILLED : BANK_ERROR;
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
     return res;
 }
 
@@ -1815,12 +1771,12 @@ static FRESULT do_write_ef3_image_from(cart_writer_t *w, crt_reader_t *f)
     for (int slot = 0; slot < EF3_NUM_SLOTS && res == FR_OK; slot++) {
         if (!img.banks[slot])
             continue;
-        s_img_slot = -1;
+        w->img_slot = -1;
         ef3_image_slot_shown(w, slot);
         res = ef3_erase_slot_any(w, slot);
     }
     exit_flash_mode(w);
-    s_img_slot = -1;
+    w->img_slot = -1;
     if (res == FR_OK)
         res = ef3_image_each_bank(w, f, ef3_image_write_bank);
     s_ef3_system = false;
@@ -1859,7 +1815,7 @@ static FRESULT ef3_image_verify_bank(cart_writer_t *w, int slot, int bank, const
     if (bad)
         LOG("[CartWriter] EF3 verify slot %d bank %d: %d bytes differ\n", slot, bank, bad);
     if ((bank & 7) == 7)
-        cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+        cart_banks(w->bank_status_lo, w->bank_status_hi);
     return FR_OK;
 }
 
@@ -1871,7 +1827,7 @@ static FRESULT do_verify_ef3_image_from(cart_writer_t *w, crt_reader_t *f)
     if (!ef3_image_scan(f, &img))
         return FR_INVALID_PARAMETER;
     s_verify_errors = s_verify_banks = 0;
-    s_img_slot = -1;
+    w->img_slot = -1;
     FRESULT res = ef3_image_each_bank(w, f, ef3_image_verify_bank);
     static uint8_t erased[0x4000];
     memset(erased, 0xFF, sizeof(erased));
@@ -1882,15 +1838,15 @@ static FRESULT do_verify_ef3_image_from(cart_writer_t *w, crt_reader_t *f)
             if (!(img.banks[slot] >> bank & 1))
                 ef3_image_verify_bank(w, slot, bank, erased);
     }
-    C64_POKE(0xDE02, w->chip->normal_val);
+    C64_POKE(w->chip->mode_addr, w->chip->rval);
     cart_ef3_select_slot(&w->base);
     LOG("[CartWriter] EF3 verify: %d banks, %d errors\n", s_verify_banks, s_verify_errors);
     char msg[48];
     if (res != FR_OK || s_verify_errors)
-        ui_snprintf(msg, sizeof(msg), "VERIFY FAILED: %d of %d banks differ!", s_verify_errors, s_verify_banks);
+        cart_snprintf(msg, sizeof(msg), "VERIFY FAILED: %d of %d banks differ!", s_verify_errors, s_verify_banks);
     else
-        ui_snprintf(msg, sizeof(msg), "Verify OK: %d banks, %d slots.", s_verify_banks, ef3_image_slots(&img));
-    draw_status(w, msg);
+        cart_snprintf(msg, sizeof(msg), "Verify OK: %d banks, %d slots.", s_verify_banks, ef3_image_slots(&img));
+    cart_status(msg);
     return (res == FR_OK && !s_verify_errors) ? FR_OK : FR_DISK_ERR;
 }
 
@@ -1908,11 +1864,11 @@ static FRESULT do_verify_ef3_image(cart_writer_t *w)
 // types the word. Nothing is touched before both are answered; any other answer ends it.
 static bool confirm_destructive(const char *msg, const char *word)
 {
-    if (u2p_ui_popup_buttons(msg, BUTTON_YES | BUTTON_NO) != BUTTON_YES)
+    if (!cart_confirm(msg))
         return false;
     char title[40], typed[64] = "";
-    ui_snprintf(title, sizeof(title), "Type %s to confirm", word);
-    if (u2p_ui_string_input(title, typed, 12) <= 0)
+    cart_snprintf(title, sizeof(title), "Type %s to confirm", word);
+    if (!cart_text(title, typed, 12))
         return false;
     for (const char *a = typed, *b = word;; a++, b++) {
         char ca = (*a >= 'a' && *a <= 'z') ? (char)(*a - 32) : *a;
@@ -1944,80 +1900,21 @@ static FRESULT ef3_guarded(cart_writer_t *w, FRESULT (*op)(cart_writer_t *))
 static FRESULT ef3_erase_cart_op(cart_writer_t *w) { return ef3_erase_cart(w); }
 
 // =========================================================================
-//  Drawing
-// =========================================================================
-
-static void draw_header(cart_writer_t *w)
-{
-    if (!w->window)
-        return;
-    cart_layout_compute(&w->layout, w->chip ? w->chip->max_banks : 1, w->chip ? w->chip->has_romh : false,
-                        w->chip && w->base.is_ef3);
-
-    char line[CART_SCREEN_COLS + 1];
-    if (w->chip) {
-        ui_snprintf(line, sizeof(line), "TREX Cart Writer - %s (%dKB)", w->chip->name, w->chip->total_size / 1024);
-    } else {
-        ui_snprintf(line, sizeof(line), "TREX Cart Writer - No cart detected");
-    }
-    cart_screen_line(w->window, w->layout.y_header, 1, line);
-
-    // EasyFlash 3: the slot to write
-    if (w->chip && w->base.is_ef3) {
-        if (w->base.ef3_whole) {
-            ui_snprintf(line, sizeof(line), "Full EF3 (all slots, type 90)");
-        } else if (w->base.ef3_slot) {
-            ui_snprintf(line, sizeof(line), "Slot %d%s%s", w->base.ef3_slot, w->base.ef3_name[0] ? ": " : "",
-                        w->base.ef3_name);
-        } else {
-            ui_snprintf(line, sizeof(line), "No slot selected");
-        }
-        cart_screen_line(w->window, w->layout.y_slot, 15, line);
-    }
-    cart_screen_file(w->window, &w->layout, w->crt_filename);
-}
-
-static void draw_status(cart_writer_t *w, const char *msg)
-{
-    cart_screen_status(w->window, &w->layout, msg);
-}
-
-static void draw_footer(cart_writer_t *w)
-{
-    static const char *const keys[] = { "F1", "Scan", "F3", "Write", "F5", "Verify", "R/S", "Exit" };
-    static const char *const slot_keys[] = { "F7", "Slot/full/erase" };
-    if (!w->window)
-        return;
-    cart_screen_keys(w->window, w->layout.y_keys, keys, 4);
-    if (w->chip && w->base.is_ef3)
-        cart_screen_keys(w->window, w->layout.y_keys2, slot_keys, 1);
-}
-
-void cart_writer_redraw(cart_writer_t *w)
-{
-    if (!w->window)
-        return;
-    window_clear(w->window);
-    draw_header(w);
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_footer(w);
-}
-
-// =========================================================================
-//  init / deinit / poll
+//  open / close and the operations a view asks for
 // =========================================================================
 
 // Scans the flash cart; EasyFlash ROMH is only visible at $E000 in flash (Ultimax) mode
 static void scan_chip(cart_writer_t *w)
 {
-    const flash_chip_info_t *chip = w->chip;
+    const cart_flash_t *chip = w->chip;
     cart_ef3_select_slot(&w->base); // EasyFlash 3: the picked slot
+    uint16_t romh = trx_window_cpu(chip->desc, chip->part->rmode, 1, false);
     if (chip->has_romh)
-        enter_flash_mode(w); // Ultimax: ROMH@$E000
+        C64_POKE(chip->mode_addr, chip->rval); // the mode the banks read in: an EasyFlash shows ROMH at $E000
     cart_scan_all_banks(w->bank_status_lo, w->bank_status_hi, chip->max_banks, chip->has_romh,
-                        chip->has_romh ? 0xE000 : 0xA000);
+                        chip->has_romh ? romh : 0xA000);
     if (chip->has_romh)
-        exit_flash_mode(w);
+        C64_POKE(chip->mode_addr, chip->rval);
 }
 
 // What the check before the writer saw in the file; the writer's summary takes it instead of walking the file again
@@ -2031,17 +1928,21 @@ static struct {
     bool eeprom;
 } s_pre;
 
-// The banks a CRT of this type may name, 0 = the writer has no such cartridge type
+// The banks a CRT of this type may name, 0 = the writer has no such cartridge type. Out of the
+// descriptors: every type with a flash block is a type the writer can flash (T95 D2).
 static int crt_type_banks(uint16_t type)
 {
-    switch (type) {
-    case 32: return 64;                 // EasyFlash, and a slot of the EasyFlash 3
-    case 60: return 64;                 // GMod2
-    case 86: return 128;                // MegaByter
-    case 19: case 88: return 256;       // C64MegaCart (19: what older dumps carry)
-    case 90: return EF3_NUM_SLOTS * 64; // EasyFlash 3 image
-    default: return 0;
+    if (type == 19) {
+        type = 88; // what older C64MegaCart dumps carry
     }
+    if (type == 90) {
+        return EF3_NUM_SLOTS * 64; // the whole EasyFlash 3 image: 8 slots in one file (T95 D7)
+    }
+    const cart_flash_t *f = cart_flash_by_crt_type(type);
+    if (f && f->crt_type == 90) {
+        return 0; // type 32 names a slot of an EasyFlash 3; 90 is handled above
+    }
+    return f ? f->max_banks : 0;
 }
 
 // Looks at a CRT before the writer screen opens. NULL = the writer can take the file, else why not, in the user's
@@ -2072,7 +1973,7 @@ const char *cart_writer_check_crt(const char *path, const char *filename)
         first_chip = cart_get_dword(hdr + 0x10);
         max_banks = crt_type_banks(type);
         if (!max_banks) {
-            ui_snprintf(reason, sizeof(reason), "CRT type %d is no cartridge\nthe writer can flash.", type);
+            cart_snprintf(reason, sizeof(reason), "CRT type %d is no cartridge\nthe writer can flash.", type);
             bad = reason;
         } else if (first_chip < 0x40 || !crt_seek(f, first_chip)) {
             bad = "The CRT header is damaged:\nthe chip data starts\noutside the file.";
@@ -2102,7 +2003,7 @@ const char *cart_writer_check_crt(const char *path, const char *filename)
             continue;
         }
         if (bank >= max_banks) {
-            ui_snprintf(reason, sizeof(reason), "The CRT has bank %d, but\ntype %d has %d banks.", bank, type,
+            cart_snprintf(reason, sizeof(reason), "The CRT has bank %d, but\ntype %d has %d banks.", bank, type,
                         max_banks);
             bad = reason;
             break;
@@ -2178,24 +2079,21 @@ static void read_crt_summary(cart_writer_t *w)
     crt_close(f);
 }
 
-void cart_writer_init(cart_writer_t *w, const char *path, const char *filename)
+void cart_writer_open(cart_writer_t *w, const char *path, const char *filename)
 {
     memset(w, 0, sizeof(*w));
+    w->img_slot = -1;
     strncpy(w->crt_path, path ? path : "", sizeof(w->crt_path) - 1);
     strncpy(w->crt_filename, filename ? filename : "", sizeof(w->crt_filename) - 1);
 
-    w->window = cart_screen_open();
-    window_clear(w->window);
-    u2p_ui_set_redraw(rebuild, w);
-
     if (!cart_session_open(false)) {
-        cart_writer_redraw(w);
-        draw_status(w, cart_session_status());
+        cart_redraw();
+        cart_status(cart_session_status());
         return;
     }
     if (!cart_check_dma_access()) {
-        cart_writer_redraw(w);
-        draw_status(w, "No cart access: set Cart Pref Internal");
+        cart_redraw();
+        cart_status("No cart access: set Cart Pref Internal");
         return;
     }
     w->chip = detect_flash_cart(w);
@@ -2213,64 +2111,46 @@ void cart_writer_init(cart_writer_t *w, const char *path, const char *filename)
             cart_ef3_pick_slot(&w->base, EF3_PICK_WHOLE);
         }
 
-        draw_header(w);
-        draw_status(w, "Scanning...");
-        draw_footer(w);
+        cart_header();
+        cart_status("Scanning...");
         if (w->base.is_ef3 && !w->base.ef3_slot && !w->base.ef3_whole) {
-            draw_status(w, "No slot selected. F7=Select slot");
+            cart_status("No slot selected. F7=Select slot");
             return;
         }
         scan_chip(w);
         w->num_banks_found = w->chip->max_banks;
-        cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-        draw_status(w, "Ready.");
+        cart_banks(w->bank_status_lo, w->bank_status_hi);
+        cart_status("Ready.");
     } else {
-        cart_writer_redraw(w);
-        draw_status(w, "No supported flash cart found!");
+        cart_redraw();
+        cart_status("No supported flash cart found!");
     }
 }
 
-void cart_writer_deinit(cart_writer_t *w)
+void cart_writer_close(cart_writer_t *w)
 {
-    u2p_ui_set_redraw(NULL, NULL);
     if (w->crt_data) {
-        g_api->mem->free(w->crt_data);
+        g_port->mem_free(w->crt_data);
         w->crt_data = NULL;
     }
     cart_ef3_restore_slot(&w->base);
     cart_session_close();
-    window_close(w->window);
-    w->window = NULL;
 }
 
 // Scans the flash cart again (EasyFlash 3: the picked slot) and shows done when finished
 static void rescan(cart_writer_t *w, const char *done)
 {
-    draw_status(w, "Scanning...");
+    cart_status("Scanning...");
     memset(w->bank_status_lo, BANK_UNKNOWN, sizeof(w->bank_status_lo));
     memset(w->bank_status_hi, BANK_UNKNOWN, sizeof(w->bank_status_hi));
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
     scan_chip(w);
-    cart_draw_bank_map(w->window, &w->layout, w->bank_status_lo, w->bank_status_hi);
-    draw_status(w, done);
+    cart_banks(w->bank_status_lo, w->bank_status_hi);
+    cart_status(done);
 }
 
-// A dialog restores the screen it found when it closes, and that was not this
-// one: the frame, the header and the keys are gone afterwards. The SDK dialogs
-// call this when they close. Open the frame again, which clears the whole
-// screen, and draw everything, rather than drawing the frame a second time
-// into the old window, which would nest one frame inside the other.
-static void rebuild(void *ctx)
-{
-    cart_writer_t *w = (cart_writer_t *)ctx;
-    if (w->window)
-        window_close(w->window);
-    w->window = cart_screen_open();
-    cart_writer_redraw(w);
-}
-
-// F7 "ERASE WHOLE CART...": the chip erase of the real EasyFlash 3, 8 MB, after two confirmations
-static void erase_cart_ui(cart_writer_t *w)
+// "ERASE WHOLE CART...": the chip erase of the real EasyFlash 3, 8 MB, after two confirmations
+static void erase_cart(cart_writer_t *w)
 {
     if (!confirm_destructive("ERASE THE WHOLE EASYFLASH 3?\n"
                              "All 8 MB: the system area\n"
@@ -2279,17 +2159,17 @@ static void erase_cart_ui(cart_writer_t *w)
                              "not start until a system\n"
                              "image is written back.",
                              "ERASE")) {
-        draw_status(w, "Not erased. Nothing changed.");
+        cart_status("Not erased. Nothing changed.");
         return;
     }
     FRESULT res = ef3_guarded(w, ef3_erase_cart_op);
     LOG("[CartWriter] whole-cart erase: %s\n", res == FR_OK ? "done" : "FAILED");
     if (res == FR_OK)
-        draw_status(w, "Whole cart erased. Write a system image!");
+        cart_status("Whole cart erased. Write a system image!");
 }
 
-// F3 with a type 90 image: write the slots the file has (slot 0 included), after two confirmations
-static void write_ef3_image_ui(cart_writer_t *w)
+// A type 90 image: write the slots the file has (slot 0 included), after two confirmations
+static void write_ef3_image_asked(cart_writer_t *w)
 {
     if (!confirm_destructive("WRITE THE WHOLE EASYFLASH 3\n"
                              "IMAGE? Every slot the file\n"
@@ -2297,148 +2177,144 @@ static void write_ef3_image_ui(cart_writer_t *w)
                              "slot 0 (the system area)\n"
                              "included.",
                              "WRITE")) {
-        draw_status(w, "Not written. Nothing changed.");
+        cart_status("Not written. Nothing changed.");
         return;
     }
     FRESULT res = ef3_guarded(w, do_write_ef3_image);
     if (res == FR_OK)
-        draw_status(w, "Image written! F5=Verify");
+        cart_status("Image written! F5=Verify");
     else if (res == FR_INVALID_PARAMETER)
-        draw_status(w, "Not a valid type 90 image!");
+        cart_status("Not a valid type 90 image!");
     else
-        draw_status(w, "WRITE FAILED!");
+        cart_status("WRITE FAILED!");
 }
 
-int cart_writer_poll(cart_writer_t *w, int c)
+// "Full EF3" picked: the type 90 image, all slots
+static bool writing_image(const cart_writer_t *w) { return w->chip && w->base.is_ef3 && w->base.ef3_whole; }
+// An EasyFlash 3 with no slot picked yet: nothing to read and nothing to write
+static bool no_slot(const cart_writer_t *w)
 {
-    bool image = w->chip && w->base.is_ef3 && w->base.ef3_whole; // "Full EF3" picked: the type 90 image, all slots
-    bool no_slot = w->chip && w->base.is_ef3 && !w->base.ef3_slot && !image;
+    return w->chip && w->base.is_ef3 && !w->base.ef3_slot && !writing_image(w);
+}
 
-    switch (c) {
-    case KEY_F1:
-        if (no_slot) {
-            draw_status(w, "No slot selected. F7=Select slot");
-        } else if (w->chip) {
-            rescan(w, "Scan complete.");
-        }
-        break;
-
-    case KEY_F3:
-        if (!w->chip) {
-            draw_status(w, "No flash cart!");
-            break;
-        }
-        if (!w->crt_filename[0]) {
-            draw_status(w, "No CRT file.");
-            break;
-        }
-        if (no_slot) {
-            draw_status(w, "No slot selected. F7=Select slot");
-            break;
-        }
-        if (image) {
-            if (w->crt_type != 90) {
-                cart_notify("Full EF3 writes a type 90\n"
-                            "image. This CRT is not one:\n"
-                            "pick a slot (F7) for it.");
-                draw_status(w, "Not a type 90 image!");
-                break;
-            }
-            write_ef3_image_ui(w);
-            break;
-        }
-        if (w->base.is_ef3 && w->crt_type == 90) {
-            cart_notify("A type 90 image needs\n"
-                        "Full EF3 (F7). Writing a\n"
-                        "single slot from it is not\n"
-                        "supported.");
-            draw_status(w, "Pick Full EF3 for type 90.");
-            break;
-        }
-        if (!w->base.is_ef3 && w->crt_type == 90) {
-            cart_notify("EasyFlash 3 image (type 90):\n"
-                        "needs an EasyFlash 3 in the\n"
-                        "port.");
-            draw_status(w, "Not for this cartridge!");
-            break;
-        }
-        // A slot of an EasyFlash 3 is an EasyFlash
-        if (w->base.is_ef3 && w->crt_type != 32) {
-            cart_notify("EasyFlash 3 slots take\n"
-                        "EasyFlash CRTs (type 32) only.");
-            draw_status(w, "Not an EasyFlash CRT!");
-            break;
-        }
-        // F3 on this screen is the decision: the chip, the slot and the file
-        // are all in front of the user, so there is no second question.
-        {
-            {
-                FRESULT res = writer_guarded(w);
-                // Like EasyProg, name the slot in the EF-Directory once the CRT is written
-                if (res == FR_OK && w->base.is_ef3 && ef3_name_slot(w) != FR_OK) {
-                    draw_status(w, "Written; directory update FAILED!");
-                    break;
-                }
-                // GMod2: verify the flash, then the EEPROM last. It powers up write-disabled, which keeps it safe
-                // while flash mode toggles its chip select.
-                if (res == FR_OK && w->chip == &gmod2_info) {
-                    bool verified = do_verify_crt(w) == FR_OK && gmod2_write_eeprom(w) == FR_OK;
-                    if (verified) {
-                        draw_status(w, "Flash+EEPROM verified.");
-                    }
-                    break; // otherwise the status shows what failed
-                }
-                if (res == FR_OK) {
-                    draw_status(w, "Write complete! F5=Verify");
-                } else if (res == FR_INVALID_PARAMETER) {
-                    cart_notify("This CRT contains ROMH data\n"
-                                "(16K/Ultimax). Cannot write to\n"
-                                "an 8K-only flash cart.");
-                    draw_status(w, "CRT has ROMH - incompatible!");
-                } else {
-                    draw_status(w, "WRITE FAILED!");
-                }
-            }
-        }
-        break;
-
-    case KEY_F5:
-        if (no_slot) {
-            draw_status(w, "No slot selected. F7=Select slot");
-        } else if (image && w->crt_filename[0]) {
-            if (w->crt_type != 90)
-                draw_status(w, "Not a type 90 image!");
-            else if (do_verify_ef3_image(w) == FR_INVALID_PARAMETER)
-                draw_status(w, "Not a valid type 90 image!");
-        } else if (w->base.is_ef3 && w->crt_type == 90 && w->crt_filename[0]) {
-            draw_status(w, "Pick Full EF3 for type 90.");
-        } else if (w->chip && w->crt_filename[0]) {
-            FRESULT res = do_verify_crt(w);
-            if (res == FR_OK && w->chip == &gmod2_info) {
-                if (gmod2_verify_eeprom(w) == FR_OK)
-                    draw_status(w, "Flash and EEPROM verified OK!");
-            } else if (res == FR_OK) {
-                draw_status(w, "All banks verified OK!");
-            }
-        }
-        break;
-
-    case KEY_F7:
-        if (w->chip && w->base.is_ef3) {
-            int r = cart_ef3_pick_slot(&w->base, EF3_PICK_WHOLE | EF3_PICK_ERASE);
-            if (r == EF3_PICKED_SLOT || r == EF3_PICKED_WHOLE) {
-                cart_writer_redraw(w);
-                rescan(w, "Ready.");
-            } else if (r == EF3_PICKED_ERASE) {
-                erase_cart_ui(w);
-            }
-        }
-        break;
-
-    case KEY_ESCAPE:
-    case KEY_BACK:
-    case KEY_BREAK:
-        return MENU_CLOSE;
+void cart_writer_scan(cart_writer_t *w)
+{
+    if (no_slot(w)) {
+        cart_status("No slot selected. F7=Select slot");
+    } else if (w->chip) {
+        rescan(w, "Scan complete.");
     }
-    return 0;
+}
+
+void cart_writer_write(cart_writer_t *w)
+{
+    if (!w->chip) {
+        cart_status("No flash cart!");
+        return;
+    }
+    if (!w->crt_filename[0]) {
+        cart_status("No CRT file.");
+        return;
+    }
+    if (no_slot(w)) {
+        cart_status("No slot selected. F7=Select slot");
+        return;
+    }
+    if (writing_image(w)) {
+        if (w->crt_type != 90) {
+            cart_notify("Full EF3 writes a type 90\n"
+                        "image. This CRT is not one:\n"
+                        "pick a slot (F7) for it.");
+            cart_status("Not a type 90 image!");
+            return;
+        }
+        write_ef3_image_asked(w);
+        return;
+    }
+    if (w->base.is_ef3 && w->crt_type == 90) {
+        cart_notify("A type 90 image needs\n"
+                    "Full EF3 (F7). Writing a\n"
+                    "single slot from it is not\n"
+                    "supported.");
+        cart_status("Pick Full EF3 for type 90.");
+        return;
+    }
+    if (!w->base.is_ef3 && w->crt_type == 90) {
+        cart_notify("EasyFlash 3 image (type 90):\n"
+                    "needs an EasyFlash 3 in the\n"
+                    "port.");
+        cart_status("Not for this cartridge!");
+        return;
+    }
+    // A slot of an EasyFlash 3 is an EasyFlash
+    if (w->base.is_ef3 && w->crt_type != 32) {
+        cart_notify("EasyFlash 3 slots take\n"
+                    "EasyFlash CRTs (type 32) only.");
+        cart_status("Not an EasyFlash CRT!");
+        return;
+    }
+    // Writing is the decision the view already presented: the chip, the slot and the file are all in front of
+    // the user, so there is no second question here.
+    FRESULT res = writer_guarded(w);
+    // Like EasyProg, name the slot in the EF-Directory once the CRT is written
+    if (res == FR_OK && w->base.is_ef3 && ef3_name_slot(w) != FR_OK) {
+        cart_status("Written; directory update FAILED!");
+        return;
+    }
+    // GMod2: verify the flash, then the EEPROM last. It powers up write-disabled, which keeps it safe while
+    // flash mode toggles its chip select.
+    if (res == FR_OK && w->chip->eeprom) {
+        bool verified = do_verify_crt(w) == FR_OK && gmod2_write_eeprom(w) == FR_OK;
+        if (verified) {
+            cart_status("Flash+EEPROM verified.");
+        }
+        return; // otherwise the status shows what failed
+    }
+    if (res == FR_OK) {
+        cart_status("Write complete! F5=Verify");
+    } else if (res == FR_INVALID_PARAMETER) {
+        cart_notify("This CRT contains ROMH data\n"
+                    "(16K/Ultimax). Cannot write to\n"
+                    "an 8K-only flash cart.");
+        cart_status("CRT has ROMH - incompatible!");
+    } else {
+        cart_status("WRITE FAILED!");
+    }
+}
+
+void cart_writer_verify(cart_writer_t *w)
+{
+    if (no_slot(w)) {
+        cart_status("No slot selected. F7=Select slot");
+    } else if (writing_image(w) && w->crt_filename[0]) {
+        if (w->crt_type != 90)
+            cart_status("Not a type 90 image!");
+        else if (do_verify_ef3_image(w) == FR_INVALID_PARAMETER)
+            cart_status("Not a valid type 90 image!");
+    } else if (w->base.is_ef3 && w->crt_type == 90 && w->crt_filename[0]) {
+        cart_status("Pick Full EF3 for type 90.");
+    } else if (w->chip && w->crt_filename[0]) {
+        FRESULT res = do_verify_crt(w);
+        if (res == FR_OK && w->chip->eeprom) {
+            if (gmod2_verify_eeprom(w) == FR_OK)
+                cart_status("Flash and EEPROM verified OK!");
+        } else if (res == FR_OK) {
+            cart_status("All banks verified OK!");
+        }
+    }
+}
+
+// The EasyFlash 3 entry: pick a slot, pick the whole image, or erase the whole cart
+void cart_writer_select(cart_writer_t *w)
+{
+    if (!w->chip || !w->base.is_ef3)
+        return;
+    int r = cart_ef3_pick_slot(&w->base, EF3_PICK_WHOLE | EF3_PICK_ERASE);
+    if (r == EF3_PICKED_SLOT || r == EF3_PICKED_WHOLE) {
+        w->img_slot = -1;
+        cart_redraw();
+        rescan(w, "Ready.");
+    } else if (r == EF3_PICKED_ERASE) {
+        erase_cart(w);
+    }
 }

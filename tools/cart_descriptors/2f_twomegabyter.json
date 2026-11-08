@@ -1,6 +1,7 @@
 {
  "cart_type": "0x2F",
  "crt_type": 89,
+ "short_name": "TwoMegabyter",
  "name": "Protovision TwoMegabyter",
  "note": "PROP-002 sec. 9.2 and footnote 7 (Protovision's flash API 1.0.0): $DE02 bit 0 = EXROM, bit 1 = GAME.",
  "regs": {
@@ -66,6 +67,8 @@
    "0xAD"
   ],
   "id_ofs": 1,
+  "wmode": 1,
+  "rmode": 0,
   "size": "2M",
   "sectors": [
    {

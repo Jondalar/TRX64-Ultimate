@@ -14,11 +14,18 @@ apps/trex_crt/
 ├── manifest.json     # file types and task menu entries (embedded in the .u2a)
 ├── src/
 │   ├── main.c        # entry point, dispatch on the manifest action
-│   ├── ui_shim.c/.h  # Window, key loop, formatting, files over the app ABI
+│   ├── cart_port.h          # the platform: bus, registers, time, heap, files
+│   ├── cart_port_u2p.c      # it filled from the app ABI (another ABI = another file)
+│   ├── cart_view.c/.h       # what the tools report and ask; no screen in it
+│   ├── cart_fmt.c/.h        # the tools' snprintf (freestanding, no libc)
 │   ├── cart_base.c/.h       # bank switching, detection, scanning, bank map
-│   ├── cart_dumper.c/.h     # Dump Cartridge
-│   ├── cart_writer.c/.h     # Flash Cartridge / Write to Cartridge
-│   └── cart_inspector.c/.h  # Cart Inspector
+│   ├── cart_flash.c/.h      # the flash profile of a type, from its descriptor
+│   ├── cart_dumper.c/.h     # Dump Cartridge: probe, scan, dump
+│   ├── cart_writer.c/.h     # Flash Cartridge: write, verify, erase
+│   ├── cart_view_text.c/.h  # the 40 x 22 screen: the keys, the dialogs, the drawing
+│   ├── cart_screen.c/.h     # the frame, the bank map and the lines it draws
+│   ├── ui_shim.c/.h         # Window, key loop, hex input, file dialogs over the app ABI
+│   └── cart_inspector.c/.h  # Cart Inspector (a hex view, it draws its own window)
 (SDK: software/appsdk, shared by every app)
     ├── include/{u2p_app.h, u2p_app_api.h, app_format.h}
     ├── crt0/app_crt0_nios2.S, crt0/app_crt0_riscv.S
@@ -158,3 +165,9 @@ stock traffic against `golden/stock.txt` (taken from the app as it was
 before T57), dumps and writes on our core, the write inhibit, the cartridge
 stopping at every access of a write run, the arming messages, the restore
 and the reset, and the policy bit.
+
+It then links a second binary, `trex_core_test` (`host/core_only.c`), out of
+the cores alone: no `cart_view_text.c`, no `cart_screen.c`, no `ui_shim.c`,
+no `main.c`. It probes, scans, writes and verifies a MegaByter with no view
+installed and compares the flash with the CRT, so a core that reaches for a
+window, a key code or a dialog again fails the link (T95 S5).

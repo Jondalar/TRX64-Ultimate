@@ -18,6 +18,7 @@
 
 #include "trx_ring.h"
 #include "trx_ring_reu.h"
+#include "trx_c64re.h"
 #include "rtc.h"
 #include "filemanager.h"
 #include "itu.h"
@@ -351,6 +352,109 @@ static SubsysResultCode_e timewarp_action(SubsysCommand *cmd)
     return SSRET_OK;
 }
 
+// ---- "Save State" (T20 §17.4, T66, U8) ----------------------------------------------
+// The newest whole frame plus the medium as a .c64re of format 2, beside the image
+// that is running (trx_c64re_place()). A progress box while it is written, then the
+// result. The file carries the chip block, so the browser's "Load State" puts the
+// machine back exactly (filetype_c64re.cc).
+struct SaveBox {
+    UserInterface *ui;
+    bool shown;
+};
+
+static void save_progress(int done, int total, void *ctx)
+{
+    SaveBox *b = (SaveBox *)ctx;
+    char msg[32];
+    if (done == 0) {
+        b->ui->show_progress("Saving the state", total);
+        b->shown = true;
+        return;
+    }
+    sprintf(msg, "Saving the state %d / %d", done, total);
+    b->ui->update_progress(msg, 1);
+}
+
+// The name: <image>-<date>.c64re beside the image itself (U8 §5).
+//
+// Rtc::get_time() hands back the year as years since 1980 - set_time_utc() puts
+// `tm_year - 80` into the chip and get_date_string() prints `1980 + y`. The old
+// test here was `y >= 2024`, which no clock can ever satisfy, so every file took
+// the fallback and was called ring-2540-t34 with the date branch dead. 1980 + y.
+static void save_path(char *path, int n, const char *dir, const char *base)
+{
+    int y, M, D, wd, h, m, s;
+    rtc.get_time(y, M, D, wd, h, m, s);
+    y += 1980;
+    if (y >= 2024) {                // a clock that was set
+        snprintf(path, n, "%s/%s-%04d%02d%02d-%02d%02d%02d.c64re", dir, base, y, M, D, h, m, s);
+    } else {
+        snprintf(path, n, "%s/%s-t%u.c64re", dir, base, (unsigned)(getMsTimer() / 1000));
+    }
+}
+
+// What the save needs: the ring runs and holds a frame it can read, and there is
+// somewhere to put the file. Returns the timeline index, or -1 after it put the
+// reason on the screen.
+static int save_target(UserInterface *ui, TrxFrame *newest, char *dir, int dirlen,
+                       char *base, int baselen)
+{
+    const char *off = trx_ring_reu_refusal();   // A08: no ring while the REU is on
+    if (off) {
+        ui->popup(TRX_REU_OFF_POPUP, BUTTON_OK);
+        return -1;
+    }
+    trx_ring_poll();
+    int target = trx_ring_target(0);
+    if (target < 0 || trx_ring_count() < 2 || !trx_ring_frame(target, newest)) {
+        ui->popup("The ring holds no frame yet.", BUTTON_OK);
+        return -1;
+    }
+    if (!trx_c64re_place(dir, dirlen, base, baselen)) {
+        ui->popup("No USB stick or SD card to save to.", BUTTON_OK);
+        return -1;
+    }
+    return target;
+}
+
+// State and medium, one file, beside the image that is running (U8). The
+// cartridge goes in as it stands at the freeze, once - a saved game that the
+// C64 wrote into the flash comes back with it.
+static SubsysResultCode_e save_state_action(SubsysCommand *cmd)
+{
+    if (!cmd->user_interface) {
+        return SSRET_NO_USER_INTERFACE;
+    }
+    UserInterface *ui = cmd->user_interface;
+    TrxFrame newest;
+    char dir[160], base[48], path[224], msg[256];
+    int target = save_target(ui, &newest, dir, sizeof(dir), base, sizeof(base));
+    if (target < 0) {
+        return SSRET_OK;
+    }
+    save_path(path, sizeof(path), dir, base);
+    uint32_t bytes = 0;
+    SaveBox box = { ui, false };
+    const char *err = trx_c64re_dump_ex(path, target, &bytes, save_progress, &box);
+    if (box.shown) {
+        ui->hide_progress();
+    }
+    char line[256];
+    if (err) {
+        snprintf(line, sizeof(line), "Saving the state failed: %s", err);
+    } else {
+        // the folder and the name on their own lines: a path in one line is
+        // longer than the overlay is wide, and UIPopup does not wrap
+        const char *name = strrchr(path, '/');
+        snprintf(line, sizeof(line), "%u KB written to\n%.*s\n%s",
+                 (unsigned)(bytes / 1024), name ? int(name - path) : 0, path,
+                 name ? name + 1 : path);
+    }
+    trx_c64re_wrap(msg, sizeof(msg), line, ui->get_screen()->get_size_x() - 6);
+    ui->popup(msg, BUTTON_OK);
+    return SSRET_OK;
+}
+
 class TrxTimewarpMenu : public ObjectWithMenu {
 public:
     void create_task_items(void)
@@ -360,6 +464,10 @@ public:
         }
         TaskCategory *cat = TasksCollection::getCategory("C64 Machine", SORT_ORDER_C64);
         cat->append(new Action("Timewarp", timewarp_action, 0, 0));
+        // One entry, replacing Save Timewarp Frame / Ring / Ring (native)
+        // (U8 §5). Writing the ring to a file is gone; .c64rering and .trxring
+        // still load (U8 §7).
+        cat->append(new Action("Save State", save_state_action, 0, 0));
     }
 };
 

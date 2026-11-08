@@ -7,6 +7,8 @@
 #   synth.sh multi N    sid_multi with N SIDs, the hardware configuration (LEGACY_FC = 2, variant A)
 #   synth.sh multiB N   the same with variant B tables
 #   synth.sh multiF N   same as multi (kept as a name)
+# FR=<n> overrides FILTER_FRAC for the multi targets (U7): FR=0 is reDIP's arithmetic, the
+# build's default is sid_multi's own (6). Used to cost the change.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -53,7 +55,9 @@ case $what in
     top=sid_multi
     vb=0; [ $what = multiB ] && vb=1
     lf=2
-    opt="-G NS=${2:-8} -G LEGACY_FC=$lf -G VARIANT_B=$vb -G MEMDIR=\".\"" ;;
+    opt="-G NS=${2:-8} -G LEGACY_FC=$lf -G VARIANT_B=$vb -G MEMDIR=\".\""
+    [ -n "${FR:-}" ] && opt="$opt -G FILTER_FRAC=$FR"
+    what="$what${FR:+_fr$FR}" ;;
 esac
 yosys -q -m slang -l "$b/$what.log" -p "read_slang --allow-use-before-declare -D YOSYS -I $w --top $top $opt $files; synth_xilinx -family xc7 -flatten -top $top; tee -o $b/$what.stat stat; tee -o $b/$what.ltp ltp" > /dev/null 2>&1 || { tail -20 "$b/$what.log"; exit 1; }
 awk '

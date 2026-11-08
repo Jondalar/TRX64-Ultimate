@@ -18,12 +18,18 @@ APP       = trex_crt
 MANIFEST  = manifest.json
 SDK       = ../../software/appsdk
 
-INC       = -I.
+INC       = -I. -I../../software/io/c64
 
 SRC_C     = src/main.c \
             src/ui_shim.c \
             src/cart_base.c \
+            src/cart_fmt.c \
+            src/cart_port.c \
+            src/cart_port_u2p.c \
+            src/cart_flash.c \
             src/cart_screen.c \
+            src/cart_view.c \
+            src/cart_view_text.c \
             src/cart_dumper.c \
             src/cart_writer.c \
             src/cart_inspector.c \

@@ -10,6 +10,8 @@
 #ifndef UI_SHIM_H
 #define UI_SHIM_H
 
+#include "cart_fmt.h" // the tools' snprintf, once shared with the UI
+#include "cart_port.h" // LOG, FRESULT and the platform behind the file helpers
 #include "u2p_app.h"
 #include "u2p_ui.h"
 #include <stdarg.h>
@@ -18,22 +20,9 @@
 // Set by app_main before anything else runs
 extern const u2p_api_t *g_api;
 
-// Debug output to the firmware console, like printf in the firmware tools
-#define LOG g_api->sys->log
-
 // Poll results, identical to the firmware UIObject codes
 #define MENU_CLOSE -1
 #define MENU_EXIT  -3
-
-// FatFs result codes used by the tools, same values as the firmware
-typedef enum {
-    FR_OK = 0,
-    FR_DISK_ERR = 1,
-    FR_DENIED = 7,
-    FR_EXIST = 8,
-    FR_NOT_ENOUGH_CORE = 17,
-    FR_INVALID_PARAMETER = 19
-} FRESULT;
 
 // The ABI window handle, used like the firmware Window class
 typedef struct Window Window;
@@ -57,10 +46,6 @@ int ui_run(void *obj, ui_poll_fn poll);
 
 // The physical function key behind a keymapped code, or the code unchanged
 int ui_fkey_pressed(int c);
-
-// Supports %d %u %x %X %s %c %%, a '0' flag, a width and a precision for %s
-int ui_snprintf(char *buf, int size, const char *fmt, ...);
-int ui_vsnprintf(char *buf, int size, const char *fmt, va_list ap);
 
 // String box for up to max_digits hex digits; returns the value or -1
 int ui_hex_input(const char *prompt, int max_digits);

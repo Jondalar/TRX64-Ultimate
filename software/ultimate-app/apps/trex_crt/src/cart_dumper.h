@@ -10,7 +10,6 @@
 #define CART_DUMPER_H
 
 #include "cart_base.h"
-#include "cart_screen.h"
 
 typedef struct
 {
@@ -23,7 +22,6 @@ typedef struct
 typedef struct
 {
     cart_base_t base;
-    Window *window;
 
     // Detection
     int det_banks;
@@ -38,17 +36,18 @@ typedef struct
     // Detected probe result (saved for later use in the dump)
     cart_probe_result_t probe_result;
 
-    // Where each part of the screen goes, and the file last written
-    cart_layout_t layout;
-    char file[40];
+    int slot_shown; // the slot of a whole EasyFlash 3 dump being read, -1 while none is
+    char file[40];  // the file last written
 } cart_dumper_t;
 
-// Opens the window, sets up the bus, probes and scans the cartridge
-void cart_dumper_init(cart_dumper_t *d);
-// Restores the bus and closes the window
-void cart_dumper_deinit(cart_dumper_t *d);
-// Handles one keymapped key; returns MENU_CLOSE to leave
-int cart_dumper_poll(cart_dumper_t *d, int key);
-void cart_dumper_redraw(cart_dumper_t *d);
+// Sets up the bus, probes the cartridge and scans its banks. Reports what it finds through cart_view.h.
+void cart_dumper_open(cart_dumper_t *d);
+// Restores the bus
+void cart_dumper_close(cart_dumper_t *d);
+
+// What a view can ask for; none of them knows a key or a window
+void cart_dumper_scan(cart_dumper_t *d);
+void cart_dumper_dump(cart_dumper_t *d);
+void cart_dumper_select(cart_dumper_t *d); // EasyFlash 3: which slot, or the whole image
 
 #endif

@@ -101,6 +101,9 @@
    "0xA4"
   ],
   "id_ofs": 1,
+  "unlock_bank": 0,
+  "wmode": 5,
+  "rmode": 5,
   "size": "2M",
   "sectors": [
    {

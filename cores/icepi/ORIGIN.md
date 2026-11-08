@@ -38,6 +38,12 @@ address with Gideon's size mask (reu.vhd), $DF06 8-bit write and his read-back, 
 Own edits since (T25.4, 2026-10-07; docs/specs/T25.4-redip-ultisid.md): `c64_redip_sid/reDIP-SID/gateware/*.sv`
 (the pipelines for NS SIDs, new `sid_core.sv`; commits 2dc7187, 547ebd1 and 10f43f4 are the patch for Dag Lem),
 `c64_redip_sid/sid_api.sv` (NS = 2 on `sid_core`), new `c64_redip_sid/sid_multi.sv` (8 SIDs, TRX_SID=redip8).
+Own edits since (U7, 2026-11-07; docs/specs/U7-sid-filter-precision.md): `sid_filter.sv` carries
+`FILTER_FRAC` fractional bits in its filter state with rounded shifts (0 = Dag Lem's arithmetic bit
+for bit, the default of his files; our `sid_multi.sv` and `cores/trx_sid/rtl/trx_sid.v` build 6),
+`sid_core.sv` passes the parameter through, and `c64_redip_sid/muladd.sv` (ours, GPL-3) took width
+parameters with the old 16x16->32 as defaults.
+
 Every modified reDIP file (SID and CIA) carries a dated "Modified by TRX64 Ultimate" notice under
 Dag Lem's header (CERN-OHL-S v2 section 3.3 b, added 2026-10-21).
 
