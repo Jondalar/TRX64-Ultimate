@@ -116,6 +116,7 @@ ring, Timewarp, monitor and SID sockets, with Gideon's app until the generic cor
 | U4 | 🔨 | From Timewarp into the monitor (C= + O) at the frame you are on | board test open; the way back (monitor -> Timewarp) is out of scope | [U4-timewarp-to-monitor](docs/specs/U4-timewarp-to-monitor.md#status-and-history) |
 | U5 | 🔨 | The stops move into the firmware: observer service, RPC server and monitor | built; board tests 1 and 3 of §7 passed 2026-11-04, four open; the dbgsess case runs first in CI | [U5-observer-service](docs/specs/U5-observer-service.md#status-and-history) |
 | U6 | 📅 | The gateware carries only what is built in: our unbuilt SID engine, the unbuilt reDIP variant and whatever else the build reads but never instantiates | Not started; costs one Vivado run, so it rides with the next gateware change | [U6](docs/todo/U6.md) |
+| U7 | 🔨 | The SID filter keeps the bits it needs: fractional state and rounded shifts (reDIP loses integrator steps at a low cutoff) | Built, measured (-32.6 -> -75.4 dBFS worst case, no new DSP) and the reDIP suite is green; Vivado numbers and board hear test open | [U7-sid-filter-precision](docs/specs/U7-sid-filter-precision.md#9-status-and-history) |
 | T69 | ❌ | SID filter profiles for reSID8 | – (won't do) | [T69](docs/todo/T69.md) |
 
 ## Parked: platform, other cores, the old U64

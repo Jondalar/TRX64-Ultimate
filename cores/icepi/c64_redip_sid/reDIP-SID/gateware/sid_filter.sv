@@ -16,11 +16,15 @@
 //
 // Modified by TRX64 Ultimate (CERN-OHL-S v2 section 3.3 b), 2026-10-06: pipelines for a parameter
 // number of SIDs (NS); stage() takes its inputs as arguments; 2026-10-07: both cutoff sources with
-// LEGACY_FC = 2 (fc_sel per SID), filter bypass per SID, the loadable curve table removed (T25.5).
-// Details: docs/specs/T25.4-redip-ultisid.md, cores/icepi/ORIGIN.md and the git history of this file.
+// LEGACY_FC = 2 (fc_sel per SID), filter bypass per SID, the loadable curve table removed (T25.5);
+// 2026-11-07: FILTER_FRAC fractional bits in the filter state and rounded shifts (U7), 0 = this
+// file's own arithmetic unchanged.
+// Details: docs/specs/T25.4-redip-ultisid.md, docs/specs/U7-sid-filter-precision.md,
+// cores/icepi/ORIGIN.md and the git history of this file.
 // ----------------------------------------------------------------------------
 
-// Clamp to 16 bits.
+// Clamp to 16 bits. The audio mixer input uses this; the filter state has its own grid and uses
+// clamp_v() inside the module (U7).
 function sid::s16_t clamp(sid::s17_t x);
     unique case (x[16:15])
       2'b10: clamp = -32768;
@@ -58,7 +62,19 @@ module sid_filter #(
     // between its two forms (the 1/Q table comes from res_hi). There is no
     // loadable curve table any more (T25.5, Alex 2026-10-07).
     parameter LEGACY_FC = 2,
+    // Fractional bits carried in the filter state (U7, docs/specs/U7-sid-filter-precision.md).
+    // 0 is this file's own arithmetic, bit for bit: the state is whole LSB and every shift floors,
+    // so at a low cutoff an integrator step of less than one LSB is lost and the integrator stops
+    // (measured: up to 45 % of the steps, worst RMS error -32.6 dBFS, SNR -23.8 dB).
+    // > 0 carries that many bits below the audio LSB AND rounds the shifts to nearest - the bits
+    // alone would make it worse, because a floored step is a systematic bias that then fires more
+    // often instead of being lost.
+    parameter FILTER_FRAC = 0,
     localparam N = 3*NS,
+    localparam FF = FILTER_FRAC,
+    localparam VW = 16 + FF,   // filter state
+    localparam DW = 17 + FF,   // before the clamp, and the integrator step
+    localparam OW = 32 + FF,   // multiply-add result
     // FC offset for average 6581 filter curve.
     localparam FC_OFFSET_6581 = 12'sh600,
     // The 6581 mixer DC offset is approximately -1/18 of the dynamic range of one voice.
@@ -291,21 +307,40 @@ module sid_filter #(
         endcase
     endfunction
 
-    // Hardware 16x16->32 multiply-add:
+    // Hardware 16 x (16 + FF) -> (32 + FF) multiply-add:
     // o = c +- (a * b)
-    sid::s32_t o;
-    sid::s32_t c;
-    logic      s;
-    sid::s16_t a;
-    sid::s16_t b;
+    logic signed [OW-1:0] o;
+    logic signed [OW-1:0] c;
+    logic                 s;
+    sid::s16_t            a;
+    logic signed [VW-1:0] b;
 
-    muladd opamp (
+    muladd #(
+        .AW (16),
+        .BW (VW),
+        .OW (OW)
+    ) opamp (
         .c (c),
         .s (s),
         .a (a),
         .b (b),
         .o (o)
     );
+
+    // Rounding of the three shifts. Zero at FILTER_FRAC = 0, where the shifts floor as reDIP's do.
+    localparam signed [OW-1:0] RND17 = (FF > 0) ? (OW'(1) <<< 16) : OW'(0);
+    localparam signed [OW-1:0] RND10 = (FF > 0) ? (OW'(1) <<< 9)  : OW'(0);
+    localparam signed [DW-1:0] RNDF  = (FF > 0) ? (DW'(1) <<< (FF > 0 ? FF - 1 : 0)) : DW'(0);
+
+    // Clamp the state to the audio range on its own grid. At FILTER_FRAC = 0 this is the file's
+    // own `clamp` above, bit for bit.
+    function automatic logic signed [VW-1:0] clamp_v(logic signed [DW-1:0] x);
+        unique case (x[DW-1 -: 2])
+          2'b10:   clamp_v = {1'b1, {(VW-1){1'b0}}};
+          2'b01:   clamp_v = {1'b0, {(VW-1){1'b1}}};
+          default: clamp_v = x[VW-1:0];
+        endcase
+    endfunction
 
     // Filter states for NS SID chips, updated as follows:
     // vlp = vlp - w0*vbp
@@ -315,10 +350,10 @@ module sid_filter #(
     // (vlp, vbp, vhp) x NS in a ring of 3*NS: v[N-1], v[N-2], v[N-3] are the
     // state of the SID that the pipeline is working on (vlp, vbp, vhp), the
     // new state is shifted in at v[0]; v[1] .. v[N-4] only delay.
-    sid::s16_t v [N];
+    logic signed [VW-1:0] v [N];
     initial begin for (int i = 0; i < N; i++) v[i] = '0; end
-    sid::s17_t dv;
-    sid::s16_t v_next;
+    logic signed [DW-1:0] dv;
+    logic signed [VW-1:0] v_next;
 
     // Buffer for the voice DCA outputs: the voice pipeline produces three
     // voices every three cycles, the filter pipeline takes three voices
@@ -376,10 +411,10 @@ module sid_filter #(
     end
 
     // Mux and sum for filter outputs.
-    // Each filter output is 16 bits, i.e. the sum of three outputs is 17.5
-    // bits. We assume that filter outputs are out of phase, so that we don't
-    // need more than 17 bits.
-    sid::s17_t  vf   = 0;
+    // Each filter output is 16 + FILTER_FRAC bits, i.e. the sum of three outputs is 17.5 + FF
+    // bits. We assume that filter outputs are out of phase, so that we don't need more than
+    // DW = 17 + FF bits.
+    logic signed [DW-1:0] vf = 0;
     sid::reg4_t mode = 0;
 
     // Audio mixers.
@@ -399,10 +434,10 @@ module sid_filter #(
     always_comb begin
         // Intermediate results for filter.
         // Shifts -w0*vbp and -w0*vlp right by 17.
-        dv = 17'(o >>> 17);
+        dv = DW'((o + RND17) >>> 17);
 
         // Next hp or lp/bp.
-        v_next = clamp(stage7 ? o[10+:17] : 17'(v[N-1]) + dv);
+        v_next = clamp_v(stage7 ? DW'((o + RND10) >>> 10) : DW'(v[N-1]) + dv);
 
         // Final result for audio output, at cycle 9 + 5k.
         // The effective width is 20 bits (4 bit volume * 16 bit audio).
@@ -455,7 +490,7 @@ module sid_filter #(
 
             // vhp = 1/Q*vbp - vlp - vi
             // c <= -(32'(v0) + (32'(vi) >>> 7)) << 10;
-            c <= -(((32'(v[0]) << 7) + 32'(vi)) << 3);
+            c <= -(((OW'(v[0]) << 7) + (OW'(vi) <<< FF)) << 3);
             s <= 1'b0;
             a <= 16'(_1_Q_lsl10);  // 1/Q << 10
             b <= v_next;           // vbp
@@ -468,8 +503,10 @@ module sid_filter #(
             c <= 0;
             // s <= 1'b0;
             a <= { 12'b0, vol };         // Master volume
-            b <= clamp(17'(vd1 >>> 7) +  // Audio mixer / master volume input
-                       vf);
+            // Audio mixer / master volume input. The direct path is in whole LSB and the filter
+            // outputs carry FF fractional bits, so vd is scaled up, and the sum is rounded back
+            // to whole LSB before the clamp - which is then the same 17 -> 16 clamp as reDIP's.
+            b <= VW'(clamp(17'((DW'(DW'(vd1 >>> 7) <<< FF) + vf + RNDF) >>> FF)));
         end
     end
 endmodule

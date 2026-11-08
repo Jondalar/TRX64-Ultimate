@@ -265,9 +265,11 @@ always @(posedge clk2x) rst_e <= {rst_e[0], rst};
 `ifdef SID_MULTI_EQUIV
     // the bench against the original reDIP (designs/c64_basic/sim/redip): its cutoff
     // curve, variant B, its pulse behaviour. Never in a build.
-    sid_multi #(.NS(8), .LEGACY_FC(1), .VARIANT_B(1), .PULSE_FIX(0), .MEMDIR(MEMDIR)) eng (
+    sid_multi #(.NS(8), .LEGACY_FC(1), .VARIANT_B(1), .PULSE_FIX(0), .FILTER_FRAC(0),
+                .MEMDIR(MEMDIR)) eng (
 `else
-    sid_multi #(.NS(8), .LEGACY_FC(2), .VARIANT_B(0), .PULSE_FIX(0), .MEMDIR(MEMDIR)) eng (
+    sid_multi #(.NS(8), .LEGACY_FC(2), .VARIANT_B(0), .PULSE_FIX(0), .FILTER_FRAC(6),
+                .MEMDIR(MEMDIR)) eng (
 `endif
         .clk(clk2x), .rst(rst_e[1]), .start(start),
         .op_valid_i(op_valid), .op_we_i(op_we), .op_all_i(1'b0), .op_sid_i(op_sid), .op_reg_i(op_reg),

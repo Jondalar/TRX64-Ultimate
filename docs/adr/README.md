@@ -71,6 +71,7 @@ Rules: a new decision gets the next number, a changed decision gets a new record
 | [0061](0061-c64re-snapshot-app-back-in-the-release.md) | The C64RE Snapshot app comes back into the release | 2026-10-31 | Accepted | supersedes 0030 in part | T66 |
 | [0062](0062-t69-wont-do.md) | T69 (named SID filter profiles) is won't do | 2026-11-04 | Accepted |  | T69, T25.5 |
 | [0063](0063-app-repo-ci-one-job-no-gideon-ui-repairs.md) | The application repository's CI builds one target, and Gideon's menu tests are not repaired | 2026-11-04 | Accepted |  | T31, U3, T71 |
+| [0065](0065-sid-filter-fractional-bits.md) | The SID filter carries six fractional bits and rounds its shifts | 2026-11-07 | Accepted |  | U7, T25.4, ADR-0048 |
 | [0066](0066-milestones-end-with-the-multicore-split.md) | The milestones end with the MultiCore separation | 2026-11-07 | Accepted | supersedes 0003 | TODO.md, ADR-0052, ADR-0056 |
 
 ## Decisions that were left where they are
