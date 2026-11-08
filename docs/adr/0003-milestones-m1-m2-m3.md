@@ -2,7 +2,8 @@
 
 Date: 2026-10-03
 
-Status: Accepted; M2 amended by [0056](0056-trx64-ultimate-is-the-monolith.md) (decoupling moved to TRX64U-MultiCore)
+Status: Superseded by [0066](0066-milestones-end-with-the-multicore-split.md) (the milestones are retired);
+M2 had been amended by [0056](0056-trx64-ultimate-is-the-monolith.md) (decoupling moved to TRX64U-MultiCore)
 
 ## Context
 

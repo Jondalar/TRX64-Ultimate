@@ -69,7 +69,7 @@ aufs Board." (Compile locally, test with the emulator until a complete app is th
 - **U2 user manual** (`docs/manual/`, on GitHub too): board pictures open (only with Alex's OK); four findings to fix: the Timewarp popup
   overflows the 40-column box in the Overlay menu; the reSID8 page is listed as "UltiSID Configuration"; the Commodore menu shows
   MODEMS/PRINTERS/DRIVE B which open nothing; `trxmon rewind` still prints F9-F12.
-- **U1** trex_crt Erase Cartridge + staging (branch `u1-crt-erase`, scope decided, not built). The other M2 rows: see TODO.md.
+- **U1** trex_crt Erase Cartridge + staging (branch `u1-crt-erase`, scope decided, not built). The other open rows: see TODO.md (no milestones since 2026-11-07, ADR-0066).
 - MultiCore host splash is slow in `probe_all` -> `cfw_probe` (walks whole bitstreams of Gideon's/Commodore's .cfw); MultiCore's, told
   to Alex, not acted on.
 

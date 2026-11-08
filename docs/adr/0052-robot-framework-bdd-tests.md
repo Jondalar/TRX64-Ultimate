@@ -2,7 +2,8 @@
 
 Date: 2026-10-09
 
-Status: Accepted
+Status: Accepted; the "exit criterion of M2" lapsed with [0066](0066-milestones-end-with-the-multicore-split.md)
+(the milestones are retired) - the migration is the goal of T71, not a gate. Robot Framework itself stands.
 
 ## Context
 

@@ -7,7 +7,7 @@ only changes the status. The table is an overview, the details are in the specs
 (docs/specs/), in docs/todo/<ID>.md and in docs/.
 
 **How this file is kept (since 2026-10-07):**
-- The tables are an overview only: ID, milestone, status, a short title, one line saying what is still missing ("Open"), and a link to the details. No histories, board results, CI numbers or decision texts in a row.
+- The tables are an overview only: ID, status, a short title, one line saying what is still missing ("Open"), and a link to the details. No histories, board results, CI numbers or decision texts in a row.
 - Details live in the row's spec (section "Status and history", dated entries, newest first); a row without a spec has `docs/todo/<ID>.md` (title, description, status and history). Create the file when the first detail comes up.
 - Decisions live in [docs/adr/](docs/adr/README.md), one file per decision (`NNNN-short-title.md`, Michael Nygard format; Alex's words quoted). A changed decision gets a new ADR and the old one is set to "Superseded by NNNN". Rows and specs link to the ADR instead of repeating it. Old "decision N" references resolve through the "Formerly" line of the ADR.
 - **Numbering (Alex, 2026-10-22):** TRX64U-MultiCore counts T numbers on its own, so the two lists collided (T112 here and there, T116). T numbers up to T116 stay as they are; T112 here is the ESP32 Wi-Fi recovery, not MC's T112. New items in this repo are U1, U2, ...
@@ -17,128 +17,128 @@ Status: 🔨 in progress · ⏭ next · ⏸ later · ✖ dropped · ✅ done · 
 
 Order set by Alex (2026-10-02): T20 -> T21 -> T28 -> T33. **Done: all four are built and in main (2026-10-06); what is still open sits in their rows (T20, T21).**
 
-Milestones (Alex, 2026-10-03; [ADR-0003](docs/adr/0003-milestones-m1-m2-m3.md)):
-- **M1** drop-in replacement for Gideon's core plus the TRX64 functions (ring, monitor, UCI,
-  turbo): everything Gideon's core does, booting from flash without JTAG.
-- **M2** the open work on the monolith: Gideon parity, ring/Timewarp/monitor extras, SID sockets, tests; Gideon's app stays the
-  application ([ADR-0056](docs/adr/0056-trx64-ultimate-is-the-monolith.md); the old M2 "decoupling from Gideon" moved to MultiCore).
-  Exit criterion: the e2e tests are fully migrated to Robot Framework (T71, [ADR-0052](docs/adr/0052-robot-framework-bdd-tests.md)).
-- **M3** platform: boot chain with host and guests, other cores, source release.
-- **–** extra, no milestone.
+**No milestones any more (Alex, 2026-11-07; [ADR-0066](docs/adr/0066-milestones-end-with-the-multicore-split.md)):**
+M1, M2 and M3 ([ADR-0003](docs/adr/0003-milestones-m1-m2-m3.md)) are retired. M2's content and M3's multi-core
+work went to `TREX/TRX64U-MultiCore` ([ADR-0056](docs/adr/0056-trx64-ultimate-is-the-monolith.md),
+[ADR-0057](docs/adr/0057-generic-core-app-replaces-gideons-app.md)), M1 closed with RC1, and the M2 exit
+criterion (the e2e tests on Robot Framework, T71, [ADR-0052](docs/adr/0052-robot-framework-bdd-tests.md)) went
+with it: that migration is T71's goal, not a gate. The sections below are named after what they hold, the
+status icons carry the order, and an **M-word in an older ADR, spec or history entry reads as "deferred, not
+now"**.
 
 Where we are (2026-10-09; older entries in [docs/todo/overview-history.md](docs/todo/overview-history.md)):
 - **Goal:** drop-in C64U replacement + TRX64 monitor + Timewarp ([ADR-0016](docs/adr/0016-back-to-the-drawing-board.md)); no 100T, no public release ([ADR-0015](docs/adr/0015-no-100t-no-public-release.md)).
-- **M1:** all M1 items closed 2026-10-10; RC1 (tag `m1-rc1`, integ-m1 692f643d, release `trx64-integ-m1-692f643d`) installed on the board and handed to the testers. Next: M2, first T77/T78 (monitor hang, WiFi RPC timeout), then T75, T76 and the ⏸ rows.
+- **The drop-in line:** all its rows closed 2026-10-10; RC1 (tag `m1-rc1`, integ-m1 692f643d, release `trx64-integ-m1-692f643d`) installed on the board and handed to the testers. Next: T77/T78 (monitor hang, WiFi RPC timeout), then T75, T76 and the ⏸ rows.
 - **Board session 2026-10-10 (Alex):** done: T62 human checks, T16 EF1/MegaByter/GMod2/EF3, T57 B1-B11, T74 (MegaByter + Gideon's core measured), T49 restore (settings NO and YES). RC1 installed. Checklist: [docs/AlexTest101026.md](docs/AlexTest101026.md).
 - **Board:** the flash holds RC1 (integ-m1 692f643d, app 3c8e4aa); EF3 in the port. Board tests: [docs/board-tests-pending.md](docs/board-tests-pending.md).
 
-## M1: drop-in replacement for Gideon's core plus the TRX64 functions
+## Done: the drop-in line and the TRX64 functions
 
-| ID | M | Status | Title | Open | Details |
-|---|---|---|---|---|---|
-| T01 | 1 | ✅ | Flash read-only for the app (settings, real MAC, ROMs) | – | – |
-| T02 | 1 | ✅ | Overlay: Gideon's menu on HDMI | – | – |
-| T03 | 1 | ✅ | SD card | – | – |
-| T04 | 1 | ✅ | Test the rocker (menu/reset/freeze), needs T02 | – | – |
-| T05 | 1 | ✅ | IEC, 1541 emulation, start D64 (directory and LOAD work on the board) | – | – |
-| T06 | 1 | ✅ | Start CRT: cartridge types, ROM from DDR2 | Freezer buttons, GMod2 EEPROM etc. | [T06](docs/todo/T06.md) |
-| T07 | 1 | ✅ | USB (hub and USB stick work on the board) | – | – |
-| T08 | 1 | ✅ | Case and board LEDs | – | [OPT-bling](docs/specs/OPT-bling.md#t08) |
-| T09 | 1 | ✅ | Keyboard LEDs (Bling), SHIFT LOCK state and its LED | – | [OPT-bling](docs/specs/OPT-bling.md#t09) |
-| T10 | 1 | ✅ | Lorenz failures (CPUPORT, TRAP, CIA timers) | – | [T10](docs/todo/T10.md) |
-| T11 | 1 | ✅ | Fast DDR2 path; 1541 and cart ROM out of block RAM | – | [T11](docs/todo/T11.md) |
-| T12 | 1 | ✅ | Freeze: full-core pause, hardware menu text, cartridge peek | Freeze without HDMI -> T35 | [T12-freeze-overlay](docs/specs/T12-freeze-overlay.md#status-and-history) |
-| T13 | 1 | ✅ | Audio and debug stream | Debug stream (2/3) not built (gap G15) | [T13](docs/todo/T13.md) |
-| T14 | 1 | ✅ | HW I2C for the app | – | – |
-| T15 | 1 | ✅ | Boot from flash without JTAG | – | [T15-flash-boot](docs/specs/T15-flash-boot.md#status-and-history) |
-| T16 | 1 | ✅ | Cartridge port with Alex's real carts | – | [T16-cartridge-port](docs/specs/T16-cartridge-port.md#status-and-history) |
-| T16.2 | 1 | ✅ | Ultimate app side for writable cartridges | – | [T16.2-app-cartridge-writeback](docs/specs/T16.2-app-cartridge-writeback.md#status-and-history) |
-| T17 | 1 | ✅ | Test the built-in speaker | – | – |
-| T20 | 1 | ✅ | Delta ring, rewind/scrub (Timewarp) | Done 2026-10-09 ($01F2 fix and `snap` bench passed on the board 2026-10-08, in main); UI extras -> T54 (M2) | [T20-delta-ring](docs/specs/T20-delta-ring.md#t20) |
-| T21 | 1 | ✅ | Monitor at TRX64 level (trxmon) | – (rest moved to T55) | [T21-monitor](docs/specs/T21-monitor.md#status-and-history) |
-| SLIM | 1 | ✅ | Slim state path (replaces the freeze session) | freeze_raster and monitor golden not individually reported | [SLIM-state-path](docs/specs/SLIM-state-path.md#status-and-history) |
-| OPT-ddr2 | 1 | ✅ | Own lean DDR2 controller instead of MIG | – | [OPT-ddr2](docs/specs/OPT-ddr2.md#status-and-history) |
-| OPT-pix | 1 | ✅ | Slimmer pix_layer | – | [OPT-pix](docs/specs/OPT-pix.md#status-and-history) |
-| OPT-mig | 1 | ✅ | MIG without XADC, 2 bank machines | – | [OPT-mig](docs/specs/OPT-mig.md#status-and-history) |
-| OPT-kb | 1 | ✅ | c64u_keyboard 721 -> 294 LUT, formally equivalent | – | [OPT-kb](docs/specs/OPT-kb.md#status-and-history) |
-| OPT-rvmul | 1 | ✅ | rvlite register file -> multiplier path pipelined | – | [OPT-rvmul](docs/specs/OPT-rvmul.md#status-and-history) |
-| T25 | 1 | ✅ | SID: Dag Lem's reDIP at UltiSID level (8 SIDs), mixer, sampler | – | [T25](docs/todo/T25.md) |
-| T28 | 1 | ✅ | UCI (Ultimate command interface at $DF1C-$DF1F) | – | [T28-uci](docs/specs/T28-uci.md#status-and-history) |
-| T29 | 1 | ✅ | Turbo: CPU up to 63 cycles per C64 cycle | – | [T29-turbo](docs/specs/T29-turbo.md#status-and-history) |
-| T33 | 1 | ✅ | Generic cartridge decoder per Alex's mapping descriptor | – | [T33-generic-cart-decoder](docs/specs/T33-generic-cart-decoder.md#status-and-history) |
-| T59 | 1 | ✅ | Custom palettes as in Gideon's core | – | [T59-palette](docs/specs/T59-palette.md#7-status-and-history) |
-| T60 | 1 | ✅ | REU as in Gideon's core, up to 16 MB | Gideon's firmware with a cartridge on our bitstream (ROM_SEL 0) not reported; EF3 needs the window widened (T51) | [T60-reu-16mb](docs/specs/T60-reu-16mb.md#status-and-history) |
-| T62 | 1 | ✅ | Small drop-in gaps from the gap audit (one RTL bundle) | – | [T62](docs/todo/T62.md) |
-| T61 | 1 | ✅ | Wall clock in software (gap audit G05) | – | [T61](docs/todo/T61.md) |
-| T63 | 1 | ✅ | App DMA into I/O ($D000-$DFFF) while the C64 runs (G06) | – | [G06-dma-cycle-steal](docs/specs/G06-dma-cycle-steal.md#status-and-history) |
-| T67 | 1 | ✅ | App registry keeps the old path when a .u2a file is replaced | – | [T67](docs/todo/T67.md) |
-| T38 | 1 | ✅ | Keyboard matrix and joystick injection from the app | Paddles/mouse, WASD-to-joystick, port swap -> T47 | [T38-T39-input-reset](docs/specs/T38-T39-input-reset.md#t38) |
-| T39 | 1 | ✅ | C64 reset sense interrupt for the app | Port's P20 reset sense ORed in with T16 | [T38-T39-input-reset](docs/specs/T38-T39-input-reset.md#t39) |
-| T40 | 1 | ✅ | NTSC: PAL/NTSC/PAL-60/NTSC-50 from the app's System Mode | Lorenz in NTSC on the board (B6); M1-M7 against Gideon's core; Till's monitor | [T40-ntsc](docs/specs/T40-ntsc.md#status-and-history) |
-| T49 | 1 | ✅ | Update packages (.cfw/.ue2 + the apps) for internal testers | – | [T49-update-packages](docs/specs/T49-update-packages.md#status-and-history) |
-| T53 | 1 | ✖ | UE2 build (XC7A100T) as a second CI bitstream | – (dropped) | [T53-ue2-build](docs/specs/T53-ue2-build.md#status-and-history) |
-| T57 | 1 | ✅ | trex_crt (dump / write / inspect) 100 % on both cores | – | [T57-trex-crt-both-cores](docs/specs/T57-trex-crt-both-cores.md#status-and-history) |
-| T72 | 1 | ✅ | Quick fix: REU, Ultimate Audio and UCI off while a cartridge runs (physical or .crt) ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | – | [T72](docs/todo/T72.md) |
-| T74 | 1 | ✅ | Unmapped I/O reads return the VIC's phi1 byte (open bus as on a real C64) | – | [T74](docs/todo/T74.md) |
-| T31 | 1 | ✅ | Multi-stage CI (Gitea job graph) | `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw | [T31-ci-pipeline](docs/specs/T31-ci-pipeline.md#status-and-history) |
+| ID | Status | Title | Open | Details |
+|---|---|---|---|---|
+| T01 | ✅ | Flash read-only for the app (settings, real MAC, ROMs) | – | – |
+| T02 | ✅ | Overlay: Gideon's menu on HDMI | – | – |
+| T03 | ✅ | SD card | – | – |
+| T04 | ✅ | Test the rocker (menu/reset/freeze), needs T02 | – | – |
+| T05 | ✅ | IEC, 1541 emulation, start D64 (directory and LOAD work on the board) | – | – |
+| T06 | ✅ | Start CRT: cartridge types, ROM from DDR2 | Freezer buttons, GMod2 EEPROM etc. | [T06](docs/todo/T06.md) |
+| T07 | ✅ | USB (hub and USB stick work on the board) | – | – |
+| T08 | ✅ | Case and board LEDs | – | [OPT-bling](docs/specs/OPT-bling.md#t08) |
+| T09 | ✅ | Keyboard LEDs (Bling), SHIFT LOCK state and its LED | – | [OPT-bling](docs/specs/OPT-bling.md#t09) |
+| T10 | ✅ | Lorenz failures (CPUPORT, TRAP, CIA timers) | – | [T10](docs/todo/T10.md) |
+| T11 | ✅ | Fast DDR2 path; 1541 and cart ROM out of block RAM | – | [T11](docs/todo/T11.md) |
+| T12 | ✅ | Freeze: full-core pause, hardware menu text, cartridge peek | Freeze without HDMI -> T35 | [T12-freeze-overlay](docs/specs/T12-freeze-overlay.md#status-and-history) |
+| T13 | ✅ | Audio and debug stream | Debug stream (2/3) not built (gap G15) | [T13](docs/todo/T13.md) |
+| T14 | ✅ | HW I2C for the app | – | – |
+| T15 | ✅ | Boot from flash without JTAG | – | [T15-flash-boot](docs/specs/T15-flash-boot.md#status-and-history) |
+| T16 | ✅ | Cartridge port with Alex's real carts | – | [T16-cartridge-port](docs/specs/T16-cartridge-port.md#status-and-history) |
+| T16.2 | ✅ | Ultimate app side for writable cartridges | – | [T16.2-app-cartridge-writeback](docs/specs/T16.2-app-cartridge-writeback.md#status-and-history) |
+| T17 | ✅ | Test the built-in speaker | – | – |
+| T20 | ✅ | Delta ring, rewind/scrub (Timewarp) | Done 2026-10-09 ($01F2 fix and `snap` bench passed on the board 2026-10-08, in main); UI extras -> T54 | [T20-delta-ring](docs/specs/T20-delta-ring.md#t20) |
+| T21 | ✅ | Monitor at TRX64 level (trxmon) | – (rest moved to T55) | [T21-monitor](docs/specs/T21-monitor.md#status-and-history) |
+| SLIM | ✅ | Slim state path (replaces the freeze session) | freeze_raster and monitor golden not individually reported | [SLIM-state-path](docs/specs/SLIM-state-path.md#status-and-history) |
+| OPT-ddr2 | ✅ | Own lean DDR2 controller instead of MIG | – | [OPT-ddr2](docs/specs/OPT-ddr2.md#status-and-history) |
+| OPT-pix | ✅ | Slimmer pix_layer | – | [OPT-pix](docs/specs/OPT-pix.md#status-and-history) |
+| OPT-mig | ✅ | MIG without XADC, 2 bank machines | – | [OPT-mig](docs/specs/OPT-mig.md#status-and-history) |
+| OPT-kb | ✅ | c64u_keyboard 721 -> 294 LUT, formally equivalent | – | [OPT-kb](docs/specs/OPT-kb.md#status-and-history) |
+| OPT-rvmul | ✅ | rvlite register file -> multiplier path pipelined | – | [OPT-rvmul](docs/specs/OPT-rvmul.md#status-and-history) |
+| T25 | ✅ | SID: Dag Lem's reDIP at UltiSID level (8 SIDs), mixer, sampler | – | [T25](docs/todo/T25.md) |
+| T28 | ✅ | UCI (Ultimate command interface at $DF1C-$DF1F) | – | [T28-uci](docs/specs/T28-uci.md#status-and-history) |
+| T29 | ✅ | Turbo: CPU up to 63 cycles per C64 cycle | – | [T29-turbo](docs/specs/T29-turbo.md#status-and-history) |
+| T33 | ✅ | Generic cartridge decoder per Alex's mapping descriptor | – | [T33-generic-cart-decoder](docs/specs/T33-generic-cart-decoder.md#status-and-history) |
+| T59 | ✅ | Custom palettes as in Gideon's core | – | [T59-palette](docs/specs/T59-palette.md#7-status-and-history) |
+| T60 | ✅ | REU as in Gideon's core, up to 16 MB | Gideon's firmware with a cartridge on our bitstream (ROM_SEL 0) not reported; EF3 needs the window widened (T51) | [T60-reu-16mb](docs/specs/T60-reu-16mb.md#status-and-history) |
+| T62 | ✅ | Small drop-in gaps from the gap audit (one RTL bundle) | – | [T62](docs/todo/T62.md) |
+| T61 | ✅ | Wall clock in software (gap audit G05) | – | [T61](docs/todo/T61.md) |
+| T63 | ✅ | App DMA into I/O ($D000-$DFFF) while the C64 runs (G06) | – | [G06-dma-cycle-steal](docs/specs/G06-dma-cycle-steal.md#status-and-history) |
+| T67 | ✅ | App registry keeps the old path when a .u2a file is replaced | – | [T67](docs/todo/T67.md) |
+| T38 | ✅ | Keyboard matrix and joystick injection from the app | Paddles/mouse, WASD-to-joystick, port swap -> T47 | [T38-T39-input-reset](docs/specs/T38-T39-input-reset.md#t38) |
+| T39 | ✅ | C64 reset sense interrupt for the app | Port's P20 reset sense ORed in with T16 | [T38-T39-input-reset](docs/specs/T38-T39-input-reset.md#t39) |
+| T40 | ✅ | NTSC: PAL/NTSC/PAL-60/NTSC-50 from the app's System Mode | Lorenz in NTSC on the board (B6); M1-M7 against Gideon's core; Till's monitor | [T40-ntsc](docs/specs/T40-ntsc.md#status-and-history) |
+| T49 | ✅ | Update packages (.cfw/.ue2 + the apps) for internal testers | – | [T49-update-packages](docs/specs/T49-update-packages.md#status-and-history) |
+| T53 | ✖ | UE2 build (XC7A100T) as a second CI bitstream | – (dropped) | [T53-ue2-build](docs/specs/T53-ue2-build.md#status-and-history) |
+| T57 | ✅ | trex_crt (dump / write / inspect) 100 % on both cores | – | [T57-trex-crt-both-cores](docs/specs/T57-trex-crt-both-cores.md#status-and-history) |
+| T72 | ✅ | Quick fix: REU, Ultimate Audio and UCI off while a cartridge runs (physical or .crt) ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | – | [T72](docs/todo/T72.md) |
+| T74 | ✅ | Unmapped I/O reads return the VIC's phi1 byte (open bus as on a real C64) | – | [T74](docs/todo/T74.md) |
+| T31 | ✅ | Multi-stage CI (Gitea job graph) | `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw | [T31-ci-pipeline](docs/specs/T31-ci-pipeline.md#status-and-history) |
 
-## M2: open work on the monolith
+## The monolith: the open work
 
 **Decoupling moved (2026-10-16, Alex: "the decoupling, softboot and so on, that is MultiCore"):** T24, T32, T36, T48, T52 live in
 `TREX/TRX64U-MultiCore` ([ADR-0056](docs/adr/0056-trx64-ultimate-is-the-monolith.md)). This repository is the monolith: Gideon's core plus
 ring, Timewarp, monitor and SID sockets, with Gideon's app until the generic core app replaces it ([ADR-0057](docs/adr/0057-generic-core-app-replaces-gideons-app.md),
 2026-10-18: built in MultiCore `app/`/`coreapp/` as T104, driven from here; day-1 list in the ADR).
 
-| ID | M | Status | Title | Open | Details |
-|---|---|---|---|---|---|
-| T30 | 2 | ⏸ | Design document (C4, sequence diagrams, Mermaid) | Not written | [T30](docs/todo/T30.md) |
-| T112 | 2 | 📅 | ESP32 Wi-Fi recovery (Gideon's module 1.18) as our safety net: analysis | DECIDED: back to Gideon; wait for his 1.18 release, then S1/S2 | [T112](docs/specs/T112-esp32-wifi-recovery.md) |
-| T35 | 2 | ⏸ | Test session at Alex's: tape port, tapecart, user port, freeze without HDMI | Not built (ADR-0047) | [T35](docs/todo/T35.md) |
-| T37 | 2 | 🔨 | Real SID chips in the C64U's SID sockets | On main since 2026-10-18, all questions answered; not yet on the board; ADC slot per socket needs a real SID | [T37-sid-sockets](docs/specs/T37-sid-sockets.md#status-and-history) |
-| T41 | 2 | ⏸ | Faster app CPU memory path (line buffer) | Re-measure the latency first (MIG is gone) | [T41](docs/todo/T41.md) |
-| T54 | 2 | ⏸ | Timewarp UI extras (from T20) | Not built | [T54](docs/todo/T54.md) |
-| T55 | 2 | ✅ | Monitor extras (from T21) | Done 2026-10-09 (script + Alex at the keyboard); counters still decimal (question); full 1541 VIAs out (budget) | [T55](docs/todo/T55.md) |
-| T56 | 2 | ⏸ | Drives as in Gideon's core (mm_drive, drive B, 1571/1581) | Spec first; trial synthesis for LUT/BRAM numbers | [T56](docs/todo/T56.md) |
-| T58 | 2 | ⏸ | Tape port in our core (Datasette and tapecart) | Not built; spec first | [T58](docs/todo/T58.md) |
-| T66 | 2 | 🔨 | Timewarp ring and .c64re snapshot save/load, done properly | all nine parts built and compiling (app CI 244); the board test is Alex's, in docs/board-tests-pending.md | [T20-delta-ring](docs/specs/T20-delta-ring.md#t66) |
-| T73 | 2 | 📅 | Internal IO devices and cartridge IO usage: spec ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | Spec first | [T73](docs/todo/T73.md) |
-| T75 | 2 | 📅 | REU register window and turbo colour RAM read as on Gideon's core | Not built | [T75](docs/todo/T75.md) |
-| T76 | 2 | 📅 | R21 (`CIA_RSTn`): what Gideon's design resets with it | Not measured | [T76](docs/todo/T76.md) |
-| T77 | 2 | 🔨 | trxmon over RPC: `bk` + `g` hangs the app (RC1) | WiFi part in T78 | [T77](docs/todo/T77.md) |
-| T78 | 2 | 📅 | WiFi RPC replies with a timeout (`wifi_cmd.h` `TRANSMIT`) | Spec written, not built | [T78-wifi-rpc-timeout](docs/specs/T78-wifi-rpc-timeout.md#status-and-history) |
-| T80 | 2 | 📅 | Lean ring engine: core passes data through, the app works on the ring (also for M1) | S1 (APPLY switch) decided, being built; S2-S4 open | [T80-lean-ring](docs/specs/T80-lean-ring.md) |
-| T82 | 2 | 📅 | VIC-II: name the cause of the raster flicker against Gideon's core, then slim kawari (2,117 LUT) | Spec written, not started | [T82-vic-check-and-slim](docs/specs/T82-vic-check-and-slim.md) |
-| T71.1 | 2 | 📅 | Robot Framework tests: PoC (same scenario on ue2emu and board) | Not built; register list (Q1) open | [T71-robot-tests](docs/specs/T71-robot-tests.md#71-poc--t711-in-m2) |
-| T71 | 2 | 📅 | Robot Framework tests: MVP in the pipeline, then full migration of the e2e suites (exit criterion of M2, [ADR-0052](docs/adr/0052-robot-framework-bdd-tests.md)) | Not built; after T71.1 | [T71-robot-tests](docs/specs/T71-robot-tests.md#7-plan-and-acceptance-criteria) |
-| U1 | 2 | 📅 | trex_crt: Erase Cartridge in the F5 menu; the writer stages the CRT on our core (USB stick drop-off) | Scope decided, not built | [U1](docs/todo/U1.md) |
-| U2 | 2 | 🔨 | User manual (docs/manual): every menu, function and app of the release | Written from code + emulator; board pictures open | [U2](docs/todo/U2.md) |
-| U3 | 2 | 📅 | Generic core app replaces Gideon's app (ADR-0057): gap analysis, order, decisions | Spec written; 10 decisions open; nothing built here | [U3](docs/specs/U3-generic-app-replaces-gideons-app.md) |
-| U4 | 2 | 🔨 | From Timewarp into the monitor (C= + O) at the frame you are on | board test open; the way back (monitor -> Timewarp) is out of scope | [U4-timewarp-to-monitor](docs/specs/U4-timewarp-to-monitor.md#status-and-history) |
-| U5 | 2 | 🔨 | The stops move into the firmware: observer service, RPC server and monitor | built; board tests 1 and 3 of §7 passed 2026-11-04, four open; the dbgsess case runs first in CI | [U5-observer-service](docs/specs/U5-observer-service.md#status-and-history) |
-| U6 | 2 | 📅 | The gateware carries only what is built in: our unbuilt SID engine, the unbuilt reDIP variant and whatever else the build reads but never instantiates | Not started; costs one Vivado run, so it rides with the next gateware change | [U6](docs/todo/U6.md) |
-| T69 | 2 | ❌ | SID filter profiles for reSID8 | – (won't do) | [T69](docs/todo/T69.md) |
+| ID | Status | Title | Open | Details |
+|---|---|---|---|---|
+| T30 | ⏸ | Design document (C4, sequence diagrams, Mermaid) | Not written | [T30](docs/todo/T30.md) |
+| T112 | 📅 | ESP32 Wi-Fi recovery (Gideon's module 1.18) as our safety net: analysis | DECIDED: back to Gideon; wait for his 1.18 release, then S1/S2 | [T112](docs/specs/T112-esp32-wifi-recovery.md) |
+| T35 | ⏸ | Test session at Alex's: tape port, tapecart, user port, freeze without HDMI | Not built (ADR-0047) | [T35](docs/todo/T35.md) |
+| T37 | 🔨 | Real SID chips in the C64U's SID sockets | On main since 2026-10-18, all questions answered; not yet on the board; ADC slot per socket needs a real SID | [T37-sid-sockets](docs/specs/T37-sid-sockets.md#status-and-history) |
+| T41 | ⏸ | Faster app CPU memory path (line buffer) | Re-measure the latency first (MIG is gone) | [T41](docs/todo/T41.md) |
+| T54 | ⏸ | Timewarp UI extras (from T20) | Not built | [T54](docs/todo/T54.md) |
+| T55 | ✅ | Monitor extras (from T21) | Done 2026-10-09 (script + Alex at the keyboard); counters still decimal (question); full 1541 VIAs out (budget) | [T55](docs/todo/T55.md) |
+| T56 | ⏸ | Drives as in Gideon's core (mm_drive, drive B, 1571/1581) | Spec first; trial synthesis for LUT/BRAM numbers | [T56](docs/todo/T56.md) |
+| T58 | ⏸ | Tape port in our core (Datasette and tapecart) | Not built; spec first | [T58](docs/todo/T58.md) |
+| T66 | 🔨 | Timewarp ring and .c64re snapshot save/load, done properly | all nine parts built and compiling (app CI 244); the board test is Alex's, in docs/board-tests-pending.md | [T20-delta-ring](docs/specs/T20-delta-ring.md#t66) |
+| T73 | 📅 | Internal IO devices and cartridge IO usage: spec ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | Spec first | [T73](docs/todo/T73.md) |
+| T75 | 📅 | REU register window and turbo colour RAM read as on Gideon's core | Not built | [T75](docs/todo/T75.md) |
+| T76 | 📅 | R21 (`CIA_RSTn`): what Gideon's design resets with it | Not measured | [T76](docs/todo/T76.md) |
+| T77 | 🔨 | trxmon over RPC: `bk` + `g` hangs the app (RC1) | WiFi part in T78 | [T77](docs/todo/T77.md) |
+| T78 | 📅 | WiFi RPC replies with a timeout (`wifi_cmd.h` `TRANSMIT`) | Spec written, not built | [T78-wifi-rpc-timeout](docs/specs/T78-wifi-rpc-timeout.md#status-and-history) |
+| T80 | 📅 | Lean ring engine: core passes data through, the app works on the ring (also for the drop-in line) | S1 (APPLY switch) decided, being built; S2-S4 open | [T80-lean-ring](docs/specs/T80-lean-ring.md) |
+| T82 | 📅 | VIC-II: name the cause of the raster flicker against Gideon's core, then slim kawari (2,117 LUT) | Spec written, not started | [T82-vic-check-and-slim](docs/specs/T82-vic-check-and-slim.md) |
+| T71.1 | 📅 | Robot Framework tests: PoC (same scenario on ue2emu and board) | Not built; register list (Q1) open | [T71-robot-tests](docs/specs/T71-robot-tests.md#71-poc--t711-in-m2) |
+| T71 | 📅 | Robot Framework tests: MVP in the pipeline, then full migration of the e2e suites ([ADR-0052](docs/adr/0052-robot-framework-bdd-tests.md); no longer a gate, [ADR-0066](docs/adr/0066-milestones-end-with-the-multicore-split.md)) | Not built; after T71.1 | [T71-robot-tests](docs/specs/T71-robot-tests.md#7-plan-and-acceptance-criteria) |
+| U1 | 📅 | trex_crt: Erase Cartridge in the F5 menu; the writer stages the CRT on our core (USB stick drop-off) | Scope decided, not built | [U1](docs/todo/U1.md) |
+| U2 | 🔨 | User manual (docs/manual): every menu, function and app of the release | Written from code + emulator; board pictures open | [U2](docs/todo/U2.md) |
+| U3 | 📅 | Generic core app replaces Gideon's app (ADR-0057): gap analysis, order, decisions | Spec written; 10 decisions open; nothing built here | [U3](docs/specs/U3-generic-app-replaces-gideons-app.md) |
+| U4 | 🔨 | From Timewarp into the monitor (C= + O) at the frame you are on | board test open; the way back (monitor -> Timewarp) is out of scope | [U4-timewarp-to-monitor](docs/specs/U4-timewarp-to-monitor.md#status-and-history) |
+| U5 | 🔨 | The stops move into the firmware: observer service, RPC server and monitor | built; board tests 1 and 3 of §7 passed 2026-11-04, four open; the dbgsess case runs first in CI | [U5-observer-service](docs/specs/U5-observer-service.md#status-and-history) |
+| U6 | 📅 | The gateware carries only what is built in: our unbuilt SID engine, the unbuilt reDIP variant and whatever else the build reads but never instantiates | Not started; costs one Vivado run, so it rides with the next gateware change | [U6](docs/todo/U6.md) |
+| T69 | ❌ | SID filter profiles for reSID8 | – (won't do) | [T69](docs/todo/T69.md) |
 
-## M3: platform
+## Parked: platform, other cores, the old U64
 
 **Multi-core moved (2026-10-13, Alex: "MultiCore inherits all the multi-core stuff under M3"):** T23, T26, T79, T81,
 T83-T94 live in `TREX/TRX64U-MultiCore` (TODO.md, docs/specs, docs/todo there). This repository is the drop-in line.
 
-| ID | M | Status | Title | Open | Details |
-|---|---|---|---|---|---|
-| T27 | 3 | ⏸ | Idea: port TRX64 Ultimate to the old U64 (Cyclone V) | Does not fit (120 % ALM); Alex decides | [T27](docs/specs/T27-u64-cyclone-port.md) |
-| T34 | 3 | ⏸ | Replace the reDIP CIAs (needed only before a source release) | Alex's call whether still needed | [T34](docs/todo/T34.md) |
-| T44 | 3 | ⏸ | Flash write gate | WEL=1 probe never run; protection returns with T50 | [T44-flash-write-gate](docs/specs/T44-flash-write-gate.md#status-and-history) |
-| T46 | 3 | ⏸ | Release build switch: leave out jtag_dbg | Not built | [T46](docs/todo/T46.md) |
-| T50 | 3 | ⏸ | T+R+X flash unlock for updates | Not needed while the gate is open; protection returns with T44/T50 | [T50-update-unlock](docs/specs/T50-update-unlock.md#status-and-history) |
-| T70 | 3 | ⏸ | TRX64 RE core for the old U64 (Cyclone V), minimal: C64, 1541, 2 SIDs, carts, Timewarp, monitor, C64RE, 576p | Next: real DDR2 and pins | [T70](docs/specs/T70-u64-re-minimal.md#status-and-history) |
+| ID | Status | Title | Open | Details |
+|---|---|---|---|---|
+| T27 | ⏸ | Idea: port TRX64 Ultimate to the old U64 (Cyclone V) | Does not fit (120 % ALM); Alex decides | [T27](docs/specs/T27-u64-cyclone-port.md) |
+| T34 | ⏸ | Replace the reDIP CIAs (needed only before a source release) | Alex's call whether still needed | [T34](docs/todo/T34.md) |
+| T44 | ⏸ | Flash write gate | WEL=1 probe never run; protection returns with T50 | [T44-flash-write-gate](docs/specs/T44-flash-write-gate.md#status-and-history) |
+| T46 | ⏸ | Release build switch: leave out jtag_dbg | Not built | [T46](docs/todo/T46.md) |
+| T50 | ⏸ | T+R+X flash unlock for updates | Not needed while the gate is open; protection returns with T44/T50 | [T50-update-unlock](docs/specs/T50-update-unlock.md#status-and-history) |
+| T70 | ⏸ | TRX64 RE core for the old U64 (Cyclone V), minimal: C64, 1541, 2 SIDs, carts, Timewarp, monitor, C64RE, 576p | Next: real DDR2 and pins | [T70](docs/specs/T70-u64-re-minimal.md#status-and-history) |
 
-## Extra (no milestone)
+## Extra
 
-| ID | M | Status | Title | Open | Details |
-|---|---|---|---|---|---|
-| T22 | – | ❌ | DDT's demos on HDMI | – (won't do) | [T22](docs/todo/T22.md) |
-| T47 | – | ❌ | Paddles/mouse, WASD-to-joystick, port swap, NMI sense | – (won't do for now) | [T47-paddles-mouse](docs/specs/T47-paddles-mouse.md#status-and-history) |
-| T42 | – | ⏸ | MAC TX frame counter undercounts | Recheck after the store-and-forward patch | [T42](docs/todo/T42.md) |
-| T43 | – | ⏸ | Gideon's `_sbrk` adds `incr` twice when the heap grows | Fix in trx64/main and report upstream | [T43](docs/todo/T43.md) |
-| T51 | – | 📅 | EasyFlash 3 emulation in the generic decoder (banking only) | Board steps 3-4 (emulation round trip, erase) | [T51-ef3](docs/specs/T51-ef3.md#status-and-history) |
-| T68 | – | ✅ | Licence: GPL-3.0-or-later (LICENSE, LICENSING.md) | – | [T68](docs/todo/T68.md) |
+| ID | Status | Title | Open | Details |
+|---|---|---|---|---|
+| T22 | ❌ | DDT's demos on HDMI | – (won't do) | [T22](docs/todo/T22.md) |
+| T47 | ❌ | Paddles/mouse, WASD-to-joystick, port swap, NMI sense | – (won't do for now) | [T47-paddles-mouse](docs/specs/T47-paddles-mouse.md#status-and-history) |
+| T42 | ⏸ | MAC TX frame counter undercounts | Recheck after the store-and-forward patch | [T42](docs/todo/T42.md) |
+| T43 | ⏸ | Gideon's `_sbrk` adds `incr` twice when the heap grows | Fix in trx64/main and report upstream | [T43](docs/todo/T43.md) |
+| T51 | 📅 | EasyFlash 3 emulation in the generic decoder (banking only) | Board steps 3-4 (emulation round trip, erase) | [T51-ef3](docs/specs/T51-ef3.md#status-and-history) |
+| T68 | ✅ | Licence: GPL-3.0-or-later (LICENSE, LICENSING.md) | – | [T68](docs/todo/T68.md) |
