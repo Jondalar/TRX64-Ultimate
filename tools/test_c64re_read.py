@@ -39,19 +39,23 @@ def block_section(x=104, flags=1, pack=0x12345678, words=BLOCK_WORDS):
     return b + le16(x) + le16(flags) + le32(pack)
 
 
+# What the firmware writes; a test that varies one field copies this and changes it.
+HEADER_BASE = {
+    "kind": "c64re", "version": 2, "writer": "trx64u", "machine": "c64-pal",
+    "blockWords": BLOCK_WORDS, "frame": 2540, "cycles": 49944903, "pc": 2300,
+    "cartridgeType": 17, "source": "/SD/C64/wasteland_ef_v1.0.1.crt",
+    "machineState": {
+        "cartridge": {"type": 17, "bytes": 1048576, "require": 2, "prohibit": 1,
+                      "source": "/SD/C64/wasteland_ef_v1.0.1.crt"},
+        "drive": {"image": "/SD/C64/game.d64", "mode": "ro"},
+        "settings": {"uci": False, "reu": 0, "reuSize": 0, "sampler": True},
+    },
+}
+
+
 def build(sections, header=None, break_sha=False, trailer=b""):
     """A format 2 file: head, header JSON, section table, payloads."""
-    h = header if header is not None else {
-        "kind": "c64re", "version": 2, "writer": "trx64u", "machine": "c64-pal",
-        "blockWords": BLOCK_WORDS, "frame": 2540, "cycles": 49944903, "pc": 2300,
-        "cartridgeType": 17, "source": "/SD/C64/wasteland_ef_v1.0.1.crt",
-        "machineState": {
-            "cartridge": {"type": 17, "bytes": 1048576, "require": 2, "prohibit": 1,
-                          "source": "/SD/C64/wasteland_ef_v1.0.1.crt"},
-            "drive": {"image": "/SD/C64/game.d64", "mode": "ro"},
-            "settings": {"uci": False, "reu": 0, "reuSize": 0, "sampler": True},
-        },
-    }
+    h = header if header is not None else dict(HEADER_BASE)
     hj = (h if isinstance(h, str) else json.dumps(h, separators=(",", ":"))).encode()
     body = io.BytesIO()
     body.write(le32(len(hj)))
@@ -203,6 +207,24 @@ class C64reFormat2(unittest.TestCase):
         code, out = self.read(build(secs))
         self.assertEqual(code, 1, out)
         self.assertIn("should be 2048", out)
+
+    def test_a_machine_this_build_does_not_run_is_refused(self):
+        h = dict(HEADER_BASE)
+        h["machine"] = "c128-pal"
+        code, out = self.read(build(whole_machine(), header=h))
+        self.assertEqual(code, 1, out)
+        self.assertIn("c128-pal", out)
+
+    def test_every_video_standard_the_board_runs_is_accepted(self):
+        # the writer names the mode now instead of the constant "c64-pal", so a
+        # state taken in NTSC says so and a load sets the machine to it (U8 §3.2)
+        for name in ("c64-pal", "c64-ntsc", "c64-pal60", "c64-ntsc50",
+                     "c64-pal60l", "c64-ntsc50l"):
+            h = dict(HEADER_BASE)
+            h["machine"] = name
+            code, out = self.read(build(whole_machine(), header=h))
+            self.assertEqual(code, 0, "%s: %s" % (name, out))
+            self.assertIn(name, out)
 
     def test_a_file_that_is_not_a_c64re_is_refused(self):
         code, out = self.read(b"PRG" + bytes(500))

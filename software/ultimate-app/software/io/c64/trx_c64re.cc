@@ -40,6 +40,7 @@
 #include "trx_trxring.h"
 #include "trx_drive.h"
 #include "command_intf.h"   // CMD_IF_SLOT_ENABLE: whether UCI was on (U9 D1)
+#include "u64_config.h"     // u64_get_system_mode(): which machine this is
 
 extern C1541 *c1541_A;    // drive A, for the "media" and "drivePart" nodes
 
@@ -987,6 +988,34 @@ static int u64dec(char *dst, int cap, uint64_t v)
 // A string into the header, with the characters that would break the JSON left
 // out rather than escaped: these are paths, and a path with a quote or a control
 // character in it is not one this firmware can open anyway.
+// The machine a file is of. The board runs six video standards (CFG_SYSTEM_MODE,
+// all four main ones board-tested under T40), and until now the writer put the
+// constant "c64-pal" in every file whatever the machine was doing - so a state
+// taken in NTSC was labelled PAL and loaded onto a PAL machine without a word,
+// and an honest "c64-ntsc" from trx64 was refused even on an NTSC board. The
+// field proved nothing. Index is color_sel[] in u64_config.cc; "c64-pal" stays
+// index 0, so every file written before this keeps loading.
+static const char *const c_machine_names[6] = {
+    "c64-pal", "c64-ntsc", "c64-pal60", "c64-ntsc50", "c64-pal60l", "c64-ntsc50l"
+};
+
+// Which of the six a header names, or -1 for a machine this build is not.
+static int machine_index(const char *js, const jsmntok_t &t)
+{
+    for (int i = 0; i < 6; i++) {
+        if (tok_eq(js, t, c_machine_names[i])) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static const char *machine_name(void)
+{
+    int m = u64_get_system_mode();
+    return (m >= 0 && m < 6) ? c_machine_names[m] : c_machine_names[0];
+}
+
 static int json_str(char *dst, int cap, const char *src)
 {
     int n = 0;
@@ -1009,8 +1038,8 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     const char *src = (f.w[W_GLUE] & GLUE_CART) ? C64_CRT::get_source() : NULL;
     int n = snprintf(dst, cap,
                      "{\"kind\":\"c64re\",\"version\":%d,\"writer\":\"trx64u\",\"appVersion\":\"%s\""
-                     ",\"machine\":\"c64-pal\",\"bitstreamId\":%u,\"caps\":%u,\"caps2\":%u,\"blockWords\":%d",
-                     C64RE_FORMAT, APPL_VERSION_NUMBER, (unsigned)trx_io_read32(TRX_ID),
+                     ",\"machine\":\"%s\",\"bitstreamId\":%u,\"caps\":%u,\"caps2\":%u,\"blockWords\":%d",
+                     C64RE_FORMAT, APPL_VERSION_NUMBER, machine_name(), (unsigned)trx_io_read32(TRX_ID),
                      (unsigned)ioRead8(TRX_CAPS), (unsigned)ioRead8(TRX_CAPS2), TRX_BLOCK_WORDS);
     if (y >= 2024) {
         n += snprintf(dst + n, cap - n, ",\"createdAt\":\"%04d-%02d-%02dT%02d:%02d:%02dZ\"", y, M, D, h, m, s);
@@ -1432,6 +1461,7 @@ struct TrxMachineWant {
     bool     has_settings;
     bool     uci, sampler;
     uint8_t  reu, reu_size;
+    int      machine;               // the video standard the file is of, -1 unknown
 };
 
 struct TrxC64reStaged {
@@ -1663,7 +1693,54 @@ static void tok_copy(const char *js, const jsmntok_t *t, int i, char *dst, int c
 static trx_progress_fn g_stage_progress;    // the load's bar (U9): set for one stage_v2()
 static void *g_stage_ctx;
 
-static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, TrxC64reStaged **out)
+static const char *base_of(const char *path)
+{
+    const char *cut = strrchr(path, '/');
+    return cut ? cut + 1 : path;
+}
+
+// U9 D3c (Alex, 2026-11-08): a file written on another machine names its medium
+// by that machine's path - TRX64 writes "/Users/...", which no board has. When
+// the path in the file is not there, the same file name beside the .c64re is the
+// medium: that is how the two reach the board, in one folder. The resolved path
+// replaces the one from the file, because build_cartridge() and build_drive()
+// mount by that string later, after the header's tokens are gone.
+static bool resolve_beside(char *want, int cap, const char *self)
+{
+    FileManager *fm = FileManager::getFileManager();
+    File *f = NULL;
+    if (!want[0]) {
+        return false;
+    }
+    if (fm->fopen(want, FA_READ, &f) == FR_OK) {
+        fm->fclose(f);
+        return true;
+    }
+    const char *base = base_of(want);
+    const char *cut = self ? strrchr(self, '/') : NULL;
+    if (!base[0] || !cut) {
+        return false;
+    }
+    char beside[192];
+    int dlen = int(cut - self);
+    int need = dlen + 1 + int(strlen(base));
+    if (need >= int(sizeof(beside)) || need >= cap) {
+        return false;
+    }
+    memcpy(beside, self, dlen);
+    beside[dlen] = '/';
+    strcpy(beside + dlen + 1, base);
+    if (fm->fopen(beside, FA_READ, &f) != FR_OK) {
+        return false;
+    }
+    fm->fclose(f);
+    printf("[C64RE] '%s' is not there; '%s' is used instead\n", want, beside);
+    strcpy(want, beside);
+    return true;
+}
+
+static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, const char *self,
+                            TrxC64reStaged **out)
 {
     uint8_t scratch[64];
     Rd rd(file);
@@ -1679,6 +1756,7 @@ static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, TrxC
     TrxMachineWant mw;              // `want` below is the section loop's own length
     memset(&mw, 0, sizeof(mw));
     mw.cart_type = -1;
+    mw.machine = -1;
 
     if (!rd.get(buf, 4)) {
         err = "The file could not be read";
@@ -1708,8 +1786,12 @@ static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, TrxC
                 err = "Bad header";
             } else if (bw >= 0 && tok_int(hdr, t, bw) != TRX_BLOCK_WORDS) {
                 err = "The file's chip block is not this machine's";
-            } else if (mk >= 0 && !tok_eq(hdr, t[mk], "c64-pal")) {
-                err = "The file is for another machine, not c64-pal";
+            } else if (mk >= 0 && (mw.machine = machine_index(hdr, t[mk])) < 0) {
+                static char msg[96];
+                int len = t[mk].end - t[mk].start;
+                sprintf(msg, "The file is for machine \"%.*s\", which this build does not run",
+                        len > 40 ? 40 : len, hdr + t[mk].start);
+                err = msg;
             }
             // U9 D1: the machine this state needs. A file written before U9 has
             // no machineState; then the flat cartridgeType is all there is, and
@@ -1766,16 +1848,22 @@ static const char *stage_v2(File *file, const uint8_t *head, uint32_t size, TrxC
     // could not describe, and the next Save State would write a cartridge
     // machine with no medium. D0 says refuse, and refuse before anything moves.
     if (!err && mw.present && mw.cart_type > 0) {
-        FileManager *fmc = FileManager::getFileManager();
-        File *probe = NULL;
-        if (!mw.cart_src[0] || fmc->fopen(mw.cart_src, FA_READ, &probe) != FR_OK) {
-            static char msg[224];
-            sprintf(msg, "The cartridge image is needed and was not found:\n%s",
-                    mw.cart_src[0] ? mw.cart_src : "the file does not name one");
+        if (!resolve_beside(mw.cart_src, sizeof(mw.cart_src), self)) {
+            static char msg[352];
+            if (!mw.cart_src[0]) {
+                strcpy(msg, "The cartridge image is needed and the file does not name one");
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "The cartridge image is needed and was not found:\n%s\nnor '%s' beside this file",
+                         mw.cart_src, base_of(mw.cart_src));
+            }
             err = msg;
-        } else {
-            fmc->fclose(probe);
         }
+    }
+    // The disk is not a refusal: build_drive() reports an image it could not
+    // mount once the machine runs again (D6), so this only widens where it looks.
+    if (!err && mw.present && mw.drive_img[0]) {
+        (void)resolve_beside(mw.drive_img, sizeof(mw.drive_img), self);
     }
     if (!err && !mw.present && mw.cart_type >= 0 &&
         mw.cart_type != int(C64_CARTRIDGE_TYPE)) {
@@ -1945,7 +2033,7 @@ const char *trx_c64re_stage_entry(const char *path, const char *want, TrxC64reSt
     uint32_t got = 0;
     if (size >= sizeof(head) && file->read(head, sizeof(head), &got) == FR_OK &&
         got == sizeof(head) && !memcmp(head, "C64RESNP", 8) && head[8] == C64RE_FORMAT) {
-        const char *e2 = stage_v2(file, head, size, out);
+        const char *e2 = stage_v2(file, head, size, path, out);
         fm->fclose(file);
         return e2;
     }
@@ -2337,10 +2425,28 @@ static void build_settings(const TrxMachineWant &mw, char *missed, int cap)
     }
 }
 
+// The video standard, before anything else: it drives the PLL and the colour
+// timing, and the chip block that follows is of a machine running at that rate.
+// set_oneshot() under it, so the user's own setting never reaches the flash -
+// the same bargain as the other settings (U9 D4).
+static void build_machine_mode(const TrxMachineWant &mw, char *missed, int cap)
+{
+    if (mw.machine < 0 || mw.machine == u64_get_system_mode()) {
+        return;
+    }
+    int was = u64_get_system_mode();
+    if (!u64_set_system_mode(mw.machine)) {
+        note(missed, cap, "the video standard");
+        return;
+    }
+    printf("[C64RE] system mode %d -> %d (%s)\n", was, mw.machine, c_machine_names[mw.machine]);
+}
+
 static void build_machine(TrxC64reStaged *st, char *missed, int cap)
 {
+    build_machine_mode(st->want, missed, cap);   // also for a file from before U9
     if (!st->want.present) {
-        return;                     // a file from before U9: nothing to build
+        return;                     // nothing else in it to build
     }
     build_cartridge(st->want, missed, cap);
     build_drive(st->want, missed, cap);

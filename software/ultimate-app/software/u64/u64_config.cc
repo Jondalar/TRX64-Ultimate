@@ -1294,6 +1294,34 @@ void U64Config :: run_reset_task()
     }
 }
 
+// U8/U9: the video standard the machine is running, for a .c64re's "machine"
+// field and for putting it back. The six are color_sel[] above: PAL, NTSC,
+// PAL-60, NTSC-50, PAL-60/L, NTSC-50/L. Negative when there is no configurator.
+extern "C" int u64_get_system_mode(void)
+{
+    if ((!u64_configurator) || (!u64_configurator->cfg)) {
+        return -1;
+    }
+    return u64_configurator->cfg->get_value(CFG_SYSTEM_MODE);
+}
+
+// Set it for this run only - set_oneshot() never reaches the flash, so loading a
+// state does not rewrite the user's own setting. effectuate_settings() is what
+// drives the PLL and the colour timing from it; the monitor relocks, as it does
+// for a mode change from the menu (T40).
+extern "C" bool u64_set_system_mode(int mode)
+{
+    if ((!u64_configurator) || (!u64_configurator->cfg) || mode < 0 || mode > 5) {
+        return false;
+    }
+    if (u64_configurator->cfg->get_value(CFG_SYSTEM_MODE) == mode) {
+        return true;
+    }
+    u64_configurator->cfg->set_oneshot(CFG_SYSTEM_MODE, mode);
+    u64_configurator->effectuate_settings();
+    return true;
+}
+
 void U64Config :: effectuate_settings()
 {
     extern uint8_t wasd_to_joy;

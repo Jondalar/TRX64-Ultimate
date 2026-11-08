@@ -209,9 +209,27 @@ above the image by `auto_mirror()` (`c64_crt.cc:463-488`). Those do not come bac
 type and a byte count: `get_image_bytes()` would read 0, and **the next `Save State` of that
 machine would write a cartridge state with no medium** - the exact thing D0 forbids, one turn
 later. So a state whose cartridge is not already in gets its `.crt` or nothing: `stage_v2()` opens
-the path from the header before a byte moves, and refuses by name if it is not there. The bytes of
-section 5 still win over the file's - the `.crt` supplies the geometry and the definition, the
-section supplies the content of the freeze. **§5 Q5** is what it would take to lift this.
+the path from the header before a byte moves, and refuses by name if neither it nor the file beside
+the state (D3c) is there. The bytes of section 5 still win over the file's - the `.crt` supplies the
+geometry and the definition, the section supplies the content of the freeze. **§5 Q5** is what it
+would take to lift this.
+
+**D3c - The medium is looked for beside the state file when its own path is not there.**
+*Added 2026-11-08, Alex, once TRX64 began writing `.c64re` files on the Mac.* A file written on
+another machine names its medium by that machine's path - `/Users/...`, which no board has. So when
+`machineState.cartridge.source` cannot be opened, the same **file name** in the folder the `.c64re`
+itself lies in is tried, and the path that works replaces the one from the file, because the
+cartridge is inserted from that string later (`resolve_beside()` in `trx_c64re.cc`, called from
+`stage_v2()` before anything moves).
+
+Nothing else is searched: not the media roots, not a walk of the card. One folder, one name. A
+medium that is not where the state file is, is not this state's medium - and a wider search would
+insert *an* image of that name rather than *the* image, which is the same defect D3b exists to
+prevent, one directory further out. The refusal names both: the path the file asked for and the name
+looked for beside it.
+
+The same rule applies to `machineState.drive.image`, where it is not a refusal: D6 reports a disk
+that could not be mounted once the machine runs again.
 
 **D3 — One list of types, and it gates the save.** A single table says, per hardware cartridge
 type, whether a state of it can be put back whole: the banking registers (`replay_cart()`), the

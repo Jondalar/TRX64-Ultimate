@@ -23,6 +23,12 @@
 class U64Config;
 extern U64Config *u64_configurator;
 
+// The video standard in use, as the index of color_sel[] (0 PAL, 1 NTSC,
+// 2 PAL-60, 3 NTSC-50, 4 PAL-60/L, 5 NTSC-50/L); -1 when there is none.
+// A .c64re names it, and a load puts it back for that run only (U8 §3.2).
+extern "C" int  u64_get_system_mode(void);
+extern "C" bool u64_set_system_mode(int mode);
+
 class U64Config : public ConfigurableObject, ObjectWithMenu, SubSystem
 {
     struct {

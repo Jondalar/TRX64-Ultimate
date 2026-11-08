@@ -130,6 +130,23 @@ length of section 5, not the size of the file on disk — a `.crt` is 2 112 byte
 flash it holds. `source` is **not** hashed: hashing it means reading a megabyte off the medium for
 nothing, and the body's own sha256 already covers every byte that is restored.
 
+**`machine` names the real one (2026-11-08).** The board runs six video standards
+(`CFG_SYSTEM_MODE`: PAL, NTSC, PAL-60, NTSC-50 and the two /L variants, the first four board-tested
+under T40), and the writer put the constant `"c64-pal"` in every file whatever the machine was
+doing. The field proved nothing: a state taken in NTSC was labelled PAL and loaded onto a PAL
+machine without a word, and an honest `c64-ntsc` from trx64 was refused even on an NTSC board. The
+peer session writing TRX64 spec 919 found it. Now the writer reads the mode
+(`u64_get_system_mode()`) and names it - `c64-pal`, `c64-ntsc`, `c64-pal60`, `c64-ntsc50`,
+`c64-pal60l`, `c64-ntsc50l` - and a load **sets** it rather than comparing, the way it inserts the
+cartridge (Alex: *"bei laden wird die maschine auf den typ gesetzt, das ist doch nur ein
+parameter"*). `set_oneshot()` holds it for that run only, so nothing reaches the flash.
+`c64-pal` stays index 0, so every file written before this keeps loading.
+
+**Section ids above 127 are not ours.** **128 = `TRX64`** is reserved for the emulator (TRX64 spec
+919): gzip of the rest of its checkpoint plus disk images. The firmware needs no change for it -
+`stage_v2()` skips an id it does not know by the section's length, and `test_c64re_read.py` has
+that case - but the number is taken and must not be handed out again.
+
 **No `%l` in the format string.** The app's printf (`software/system/small_printf.cc:126`) knows
 `d u i f s c p x X b B` and no length modifier: a `%lu` or `%llu` is copied out verbatim *and its
 argument is never taken off the stack*, so every conversion behind it reads the one before. A

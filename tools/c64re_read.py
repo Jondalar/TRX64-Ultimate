@@ -21,6 +21,9 @@ MAGIC = b"C64RESNP"
 SEC_NAMES = {1: "BLOCK", 2: "RAM", 3: "COLOR", 4: "CARTRAM", 5: "CARTROM", 6: "DRIVE",
              7: "EEPROM"}
 SEC_FIXED = {2: 65536, 3: 1024, 4: 65536, 7: 2048}  # lengths the format pins down
+# The video standards this board runs (CFG_SYSTEM_MODE); "c64-pal" is index 0, so
+# files written before the writer named the real one still read.
+MACHINES = ("c64-pal", "c64-ntsc", "c64-pal60", "c64-ntsc50", "c64-pal60l", "c64-ntsc50l")
 HEAD = 41
 
 
@@ -70,6 +73,13 @@ def read_v2(d, extract):
     except ValueError:
         print("  !! the header is not JSON")
         return 1
+
+    mach = h.get("machine")
+    if mach not in MACHINES:
+        print(f"  !! machine {mach!r} is not one this board runs")
+        bad = 1
+    else:
+        print(f"  machine    {mach}")
 
     # U9: the machine the state needs, if the file says. A file without it loads
     # only onto the machine it was taken on; one with it builds that machine.

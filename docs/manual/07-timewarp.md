@@ -70,9 +70,12 @@ together before putting the state into it:
   the state owns. They survive **Reset C64**, the way a cartridge in the port does, and end at
   **Reboot C64** or when you change the setting yourself.
 
-If the `.crt` the file names is not where the file says, the load is refused by name and the
-running machine is left alone. The state file is written beside the image it came from, so the two
-normally travel together. A state of one cartridge will not go into a machine holding another: it
+If the `.crt` the file names is not where the file says, the same file name **in the folder the
+`.c64re` lies in** is used instead - a state written on another computer names its cartridge by that
+computer's path, so putting the two files in one folder is enough. Only that one folder is looked
+in; is the image in neither place, the load is refused naming both and the running machine is left
+alone. The disk image is found the same way. The state file is written beside the image it came
+from, so the two normally travel together. A state of one cartridge will not go into a machine holding another: it
 is refused with both types. Anything a load could not put back is named in a message once the
 machine is running again.
 
