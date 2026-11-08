@@ -26,6 +26,7 @@ Shown when the current folder is writable.
 | Entry | When | Effect |
 |---|---|---|
 | Timewarp | Freeze menu, our bitstream | The Timewarp bar ([7.](07-timewarp.md)) |
+| Save State | the ring holds a frame | The machine and its medium as one `.c64re`, beside the image that is running ([7.](07-timewarp.md)) |
 | Reset C64 | | Reset; the menu closes |
 | Reboot C64 | | Cold start of cartridge and KERNAL |
 | Reboot (Clr Mem) | | Clears the RAM, then reboots |

@@ -13,7 +13,7 @@ firmware. For installing and going back to the stock firmware see [INSTALL.md](.
 | [4. Settings](04-settings.md) | Every settings page and item, with values, defaults and what they do on this bitstream |
 | [5. Cartridges](05-cartridges.md) | CRT files, real cartridges in the port, saving changes, the cartridge tool `trex_crt` |
 | [6. Monitor](06-monitor.md) | The monitor in the firmware: commands, breakpoints, observers, the C64RE connection |
-| [7. Timewarp](07-timewarp.md) | Rewinding the machine, the Timewarp bar |
+| [7. Timewarp](07-timewarp.md) | Rewinding the machine, the Timewarp bar, saving the state with its medium and loading it back |
 | [8. Apps](08-apps.md) | Installing apps; `softboot` and `unzip` |
 | [9. Network](09-network.md) | REST API, FTP, Telnet, streams, discovery |
 | [10. Differences](10-differences.md) | What the stock firmware has and this one does not, and settings without effect |
