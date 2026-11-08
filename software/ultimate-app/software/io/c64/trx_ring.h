@@ -18,6 +18,12 @@
 #ifndef TRX_RING_H
 #define TRX_RING_H
 
+// U9 D4: what a config item shows while a loaded state owns it. set_override()
+// is display only (config.h: "the saved value stays"), so the registers are
+// written beside it and nothing reaches the flash.
+#define TRX_STATE_OVERRIDE "set by the loaded state"
+
+
 #include <stdint.h>
 #include <stddef.h>   // NULL, for the default arguments below
 
@@ -268,6 +274,16 @@ int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_are
 // {hold[22:8] b31:17, $D031 b16:9, $D030 bit 0 b8, enable word b7:5, PREFER bit 7 b4, index b3:0});
 // used once. A restore of a ring entry keeps the machine's current turbo state: the ring is
 // recorded at 1 MHz only and does not carry it.
+// U9 D0/D3: the cartridge types a .c64re can carry whole. One table in
+// trx_ring.cc answers both sides - the writer refuses a type it says no to
+// before a file exists, and the loader replays the banking registers of the
+// types it says yes to. `name` is filled with the cartridge's name for the
+// message, or NULL.
+bool trx_ring_cart_state_ok(uint8_t type, const char **name);
+// True when this cartridge keeps a 93C86 EEPROM whose contents are state the
+// ROM window does not hold (GMod2): the file carries it as its own section.
+bool trx_ring_cart_has_eeprom(uint8_t type);
+
 void trx_ring_set_turbo(uint32_t pack);
 
 #else
@@ -317,6 +333,8 @@ static inline uint32_t trx_ring_stream2_pos(void) { return 0; }
 typedef int (*trx_area_fn)(void *ctx);
 static inline int trx_ring_install(const TrxFrame *, int, const TrxLoadMem *, trx_area_fn, void *)
 { return -1; }
+static inline bool trx_ring_cart_state_ok(uint8_t, const char **name) { if (name) *name = 0; return false; }
+static inline bool trx_ring_cart_has_eeprom(uint8_t) { return false; }
 static inline void trx_ring_set_turbo(uint32_t) { }
 
 #endif

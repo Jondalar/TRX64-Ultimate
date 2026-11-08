@@ -8,7 +8,7 @@
 #ifndef EAPI_DRIVERS_H
 #define EAPI_DRIVERS_H
 
-#include "u2p_app.h"
+#include <stdint.h>
 
 #define EAPI_DRIVER_SIZE 0x300  // 768 bytes
 #define EAPI_ROMH_OFFSET 0x1800 // in bank 0 ROMH, starts with the signature "eapi" ($65 $61 $70 $69)

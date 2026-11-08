@@ -498,9 +498,70 @@ void C64::set_rom_config(uint8_t idx, const char *fname)
     }
 }
 
+// Alex's order, 2026-11-08: *"Cartridge einlegen / reset aber nicht laufen lassen
+// damit es keinen CPU state gibt / State(s) herstellen / los lassen."* The hardware
+// demands exactly that, and both halves of it are load-bearing.
+//
+// **Reset**, because cart_slot.v:149 is the whole rule for inserting:
+//
+//     if (reset_in || force_) begin
+//         d       <= desc;
+//         cart_en <= reset_in && cart_type[4:0] != 5'd0 && desc[8*36];
+//     end                                   // "a forced type starts off"
+//
+// `cart_en` can only go high while the C64 is in reset. A force on a running
+// machine reloads the descriptor and switches the cartridge OFF - measured on the
+// board: type 11 set, C64_CARTRIDGE_ACTIVE 0, the glue's cartridge line 0 through
+// eight reads, the intro running out of RAM and the first bank switch landing on
+// nothing.
+//
+// **And released again at once**, because the state bus refuses staged words while
+// the machine is in reset ("the state bus refused the staged words" - also measured,
+// the attempt that held the reset across the load). What keeps the C64 from running
+// in between is not the reset but `hard_stop()`: held, so no CPU state is made, and
+// the reset is only a pulse around the descriptor latch.
+//
+// Once set, cart_en survives the release: the gateware clears it only on a kill or
+// another force.
+void C64::insert_cartridge_for_state(cart_def *def)
+{
+    bool was_held = (C64_STOP & C64_HAS_STOPPED) != 0;
+    hard_stop();                   // no CPU cycles while the port changes
+    C64_MODE = C64_MODE_RESET;
+    set_cartridge(def);
+    C64_CARTRIDGE_KILL = 2;             // latch the descriptor while reset_in is high
+    C64_CARTRIDGE_KILL = 2;             // "a second time, because if carttype WAS none,
+                                        //  then Cart enable gets cleared again in the
+                                        //  cycle after it was set" (c64.cc:2165)
+    C64_MODE = C64_MODE_UNRESET;
+    if (!was_held) {
+        C64_STOP = 0;                   // leave the machine as held as it was found
+    }
+}
+
+void C64::mark_settings_from_state(void)
+{
+    // The registers themselves are written by the loader (trx_c64re.cc); this
+    // only tells the menu who is in charge, because cfg is untouched and would
+    // otherwise show a value the hardware does not have.
+    cfg->set_override(CFG_CMD_ENABLE, TRX_STATE_OVERRIDE);
+    cfg->set_override(CFG_C64_MAP_SAMP, TRX_STATE_OVERRIDE);
+    cfg->set_override(CFG_C64_REU_EN, TRX_STATE_OVERRIDE);
+}
+
 void C64::set_emulation_flags(void)
 {
     cart_def *def = &current_cart_def;
+
+    // U9 D4: everything that puts the user's own cfg back on the hardware comes
+    // through here, and nothing else does. A loaded state's settings therefore
+    // survive Reset C64 (which only toggles C64_MODE) and end at Reboot C64,
+    // at Start Cartridge and when the user changes a setting - the way a
+    // cartridge in the port behaves. The display has to stop claiming the state
+    // owns them in the same breath as the registers go back.
+    cfg->set_override(CFG_CMD_ENABLE, NULL);
+    cfg->set_override(CFG_C64_MAP_SAMP, NULL);
+    cfg->set_override(CFG_C64_REU_EN, NULL);
 
     C64_REU_ENABLE = 0;
     C64_SAMPLER_ENABLE = 0;

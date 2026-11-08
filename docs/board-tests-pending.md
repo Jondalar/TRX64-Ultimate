@@ -124,22 +124,62 @@ Hinweise: ein Stage-Fehler beendet die Stage, nicht den Lauf; die Write-Stages w
 | LED | T08/T09: Case-LEDs an/aus und Polaritaet, Tastatur-LEDs, SHIFT-LOCK-LED amber bei Lock, sonst dunkel. Nicht in Alex' Bericht 2026-10-06. | Wie OPT-bling Spec §4; Lichteffekte sind absichtlich raus. | A | 5 min | **Board 2026-10-07 abends (Lauf 514, Paket integ-m1-e2b2ca47, App 301ef8c3, trxmon wie integ-m1-app): BESTANDEN: SHIFT-LOCK-LED amber bei Lock, dunkel beim Loslassen; Case-LEDs ok (T08/T09-Board-Punkte erledigt).**
 | AUD | Audit-Reste, nicht in Alex' Bericht: T17 Lautsprecher (Pegel gegen Gideon), T03 SD schreiben + Hot-Plug + Card-Detect, T07 USB-Maus/Gamepad, T38 USB-Tastatur zusammen mit physischen Tasten, Reset-Byte (Ctrl+Shift+Alt+Win). | Je ok/nicht ok. **Uneindeutig:** das Audit ist vom 2026-10-04 und teils ueberholt (Tastatur, Freeze-Joystick liefen am 06.10.); ich liste nur, was dort als "untested" steht und seither nicht berichtet ist. Alex kann Punkte streichen. | A | 15 min | **Board 2026-10-07 abends (Lauf 514, Paket integ-m1-e2b2ca47, App 301ef8c3, trxmon wie integ-m1-app): USB-Maus im Menue BESTANDEN (Bewegen, Klick, Rad scrollt); als 1351 am C64 bleiben POTX/POTY $FF - erwartet, T47 nicht gebaut. SD schreiben per FTP + Zuruecklesen BESTANDEN; USB-Stick abziehen/stecken im Menue BESTANDEN; SD-Hot-Plug uebersprungen (Alex: SD nur bei offenem Gehaeuse erreichbar, USB deckt Hot-Plug ab). Lautsprecher-Pegel gegen Gideon: in SMP-PAN verschoben. USB-Tastatur/Gamepad/Reset-Kombi: heute keine Hardware.**
 
-## 1b. T66: Timewarp-Dateien (Stand 2026-11-05, app-Branch `t66-app`, CI-Lauf 244)
+## 1b. T66/U8: Timewarp-Dateien (Stand 2026-11-07 nach der ersten Board-Sitzung)
 
-Alle neun Teile sind gebaut und kompilieren; auf dem Board war noch nichts davon. Die Host-Banken decken ab, was rein rechnerisch
-ist (Inflate gegen zlib, Knoten-Bauer gegen die Bitpositionen der Gateware, Ring-/Alignment-Arithmetik, SHA-256, beide 6502-Stubs
-im Interpreter). Was hier steht, kann nur das Board beantworten. Reihenfolge wie aufgelistet: T66-FILES legt die Dateien an, die
-alle weiteren brauchen. Paket: `t66-app` im Host gepinnt, dann ein Vivado-Lauf - **der Pin loest die Gateware-Pipeline aus**.
+**Board 2026-11-07 (Paket `t66-12e293fb`, App `0c0f5fc8`), Wasteland EasyFlash von `/SD/C64/`:**
+T66-FILES schrieb alle drei Dateien - `.c64re` 2.987.081 B, `.c64rering` 60.828.557 B (21 Eintraege,
+Minuten am Schreiben), `.trxring` **0 Bytes** mit "The file could not be written". Danach
+`USB1 SanDisk 3.2Gen1 FAILED`: der Stick fiel waehrend des 59-MB-Schreibens vom Bus. T66-LOADSNAP
+auf die `.c64re`: **"This file cannot be loaded: Out of memory"**. Die Dateien per FTP geholt und
+ausgemessen: 93,7 % bzw. 96,7 % der Datei sind das Cartridge, zweimal bzw. 42-mal, und der
+gzip-Mantel besteht nur aus stored-Bloecken (Verhaeltnis 1,000). Befund und Zahlen:
+[U8 §1](specs/U8-c64re-v2-state-and-medium.md), Entscheidung [ADR-0067](adr/0067-c64re-format-2-binary-state-and-medium.md).
+
+**T66-FILES, T66-LOADSNAP und T66-LOADRING sind damit erledigt und durch U8-* ersetzt**; das
+Ring-Schreiben gibt es nicht mehr. T66-REST, T66-MON, T66-CART, T66-DRIVE, T66-TRX64 und T66-REFUSE
+bleiben, pruefen aber jetzt `Save State` / `Load State` statt der drei alten Eintraege.
+
+**Lauf 2026-11-07, 20:01 (Paket `u8dev`):** U8-SAVE **bestanden** -
+`/SD/C64/wasteland_ef_v1.0.1-20261107-200156.c64re`, 1.183.369 B, neben dem Image, Datum im Namen,
+Koerper-Digest gut, sechs Sektionen, Cartridge **einmal**. U8-LOAD **gescheitert**: "The file's chip
+block is not this machine's". Ursache war kein Zustandsfehler, sondern der Textkopf - `%lu`/`%llu`
+kennt `small_printf.cc` nicht, jedes Feld dahinter rutschte eins weiter, `blockWords` trug den Wert
+von `caps2` (247 statt 58). `tools/c64re_read.py` meldete es beim ersten Lauf, also hat U8-CHECK die
+Gegenprobe geleistet, fuer die es da ist. Behoben, neu gebaut als `u8dev2`; beide Zeilen sind damit
+wieder offen und mit der neuen Firmware zu wiederholen. Hergang: [U8 §9](specs/U8-c64re-v2-state-and-medium.md).
 
 | ID | Was tun | Erwartet | Wer | Dauer |
 |---|---|---|---|---|
-| T66-FILES | **Neues Image.** USB-Stick rein. BASIC-Prompt reicht. Menue > C64 Machine: `Save Timewarp Frame`, `Save Timewarp Ring`, `Save Timewarp Ring (native)` nacheinander. Danach im Datei-Browser `/Usb0/timewarp` ansehen. | Drei Dateien `ring-<frame>-<datum>.c64re` / `.c64rering` / `.trxring`. Groessen: `.c64re` ab ca. 130 KB (RAM als base64), `.c64rering` je nach Eintraegen einige MB, `.trxring` je nach Ringlaenge - die Popup-Meldung nennt jeweils die Bytes. Kein Haenger, Maschine laeuft weiter. | A | 10 min |
-| T66-LOADSNAP | Im Datei-Browser auf die `.c64re`: Kontextmenue hat **Load Snapshot**. Vorher am C64 etwas aendern (z. B. `PRINT "X"` tippen, Rahmenfarbe per POKE), dann laden. Dasselbe mit der `.c64rering`. | Menue schliesst, Maschine steht wieder genau auf dem Stand der Datei und laeuft von dort weiter (nicht nur Bild: weitertippen geht). Bei der `.c64rering` der Cursor-Eintrag. | A | 10 min |
-| T66-LOADRING | Auf die `.trxring`: Kontextmenue hat **Load Ring**. Laden. Danach Menue > `Timewarp` oeffnen und zurueckscrubben. | Maschine auf dem Stand der Datei **und** der Ring ist wieder da: Timewarp kann in die Sekunden zurueck, die vor dem Speichern liefen. Genau das kann die `.c64re` nicht - nach ihr faengt der Ring bei 0 an. | A | 10 min |
+| U8-SAVE | Wasteland (oder ein anderes EasyFlash-CRT) von `/SD/C64/` starten, kurz spielen. Menue > C64 Machine > **Save State**. | Fortschrittsbox, dann `~1150 KB written to /SD/C64/wasteland_ef_v1.0.1-<datum>-<zeit>.c64re` - **neben dem Image**, nicht auf dem Stick, und mit Datum im Namen. Maschine laeuft weiter. | A | 10 min |
+| U8-LOAD | Am C64 etwas aendern (POKE 53280,1), dann im Browser auf die Datei: **Load State**. | Maschine steht wieder auf dem Stand der Datei **und laeuft weiter** - weitertippen geht. Kein "Out of memory". | A | 10 min |
+| U8-FLASH | Im Spiel einen Spielstand speichern (schreibt den EasyFlash), dann `Save State`. Weiterspielen, Spielstand ueberschreiben, dann die Datei laden. | Der Spielstand von der Aufnahme ist wieder da: das Cartridge kommt in der Fassung des Freezes zurueck. | A | 20 min |
+| U8-CHECK | Die Datei per FTP holen, `python3 tools/c64re_read.py <datei>`. | `sha256 of the body matches`, Sektionen BLOCK/RAM/COLOR/CARTRAM/CARTROM/DRIVE mit den richtigen Laengen, Exit 0. Die unabhaengige Gegenprobe zum Schreiber. | C | 5 min |
+| U8-HEAP | `System Info` vor dem Laden und direkt danach ansehen (Heap). | Die Spitze beim Laden bleibt unter 1,3 MB; der Heap ist danach wieder da, wo er vorher war. | C+A | 10 min |
+| U8-OLD | Eine Datei von **vor** dieser Version laden (`rr.c64re` in `/SD/C64/`, 320K, aus trx64). | Laedt weiter - grob, mit `[C64RE] coarse load (no trx64Hw node): ...` auf der Konsole. Format 1 bleibt lesbar. | C+A | 10 min |
+| U8-NOCART | Ohne Cartridge am BASIC-Prompt `Save State`, dann laden. | Datei etwa 70 KB (keine Medium-Sektion), laedt zurueck. Ablage: `timewarp/` auf dem ersten Volume, weil es kein laufendes Image gibt. | A | 10 min |
+| U9-COLD | **BESTANDEN 2026-11-08** (Paket u9dev5, per Softload). Leerer C64 ohne Cartridge, State geladen: Cartridge aus der `.crt` eingelegt und aktiv, Spiel laeuft weiter, und der EasyFlash-Write-back landet danach in der echten `wasteland_ef_v1.0.1.crt`. Drei Anlaeufe: `set_cartridge()` allein aktiviert nichts (`cart_en` latcht nur unter Reset, cart_slot.v:149), und ein **gehaltener** Reset laesst den State-Bus die Worte ablehnen - der Reset muss ein Puls sein, festgehalten wird ueber `hard_stop()`. Zur Wiederholung: C64 aus/an (kein Cartridge drin), dann im Browser den gespeicherten State laden. | Das Cartridge wird aus seiner eigenen `.crt` eingelegt, der Flash-Inhalt kommt aus der Datei (Fassung des Freezes), die Maschine laeuft weiter. **Kein Reset** - das Intro startet nicht neu. | A | 15 min |
+| U9-NOSRC | Die `.crt` wegschieben (umbenennen), dann den State laden. | Klare Absage mit dem Dateinamen, **bevor** etwas angefasst wird; die laufende Maschine bleibt unveraendert. Danach zurueckbenennen, laden geht wieder. | A | 10 min |
+| U9-TYPE | Ein anderes Cartridge stecken (anderer Typ), dann einen State von einem Typ laden, den dieser Build nicht zurueckholen kann - oder eine Datei von vor U9 auf die falsche Maschine. | Absage mit beiden Nummern: "The file is of cartridge type XX; this machine has YY". Nichts geschrieben. | A | 10 min |
+| U9-DISK | Mit einem D64 in Laufwerk A speichern. Image auswerfen, dann den State laden. | Das Image ist wieder gemountet, mit demselben Modus (ro/rw), und der Laufwerks-Zustand sitzt **danach** drauf - das Laufwerk haengt nicht. | A | 15 min |
+| U9-SET | UCI aus, State speichern. UCI an. State laden. | UCI ist wieder aus, im Menue steht `set by the loaded state`. **Reset C64**: bleibt aus (wie ein Cartridge). **Reboot C64**: deine eigene Einstellung ist zurueck, der Hinweis weg. Der Flash wurde nie beschrieben. | A | 15 min |
+| U9-GATE | Ein Cartridge stecken, das nicht auf der Liste steht (Action Replay, Final Cartridge, Dinamic, C64MegaCart ...), dann `Save State`. | Absage **vor** dem Schreiben: "A state of this cartridge (type XX) cannot be loaded back yet". **Keine Datei** entsteht. | A | 10 min |
+| U9-GMOD | GMod2-Spiel starten, im Spiel speichern (schreibt den EEPROM), `Save State`. Weiterspielen, anderen Stand speichern, dann die Datei laden. | Der Stand **von der Aufnahme** ist wieder da: der EEPROM reist als eigene Sektion mit (2048 Bytes). Datei enthaelt `EEPROM` laut `tools/c64re_read.py`. | A | 20 min |
+| U9-REPORT | Einen State laden, bei dem etwas fehlt (z. B. D64 geloescht). | Maschine laeuft trotzdem, und ein Popup sagt, was nicht zurueckkam. Konsole hat die Details. | A | 10 min |
+| U8-FAIL | Waehrend `Save State` schreibt den Stick ziehen (nur wenn du magst - der Fehlerpfad ist sonst schwer zu treffen). | Fehlermeldung, und **keine Datei** bleibt liegen. | A | 5 min |
+
+### Die alten T66-Zeilen, soweit sie noch gelten
+
+Die Host-Banken decken ab, was rein rechnerisch ist (Inflate gegen zlib, Knoten-Bauer gegen die
+Bitpositionen der Gateware, Ring-/Alignment-Arithmetik, SHA-256, beide 6502-Stubs im Interpreter,
+dazu U8/U9s siebzehn Formattests). Was hier steht, kann nur das Board beantworten. **U8-SAVE legt jetzt
+die Datei an, die die folgenden brauchen**, nicht mehr T66-FILES.
+
+| ID | Was tun | Erwartet | Wer | Dauer |
+|---|---|---|---|---|
 | T66-REST | `./run-tests -s timewarp-files <host>` (grosse Datei auf den Stick: `--dir /Usb0`). | Suite PASS. Sie prueft genau den Unterschied oben und nach jedem Laden, ob das Geraet noch antwortet und der Ring wieder laeuft. Ohne Engine oder mit eingeschaltetem REU ueberspringt sie sich selbst (A08). | C | 10 min |
-| T66-MON | trxmon: `dump /Usb0/a.c64re`, `undump /Usb0/a.c64re`, `ringdump /Usb0/a.c64rering 4 5`, `ringload /Usb0/a.c64rering #0`, `ringsave /Usb0/b.trxring`, `ringload /Usb0/b.trxring`. | Jeder Verb antwortet mit der TRX64-Textform; `ringload` einer `.trxring` sagt "the ring is back from ..." und Timewarp kann danach zurueck, `ringload` einer `.c64rering` sagt "restored 1 anchor(s)". | C+A | 10 min |
-| T66-CART | EasyFlash-CRT laden (z. B. Timo's Castle), etwas spielen, `Save Timewarp Frame`. Dann das Spiel weiterlaufen lassen (moeglichst mit einem Speicherstand, der den Flash beschreibt) und die Datei wieder laden. | Der Flash-Inhalt ist der von der Aufnahme - das ist der einzige Teil, den der Ring selbst nicht zurueckholen kann (im Log stehen keine Flash-Schreibzugriffe). Konsole zeigt keine Fehlzeile. Gegenprobe: dieselbe Datei mit einem **anderen** Cartridge-Typ gesteckt laden -> klare Absage "The file is of cartridge type XX; this machine has YY". | A | 20 min |
-| T66-DRIVE | Laufwerk A an, ein Spiel mit Schnelllader von D64 starten. Waehrend es laedt: `Save Timewarp Frame`. Konsole (UART) mitlesen. Danach die Datei laden. | Entweder "drive A runs in its ROM ..." (dann traegt die Datei nur das Laufwerks-RAM - kein Fehler) oder die Registerwerte sind drin und das Laufwerk laeuft nach dem Laden weiter. **Keinesfalls:** haengendes Laufwerk, Dauerleuchten der LED, Maschine steht. Wenn das Laufwerk haengt: Befund notieren (PC, was lief) - der Stub ist die einzige Stelle, die das Laufwerk anfassen kann. | A | 20 min |
+| T66-MON | trxmon: `dump <p>.c64re` (schreibt jetzt Format 2), `undump <p>.c64re`, `ringdump /Usb0/a.c64rering 4 5`, `ringload /Usb0/a.c64rering #0`, `ringsave /Usb0/b.trxring`, `ringload /Usb0/b.trxring`. | Jeder Verb antwortet mit der TRX64-Textform; `ringload` einer `.trxring` sagt "the ring is back from ..." und Timewarp kann danach zurueck, `ringload` einer `.c64rering` sagt "restored 1 anchor(s)". | C+A | 10 min |
+| T66-CART | EasyFlash-CRT laden (z. B. Timo's Castle), etwas spielen, `Save State`. Dann das Spiel weiterlaufen lassen (moeglichst mit einem Speicherstand, der den Flash beschreibt) und die Datei wieder laden. | Der Flash-Inhalt ist der von der Aufnahme - das ist der einzige Teil, den der Ring selbst nicht zurueckholen kann (im Log stehen keine Flash-Schreibzugriffe). Konsole zeigt keine Fehlzeile. Gegenprobe: dieselbe Datei mit einem **anderen** Cartridge-Typ gesteckt laden -> klare Absage "The file is of cartridge type XX; this machine has YY". | A | 20 min |
+| T66-DRIVE | Laufwerk A an, ein Spiel mit Schnelllader von D64 starten. Waehrend es laedt: `Save State`. Konsole (UART) mitlesen. Danach die Datei laden. | Entweder "drive A runs in its ROM ..." (dann traegt die Datei nur das Laufwerks-RAM - kein Fehler) oder die Registerwerte sind drin und das Laufwerk laeuft nach dem Laden weiter. **Keinesfalls:** haengendes Laufwerk, Dauerleuchten der LED, Maschine steht. Wenn das Laufwerk haengt: Befund notieren (PC, was lief) - der Stub ist die einzige Stelle, die das Laufwerk anfassen kann. | A | 20 min |
 | T66-TRX64 | Eine `.c64re`, die **TRX64** geschrieben hat (aus der TRX64-Sitzung), auf den Stick und laden. Vorher muss Timewarp gelaufen sein. | Grober Ladeweg: Maschine uebernimmt CPU, CIAs, VIC-Register, Farb-RAM und RAM; Konsole sagt "coarse load (no trx64Hw node): ..." und was nicht zurueckkommt (Rasterposition, Pixel-Pipeline, SID, Laufwerk). Ohne laufenden Ring: "No frame of this machine to build on: let Timewarp run first". Fremde Maschine: "The file is for machine ..., not c64-pal". | C+A | 15 min |
 | T66-REFUSE | REU einschalten, dann Laden und Speichern versuchen (Menue und REST). Danach REU aus. | Ueberall die A08-Absage, nichts wird geschrieben, Maschine unveraendert. | C | 5 min |
 

@@ -4,9 +4,9 @@
 #include "filetypes.h"
 #include "browsable_root.h"
 
-// A .c64re snapshot or a .c64rering ring save in the file browser (T66,
-// docs/specs/T20-delta-ring.md §9.4): "Load Snapshot" puts the machine into
-// the state the file holds and lets it run from there.
+// A .c64re state file or a .c64rering ring save in the file browser (T66, U8,
+// docs/specs/T20-delta-ring.md §9.4): "Load State" puts the machine into the
+// state the file holds, with its medium, and lets it run from there.
 class FileTypeC64re : public FileType
 {
     BrowsableDirEntry *node;

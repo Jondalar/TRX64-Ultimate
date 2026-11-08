@@ -10,7 +10,10 @@
 #ifndef CART_BASE_H
 #define CART_BASE_H
 
-#include "ui_shim.h"
+#include "cart_port.h"
+
+#include <stdbool.h>
+#include <stdint.h>
 
 // Bank status flags for visual display (used per-chip: status_lo / status_hi)
 #define BANK_UNKNOWN    0   // not yet scanned
@@ -32,8 +35,6 @@ int cart_read(uint16_t addr, void *dst, int len);
 #define C64_PEEK(x)           cart_peek(x)
 #define C64_POKE(x, y)        cart_poke(x, y)
 #define C64_READ(x, dst, len) cart_read(x, dst, len)
-
-#define MODE_NORMAL 0
 
 // EasyFlash 3: 8 slots of 64 EasyFlash banks. Slot 0 is the system area (KERNALs, menu, EasyProg, freezers,
 // EF-Directory), slots 1-7 hold EasyFlash CRTs. $DE01 selects the slot and reads back in EasyFlash mode.

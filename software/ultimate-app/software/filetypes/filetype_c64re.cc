@@ -5,8 +5,9 @@
  * The file carries this board's own chip block, so the machine comes back
  * exactly as it was at that frame boundary - the CPU registers and the CIA
  * flip-flops included, which is why it runs on instead of only being looked
- * at. A file this board did not write is refused here (T66 still owes the
- * coarse load of a TRX64 file, §9.4).
+ * at. A file without this build's chip block - a dump from the c64re app, or
+ * one from TRX64 - takes the coarse load of §9.4 instead: its nodes are laid
+ * on the machine's own newest frame, so the ring has to be running.
  *
  * Why in two steps: the browser runs with the machine frozen, and the menu
  * puts its own backup back when it closes, which would undo a load made
@@ -70,7 +71,10 @@ int FileTypeC64re :: fetch_context_items(IndexedList<Action *> &list)
     if (!(trx_io_caps() & 0x04)) {      // CAPS b2: no frame ring, nothing to load into
         return 0;
     }
-    list.append(new Action(type == C64RE_TYPE_NATIVE ? "Load Ring" : "Load Snapshot",
+    // "Load State" is the counterpart of "Save State" in the C64 Machine menu
+    // (U8 §5); a .trxring still brings the whole ring back, which is its own
+    // thing and keeps its own name.
+    list.append(new Action(type == C64RE_TYPE_NATIVE ? "Load Ring" : "Load State",
                            FileTypeC64re :: execute_st, C64REFILE_LOAD));
     return 1;
 }
@@ -141,11 +145,33 @@ SubsysResultCode_e FileTypeC64re :: execute_st(SubsysCommand *cmd)
         return SSRET_OK;
     }
 
+    // U9: the same progress box the save has - a .c64re is over a megabyte and
+    // reading it off an SD card or a stick is a visible wait
+    struct LoadBox {
+        UserInterface *ui;
+        bool shown;
+    } box = { cmd->user_interface, false };
+    trx_progress_fn bar = [](int done, int total, void *ctx) {
+        LoadBox *b = (LoadBox *)ctx;
+        char m[32];
+        if (done == 0) {
+            b->ui->show_progress("Loading the state", total);
+            b->shown = true;
+            return;
+        }
+        sprintf(m, "Loading the state %d / %d", done, total);
+        b->ui->update_progress(m, 1);
+    };
     TrxC64reStaged *staged = NULL;
-    const char *err = trx_c64re_stage(path, &staged);
+    const char *err = trx_c64re_stage_ex(path, &staged, bar, &box);
+    if (box.shown) {
+        cmd->user_interface->hide_progress();
+    }
     if (err) {
-        char msg[192];
-        snprintf(msg, sizeof(msg), "This file cannot be loaded:\n%s", err);
+        char line[224], msg[320];
+        snprintf(line, sizeof(line), "This file cannot be loaded:\n%s", err);
+        trx_c64re_wrap(msg, sizeof(msg), line,
+                       cmd->user_interface->get_screen()->get_size_x() - 6);
         cmd->user_interface->popup(msg, BUTTON_OK);
         return SSRET_CANNOT_OPEN_FILE;
     }
@@ -161,10 +187,23 @@ SubsysResultCode_e FileTypeC64re :: execute_st(SubsysCommand *cmd)
     // the file goes in now.
     err = trx_c64re_apply(staged);
     if (err) {
-        char msg[192];
-        snprintf(msg, sizeof(msg), "The snapshot could not be loaded:\n%s", err);
+        char line[224], msg[320];
+        snprintf(line, sizeof(line), "The state could not be loaded:\n%s", err);
+        trx_c64re_wrap(msg, sizeof(msg), line,
+                       cmd->user_interface->get_screen()->get_size_x() - 6);
         cmd->user_interface->popup(msg, BUTTON_OK);
         return SSRET_CANNOT_OPEN_FILE;
+    }
+    // U9 D6: the machine is back; say what did not come with it rather than
+    // leave the user to notice. Over a frozen machine the load happens at
+    // unfreeze, with the menu already gone - there the console carries it.
+    const char *missed = trx_c64re_missed();
+    if (missed) {
+        char line[224], msg[320];
+        snprintf(line, sizeof(line), "The state is loaded, but not:\n%s", missed);
+        trx_c64re_wrap(msg, sizeof(msg), line,
+                       cmd->user_interface->get_screen()->get_size_x() - 6);
+        cmd->user_interface->popup(msg, BUTTON_OK);
     }
     cmd->user_interface->menu_response_to_action = MENU_HIDE;
     return SSRET_OK;

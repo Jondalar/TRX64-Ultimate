@@ -129,7 +129,7 @@ void cart_screen_file(Window *w, const cart_layout_t *l, const char *name)
     if (!w || l->y_file < 0)
         return;
     char line[CART_SCREEN_COLS + 1];
-    ui_snprintf(line, sizeof(line), "CRT: %s", (name && name[0]) ? name : "-");
+    cart_snprintf(line, sizeof(line), "CRT: %s", (name && name[0]) ? name : "-");
     cart_screen_line(w, l->y_file, COLOR_LABEL, line);
 }
 
@@ -145,7 +145,7 @@ void cart_screen_keys(Window *w, int y, const char *const *pairs, int npairs)
         int klen = 0, wlen;
         while (pairs[i][klen])
             klen++;
-        wlen = ui_snprintf(word, sizeof(word), "=%s ", pairs[i + 1]);
+        wlen = cart_snprintf(word, sizeof(word), "=%s ", pairs[i + 1]);
         if (x + klen + wlen - 1 > CART_SCREEN_COLS)
             break;
         window_set_color(w, COLOR_KEY);
@@ -171,7 +171,7 @@ static void draw_grid(Window *w, const uint8_t *status, int banks, int rows, int
             window_output(w, label);
         }
         char rowlabel[5];
-        ui_snprintf(rowlabel, sizeof(rowlabel), "%02X:", r * 16);
+        cart_snprintf(rowlabel, sizeof(rowlabel), "%02X:", r * 16);
         window_move_cursor(w, COL_ROWLABEL, y + 1 + r);
         window_output(w, rowlabel);
 

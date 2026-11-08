@@ -516,6 +516,16 @@ public:
     }
     const cart_def *get_cart_definition() { return &current_cart_def; } // Dangerous!
 
+    // U9 D2: put a cartridge in without booting it. start_cartridge() stops the
+    // machine, forces Ultimax, clears VIC registers and ends in UNRESET - which
+    // is right for starting a cartridge and fatal for loading a state. This holds
+    // the machine, pulses the reset the gateware needs to latch the cartridge,
+    // and hands back a machine that has run no cycle. See c64.cc for the why.
+    void insert_cartridge_for_state(cart_def *def);
+    // U9 D4: the three settings a loaded state can own. set_emulation_flags()
+    // releases them again, which is every path that puts the user's cfg back.
+    void mark_settings_from_state(void);
+
     static int isMP3RamDrive(int dev);
     static int getSizeOfMP3NativeRamdrive(int dev);
 

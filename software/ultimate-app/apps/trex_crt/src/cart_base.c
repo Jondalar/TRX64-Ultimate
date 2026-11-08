@@ -7,6 +7,11 @@
 
 #include "cart_base.h"
 
+#include "cart_fmt.h"
+#include "cart_view.h"
+
+#include <string.h>
+
 // Scratch buffer for one 8K bank read back from the bus
 static uint8_t s_bank_buf[0x2000];
 
@@ -23,16 +28,10 @@ static bool s_wr_open;      // ROM_WR_EN is raised by slot_wr_open
 static uint8_t s_wr0;       // SLOT_STATUS b18 when the session began
 static const char *s_status_msg = "";
 
-// The registers of the IO block (the host harness puts a model behind them)
-#ifdef HOST_TEST
-extern uint8_t mock_trx_rd8(uint32_t off);
-extern void mock_trx_wr8(uint32_t off, uint8_t v);
-#define TRX_RD8(off)    mock_trx_rd8(off)
-#define TRX_WR8(off, v) mock_trx_wr8(off, v)
-#else
-#define TRX_RD8(off)    (g_api->trx->regs[off])
-#define TRX_WR8(off, v) (g_api->trx->regs[off] = (v))
-#endif
+// The registers of the IO block, through the platform (cart_port.h): the app reaches them over the ABI, the host
+// harness puts its model of trx_sys.v behind them
+#define TRX_RD8(off)    g_port->reg_rd(off)
+#define TRX_WR8(off, v) g_port->reg_wr(off, v)
 
 // 32-bit registers over the byte bus (ARCH-lean-state-access 10): a read takes byte 0 first, then 1-3; a write
 // of byte 3 commits bytes 0-2, so it comes last
@@ -53,13 +52,12 @@ static void trx_wr32(uint32_t off, uint32_t v)
     TRX_WR8(off + 3, (uint8_t)(v >> 24));
 }
 
-// api->trx is there only when the firmware found "TRX2" and the debug page; Gideon's block reads 0, and nothing
-// at 0x101A0000 is touched on his core
+// The register block is there only when the firmware found "TRX2" and the debug page; Gideon's block reads 0,
+// and nothing at 0x101A0000 is touched on his core
 void core_detect(void)
 {
     g_core = CORE_GIDEON;
-    if (g_api->trx && g_api->trx->regs && g_api->trx->regs[0] == 'T' && g_api->trx->regs[1] == 'R' &&
-        g_api->trx->regs[2] == 'X' && g_api->trx->regs[3] == '2') {
+    if (g_port->has_regs && TRX_RD8(0) == 'T' && TRX_RD8(1) == 'R' && TRX_RD8(2) == 'X' && TRX_RD8(3) == '2') {
         g_core = CORE_TRX;
     }
     LOG("[CartBase] core: %s\n", g_core == CORE_TRX ? "TRX64 Ultimate" : "Gideon");
@@ -123,7 +121,7 @@ void slot_wr_close(void)
 void cart_notify(const char *msg)
 {
     LOG("[CartBase] %s\n", msg);
-    u2p_ui_popup_buttons(msg, BUTTON_OK);
+    cart_tell(msg);
 }
 
 void cart_notify_no_cartridge(void)
@@ -155,10 +153,10 @@ bool cart_session_open(bool gideon_normal)
     if (!is_trx()) {
         cart_setup_bus();
         if (gideon_normal) {
-            g_api->c64->cart_mode(MODE_NORMAL); // Release cart GAME/EXROM pins (freeze sets Ultimax)
+            g_port->cart_mode(MODE_NORMAL); // Release cart GAME/EXROM pins (freeze sets Ultimax)
             // The mode write only reaches the C64 bus with the next bus cycle; one
             // discarded read through the aperture is that cycle.
-            (void)g_api->c64->peek(0x8000);
+            (void)g_port->peek(0x8000);
             LOG("[CartDumper] C64_MODE = MODE_NORMAL (was Ultimax from freeze)\n");
         }
         return true;
@@ -175,7 +173,7 @@ bool cart_session_open(bool gideon_normal)
     }
     if (s0 & SLOT_ST_FAULT) {
         char msg[64];
-        ui_snprintf(msg, sizeof(msg), "Port fault (cause %d).\nReset the C64.", (int)((s0 >> 20) & 15));
+        cart_snprintf(msg, sizeof(msg), "Port fault (cause %d).\nReset the C64.", (int)((s0 >> 20) & 15));
         cart_notify(msg);
         session_fail("Port fault: reset the C64");
         return false;
@@ -198,19 +196,19 @@ bool cart_session_open(bool gideon_normal)
     }
 
     cart_setup_bus();
-    g_api->c64->cart_mode(MODE_NORMAL); // the freeze's Ultimax keeps ROML/ROMH off the port
-    (void)g_api->c64->peek(0x8000);     // the mode reaches the bus with the next cycle
+    g_port->cart_mode(MODE_NORMAL); // the freeze's Ultimax keeps ROML/ROMH off the port
+    (void)g_port->peek(0x8000);     // the mode reaches the bus with the next cycle
 
     uint32_t want = SLOT_ST_ARMED | SLOT_ST_EXT_IO | SLOT_ST_EXT_ROM;
     bool ok = false;
-    uint32_t t0 = g_api->sys->tick_ms();
+    uint32_t t0 = g_port->tick_ms();
     for (int n = 0; n < 1000; n++) {
         uint32_t s = slot_status();
         if ((s & want) == want && !(s & SLOT_ST_INT_ROM)) {
             ok = true;
             break;
         }
-        if ((g_api->sys->tick_ms() - t0) > 10 && n >= 4) {
+        if ((g_port->tick_ms() - t0) > 10 && n >= 4) {
             break;
         }
     }
@@ -229,9 +227,9 @@ void cart_session_close(void)
     s_touch_on = false;
     // Bank registers and the EasyFlash mode are write-only: a running program cannot be put back into its bank, so
     // the cartridge restarts through the C64's reset. The reset is carried out after the app returned.
-    if (is_trx() && g_cart_touched && U2P_HAS(g_api->media, reset)) {
+    if (is_trx() && g_cart_touched && g_port->reset_machine) {
         LOG("[CartBase] Resetting C64 (the cartridge was touched)\n");
-        g_api->media->reset();
+        g_port->reset_machine();
     }
 }
 
@@ -240,7 +238,7 @@ uint8_t cart_peek(uint16_t addr)
     if (s_touch_on && addr >= 0xDE00 && addr < 0xE000) {
         g_cart_touched = true;
     }
-    return g_api->c64->peek(addr);
+    return g_port->peek(addr);
 }
 
 void cart_poke(uint16_t addr, uint8_t val)
@@ -248,7 +246,7 @@ void cart_poke(uint16_t addr, uint8_t val)
     if (s_touch_on && addr >= 0x8000) {
         g_cart_touched = true;
     }
-    g_api->c64->poke(addr, val);
+    g_port->poke(addr, val);
 }
 
 int cart_read(uint16_t addr, void *dst, int len)
@@ -256,7 +254,7 @@ int cart_read(uint16_t addr, void *dst, int len)
     if (s_touch_on && addr < 0xE000 && (uint32_t)addr + (uint32_t)len > 0xDE00u) {
         g_cart_touched = true;
     }
-    return g_api->c64->dma_read(addr, dst, len);
+    return g_port->dma_read(addr, dst, len);
 }
 
 // =========================================================================
@@ -265,7 +263,7 @@ int cart_read(uint16_t addr, void *dst, int len)
 
 void cart_setup_bus(void)
 {
-    g_api->c64->cart_setup_bus();
+    g_port->setup_bus();
     s_bus_open = true;
     LOG("[CartBase] Bus setup: bridge=03 int=0 ext=15 $01=37\n");
 }
@@ -273,7 +271,7 @@ void cart_setup_bus(void)
 void cart_restore_bus(void)
 {
     if (s_bus_open) {
-        g_api->c64->cart_restore_bus();
+        g_port->restore_bus();
         s_bus_open = false;
     }
 }
@@ -288,20 +286,19 @@ bool cart_check_dma_access(void)
     if (is_trx()) {
         return true;
     }
-    int pref = g_api->c64->cart_preference();
+    int pref = g_port->cart_preference();
     if (pref < 0) {
         pref = 1; // no machine: same default as the firmware
     }
-    bool ext_cart = ((g_api->c64->cart_detect() & 3) != 3);
+    bool ext_cart = ((g_port->cart_detect() & 3) != 3);
     if (!ext_cart || ((pref != 0) && (pref != 2))) {
         return true;
     }
 
     LOG("[CartBase] No cartridge access: Cartridge Preference is %s\n", pref ? "External" : "Auto");
-    u2p_ui_popup_buttons("No access to the cartridge.\n"
-                            "Set 'Cartridge Preference'\n"
-                            "to 'Internal' and reboot.",
-                            BUTTON_OK);
+    cart_tell("No access to the cartridge.\n"
+              "Set 'Cartridge Preference'\n"
+              "to 'Internal' and reboot.");
     return false;
 }
 
@@ -335,7 +332,7 @@ void cart_switch_bank(int bank, int crt_hw_type)
 
 bool cart_detect_present(cart_base_t *cb)
 {
-    uint8_t detect = g_api->c64->cart_detect();
+    uint8_t detect = g_port->cart_detect();
     cb->det_game = detect & 1;
     cb->det_exrom = (detect >> 1) & 1;
 
@@ -513,10 +510,10 @@ int cart_ef3_pick_slot(cart_base_t *cb, int extra)
         char name[EF3_NAME_LEN + 1];
         cart_ef3_slot_name(dir, slot, name);
         if (!valid) {
-            ui_snprintf(items[slot - 1], sizeof(items[0]), "Slot %d", slot);
+            cart_snprintf(items[slot - 1], sizeof(items[0]), "Slot %d", slot);
         } else {
             // EasyProg shows an empty name as '-'
-            ui_snprintf(items[slot - 1], sizeof(items[0]), "%d: %s", slot, name[0] ? name : "-");
+            cart_snprintf(items[slot - 1], sizeof(items[0]), "%d: %s", slot, name[0] ? name : "-");
         }
         list[slot - 1] = items[slot - 1];
     }
@@ -527,7 +524,7 @@ int cart_ef3_pick_slot(cart_base_t *cb, int extra)
     if (extra & EF3_PICK_ERASE)
         list[n++] = "ERASE WHOLE CART...";
 
-    int choice = u2p_ui_menu("EasyFlash 3 slot", list, n);
+    int choice = cart_choice("EasyFlash 3 slot", list, n);
     if (choice < 0 || choice >= n) {
         return EF3_PICKED_NONE;
     }
@@ -775,10 +772,10 @@ bool cart_gmod2_eeprom_write_word(int address, uint16_t data)
     C64_POKE(0xDE00, EEPROM_CS);
 
     bool ready = false;
-    uint32_t start = g_api->sys->tick_ms();
+    uint32_t start = g_port->tick_ms();
     for (int reads = 1; !ready; reads++) {
         ready = (C64_PEEK(0xDE00) & EEPROM_DO) != 0;
-        if (!ready && reads >= 2 && (g_api->sys->tick_ms() - start) > EEPROM_READY_TIMEOUT_MS) {
+        if (!ready && reads >= 2 && (g_port->tick_ms() - start) > EEPROM_READY_TIMEOUT_MS) {
             break;
         }
     }

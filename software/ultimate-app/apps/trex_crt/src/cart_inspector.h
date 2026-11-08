@@ -9,6 +9,7 @@
 #define CART_INSPECTOR_H
 
 #include "cart_base.h"
+#include "ui_shim.h"
 
 typedef struct
 {
