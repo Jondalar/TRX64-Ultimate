@@ -1,6 +1,7 @@
 {
  "cart_type": "0x0F",
  "crt_type": 86,
+ "short_name": "MegaByter",
  "name": "Protovision Megabyter",
  "note": "PROP-002 sec. 8.2 (VICE megabyter.c). ROMH (16K lines, entry 01) mirrors ROML as before; VICE has no ROMH for the type.",
  "regs": {
@@ -70,6 +71,8 @@
    "0x58"
   ],
   "id_ofs": 2,
+  "wmode": 3,
+  "rmode": 0,
   "size": "1M",
   "sectors": [
    {

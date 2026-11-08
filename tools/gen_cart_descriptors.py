@@ -167,11 +167,30 @@ def flash_profile(d):
         raise ValueError("%s: sectors do not add up to the chip" % d["name"])
     if len(runs) > 6:
         raise ValueError("more than 6 sector runs")
+    # Which value of the MODE field the programmer writes to open the write window ("wmode") and which one
+    # it reads the banks in ("rmode"). The 43 descriptor bytes do not carry them: the hardware takes the
+    # windows from flash.select, and "w" in the mode table says in which modes writing is allowed, which is
+    # not the same fact as which of them a programmer should select (EasyFlash marks three). So both are
+    # explicit data, validated against the table. T95 D2.
+    mode = d.get("mode", {"width": 0})
+    mwidth = num(mode.get("width", 0))
+    entries = 1 << mwidth
+    table = d.get("table", [])
+    for key in ("wmode", "rmode"):
+        if key not in fl:
+            raise ValueError("%s: flash.%s missing (the mode value the tool writes)" % (d["name"], key))
+        if not 0 <= num(fl[key]) < entries:
+            raise ValueError("%s: flash.%s outside the %d-bit mode field" % (d["name"], key, mwidth))
+    wmode, rmode = num(fl["wmode"]), num(fl["rmode"])
+    if wmode < len(table) and not num(table[wmode].get("w", 0)):
+        raise ValueError("%s: mode %d is flash.wmode but carries no \"w\" in the table" % (d["name"], wmode))
     return {
         "part": fl["part"], "magic1": num(fl["magic1"]), "magic2": num(fl["magic2"]),
         "mask": num(fl["mask"]), "id": [num(x) for x in fl["id"]], "id_ofs": num(fl["id_ofs"]),
         "size": chip, "chips": num(fl.get("chips", 1)), "runs": runs,
         "linear": 2 if d.get("flash_split") else int(d.get("layout") == "L16"),
+        "wmode": wmode, "rmode": rmode, "unlock_bank": num(fl.get("unlock_bank", -1)),
+        "sel": sum(FLASH_SEL[x] for x in fl["select"]),
     }
 
 
@@ -222,11 +241,17 @@ def c_header(descs, srcs):
     L.append("    uint32_t chip_size;")
     L.append("    uint8_t  runs;")
     L.append("    trx_sector_run_t run[6];")
+    L.append("    uint8_t  sel;            // which windows the flash answers: b0 ROML_R, b1 ROML_W, b2 ROMH_R, b3 ROMH_W")
+    L.append("    uint8_t  wmode;          // MODE field value the programmer writes to open the write window")
+    L.append("    uint8_t  rmode;          // MODE field value the banks are read in")
+    L.append("    int8_t   unlock_bank;    // bank that must be selected for a command cycle, -1: wherever the bank stands (EasyFlash: EAPI requires bank 0)")
     L.append("} trx_flash_part_t;")
     L.append("")
     L.append("typedef struct {")
     L.append("    uint8_t  cart_type;      // the app's CART_TYPE byte")
+    L.append("    uint16_t crt_type;       // the CRT hardware type of this cartridge (informational; 0 = none of its own)")
     L.append("    const char *name;")
+    L.append("    const char *short_name;  // for a 40-column line; the name itself when the JSON has no short_name")
     L.append("    const trx_flash_part_t *flash;   // NULL: no flash the C64 can program")
     L.append("    uint8_t  desc[TRX_CART_DESC_BYTES];")
     L.append("} trx_cart_desc_t;")
@@ -236,16 +261,18 @@ def c_header(descs, srcs):
         if not p:
             continue
         runs = ", ".join("{ %d, 0x%X }" % r for r in p["runs"])
-        L.append("static const trx_flash_part_t c_flash_%02x = { \"%s\", %d, %d, 0x%04X, 0x%04X, 0x%04X, 0x%02X, 0x%02X, %d, 0x%X, %d, { %s } };"
+        L.append("static const trx_flash_part_t c_flash_%02x = { \"%s\", %d, %d, 0x%04X, 0x%04X, 0x%04X, 0x%02X, 0x%02X, %d, 0x%X, %d, { %s }, 0x%02X, 0x%02X, 0x%02X, %d };"
                  % (num(d["cart_type"]), p["part"], p["chips"], p["linear"], p["magic1"], p["magic2"], p["mask"],
-                    p["id"][0], p["id"][1], p["id_ofs"], p["size"], len(p["runs"]), runs))
+                    p["id"][0], p["id"][1], p["id_ofs"], p["size"], len(p["runs"]), runs, p["sel"], p["wmode"], p["rmode"],
+                    p["unlock_bank"]))
     L.append("")
     L.append("static const trx_cart_desc_t c_cart_descs[] = {")
     for d in descs:
         k = num(d["cart_type"])
         fl = "&c_flash_%02x" % k if d["_flash"] else "0"
         by = ", ".join("0x%02X" % x for x in d["_bytes"])
-        L.append("    { 0x%02X, \"%s\", %s,  // %s" % (k, d["name"], fl, d["_file"]))
+        L.append("    { 0x%02X, %d, \"%s\", \"%s\", %s,  // %s"
+                 % (k, num(d.get("crt_type", 0)), d["name"], d.get("short_name", d["name"]), fl, d["_file"]))
         L.append("      { %s } }," % by)
     L.append("};")
     L.append("")

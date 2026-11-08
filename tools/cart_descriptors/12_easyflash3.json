@@ -47,6 +47,9 @@
   "mask": "0xFFF",
   "id": ["0xC2", "0xCB"],
   "id_ofs": 2,
+  "unlock_bank": 0,
+  "wmode": 5,
+  "rmode": 5,
   "size": "8M",
   "sectors": [
    {"count": 8, "size": "8K"},

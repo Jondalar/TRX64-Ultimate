@@ -1,6 +1,7 @@
 {
  "cart_type": "0x68",
  "crt_type": 88,
+ "short_name": "C64MegaCart",
  "name": "C64MegaCart (2 MiB board V4.3)",
  "note": "PROP-002 sec. 8.2 and footnote 8 (Piper's VICE fork, TRX64): mode 01 holds the lines, mode 11 is Ultimax only for CPU writes to $8000-$FFFF.",
  "regs": {
@@ -78,6 +79,8 @@
    "0xD2"
   ],
   "id_ofs": 2,
+  "wmode": 3,
+  "rmode": 0,
   "size": "2M",
   "sectors": [
    {
