@@ -121,8 +121,53 @@ Scenario: Nothing that worked stops working
 **D1 — The filter gets a 6581 path of its own, from libresidfp.** Not another curve: the
 non-linearity is in the topology. libresidfp's 6581 filter model is already the source of our
 combined-waveform tables and our provenance line, so it costs no new reading and no clean-room
-exception. The 8580 path stays exactly as it is, bit for bit, and which path a chip takes follows
-the chip model (D3).
+exception (and explicitly **not** reDIP's HDL: `trx_sid_engine.v:11` says the engine was written
+without it, and that stays true). The 8580 path stays exactly as it is, bit for bit, and which path
+a chip takes follows the chip model (D3).
+
+**D1a — The model, read 2026-11-09** (`Integrator6581.cpp:32-96`, pinned commit
+`dcf6b8ac` of libresidfp). Per integrator and sample:
+
+```
+Vgst = nVddt - vx ;  Vgdt = nVddt - vi                  two 16 x 16 squares
+n_I_snake = kSnake * ((Vgst^2 - Vgdt^2) >> 15)          one multiply
+nVg  = vcr_nVg[(nVddt_Vw_2 + (Vgdt^2 >> 1)) >> 16]      table
+kVgt = (nVg - nVt) - nVmin
+If   = vcr_n_Ids_term[kVgt - vx - INT16_MIN] << 15      table
+Ir   = vcr_n_Ids_term[kVgt - vi - INT16_MIN] << 15      table
+vc  += n_I_snake + (If - Ir)
+vx   = opamp_rev[(vc >> 15) - INT16_MIN]                table
+vo   = vx - (vc >> 14)
+```
+
+So three distinct tables, four lookups, three multiplies, and one piece of state (`vc`) per
+integrator. The tables are chip constants, not per-SID, which is the good news.
+
+**D1b — The tables cannot be copied, and that is measured, not feared.** In libresidfp they are
+`vcr_nVg[1<<16]`, `vcr_n_Ids_term[1<<16]` and `opamp_rev[1<<16]` (`FilterModelConfig6581.h:82-83`,
+`FilterModelConfig.h:101`), 16 bit each: **384 KB, which is 85 BRAM36 tiles**. This part
+(Artix-7 50T) has **75 tiles in total**, 56.5 are in use and T25.1 §5 puts the ceiling at 60 — so
+the headroom is **3.5 tiles, about 15.75 KB**, and T25.1 already names BRAM as the tight resource.
+A direct port is out by a factor of 24.
+
+They go in as **1024-entry tables with linear interpolation**: 3 x 1024 x 16 bit = 48 Kb, **1.5
+tiles as three RAMB18**, which fits the headroom with room to spare. All three functions are smooth
+(a square root, `ln^2(1+e^x)`, and the measured opamp curve), so the question is not whether
+interpolation works but where the error lands: the knee of the Ids term is where a uniform grid is
+worst, and the decision of how to grid it is **taken against a measurement** (D1d), not by eye.
+
+**D1c — The filter stage becomes a streaming pipeline.** Today each SID's filter is four clocks with
+its own arithmetic (`trx_sid_engine.v`, t = 12 + 4s). The 6581 path needs, for 8 filters x 2
+integrators, about **48 lookups and 48 multiplies per C64 cycle**, and a frame is **64 clk2x**. One
+port per table does 64 lookups in a frame and one DSP does 64 multiplies, so it fits - but only if
+the stage streams the eight SIDs through shared arithmetic instead of giving each its own. That is
+the real work of D1, and it is a change to the schedule, so T25.1 §4a's table moves with it.
+
+**D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
+harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
+difference the way U7 reported dB, and the same sweeps F20 uses. The interpolated tables are
+accepted when that error is below the 8580 path's own error against its model, and not before.
+`tb_wav` (D5) is for the ear afterwards, not for the proof.
 
 **D2 — Distortion is its own stage, switchable, and off until it has been heard.** It sits after the
 6581 path, per chip, so that a wrong fit cannot spoil the 8580 side or a 6581 that someone liked
