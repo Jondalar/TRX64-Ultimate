@@ -161,6 +161,28 @@ that a test shows is then chased in the tables.
 
 ## §5 Questions for Alex
 
+**Q5 — Is the IRQ status register a per-voice flag or a mask of all voices?** This decides whether
+his test program can pass on our hardware at all, and it is the one thing in the review that is a
+defect rather than a missing feature.
+
+- **Ours** (`trx_sampler.v`, the `dout` of the C64 side): a read of a voice's `+0` returns
+  `{7'd0, irq_pend[that voice]}` — bit 0, that voice, no other bit, which is what T25.6 §3 wrote
+  down. That sentence was derived from the players, not measured against hardware.
+- **His test** reads `$DF20` — voice 0's window — inside the interrupt and expects **bit 0 = voice 0,
+  bit 1 = voice 1**; it waits for `$DF20 == 3` and acknowledges each voice at its own `+1F`
+  (`$DF3F`, `$DF5F`, which is ours exactly). On ours bit 1 is never set, so the program cannot
+  finish: it sits in its wait loop with a red border. That is read off his source, not a board run
+  (`U12-UA972`).
+- **Both public programs agree** if the status byte is the 8 bit pending mask of all voices, the same
+  in every window: Xander's detection (T25.6 §3) uses **voice 0** — it acknowledges `$DF3F` and polls
+  `$DF20` for 1 — so a mask reads 1 for it too.
+- **What it would cost:** a program that polls voice 3's own flag at `$DF80` bit 0 would then see
+  voice 0's. Nothing we have read does that, and nothing rules it out either; Heartbeat's IRQ use is
+  not recorded in T25.6.
+- I would make it the mask, because it is the only reading under which both known programs work, and
+  write it into T25.6 as a measured rule instead of a derived one. It is register-visible, so it is
+  Alex's.
+
 **Q1 — How much of this is one piece of work?** D1 alone (a second filter topology, its benches and
 its board test) is the size of U7. D1 + D3 is the smallest thing that makes a 6581 sound like one;
 D2 and D4 are each their own change with their own listening test; D5 is a tool. The spec is written
@@ -183,16 +205,25 @@ with what, is Alex's.
 
 Kept here so the e-mail's content survives in the repo, not to be built under this number:
 
-- **The 1-vs-2-byte slowdown** he documented as GideonZ/1541ultimate#972: ours does not have it, he
-  checked. No action.
+- **The 8-vs-16-bit rate asymmetry** he documented as GideonZ/1541ultimate#972 (read 2026-11-09; an
+  earlier draft of this spec called it a "1-vs-2-byte slowdown" and said it described the stereo
+  interleave — it does neither). In his reading of Gideon's VHDL the fetch states after each divider
+  expiry are not prescaled, so a 16 bit voice pays two unprescaled visits per sample against a mono8
+  voice's one, and two voices at the same RATE drift apart without bound (80 ns per sample on the
+  U64-II). **Ours does not have it, measured rather than assumed:** `tb_sampler` section 11 runs an
+  8 bit and a 16 bit voice at the same RATE (194 = his $00c2, 50, 400) and counts what each delivers
+  in the same time — equal to within the one sample they start apart. Our period comes from `ratee`
+  and the 1/256-tick counter, and neither sees the bit depth.
 - **Misaligned 16 bit fetches:** fixed, [U11](U11-sampler-any-byte-address.md), benches green, board
   hear test open.
-- **Stereo interleave:** he thinks it is missing, and it is — U11 §4 left it out because the only
-  description of its encoding we had was Gideon's VHDL. **His issue #972 and its test code are a
-  public source**, so the exclusion can be lifted without touching the clean room. That needs
-  reading #972 first, and then its own spec section.
+- **Stereo interleave:** he thinks it is missing, and it is. #972 says nothing about it and neither
+  does his test program, so **the exclusion of U11 §4 stands**: Gideon's VHDL is still the only
+  description of its encoding we know of, and this repo does not open it. It needs another source —
+  his own words by mail would be one, Xander's manual another — before it can be built.
 - **The IRQ:** he had not checked whether ours is wired. It is — `c64_core.v:591`,
-  `.ext_io_irq(io_irq | smp_irq)` — and his #972 test code would exercise it on the board.
+  `.ext_io_irq(io_irq | smp_irq)`. His test program (`ua_972_check.prg`, posted in #972, sha256
+  `bc1e0806c2e9b596216a1e50a0021aa404d95806920822fdd2293307d89c7439`) does exercise it, and reading
+  its source turned up something bigger than the rate it was written for — **Q5**.
 - **Dropping late samples:** Q3.
 - **The sub-cycle blend** (T25.6, 2026-10-08: 452 -> 639 LUT for -45 dB of step error) he suspects is
   overkill because the output resampler removes what it fixes. Worth measuring after the resampler

@@ -535,6 +535,36 @@ int main(int argc, char **argv)
     }
     reset_all();
 
+    // ---- 11. GideonZ/1541ultimate#972: the rate must not depend on the bit depth
+    {
+        // Two voices, the same RATE, one 8 bit and one 16 bit: in his VHDL the
+        // 16 bit voice pays one more unprescaled visit per sample and the two
+        // drift apart without bound. Ours must deliver the same number of
+        // samples in the same time, whatever the depth.
+        const uint32_t a8 = REU + 0xA0000, a16 = REU + 0xB0000;
+        for (int i = 0; i < 0x4000; i++) { ddr[a8 + i] = (uint8_t)i; ddr[a16 + i] = (uint8_t)i; }
+        int rates11[] = {194, 50, 400};             // 194 = his $00c2
+        for (int ri = 0; ri < 3; ri++) {
+            int rate = rates11[ri];
+            vsetup(1, a8,  0x4000, rate, 0, 0);     // 8 bit
+            vsetup(2, a16, 0x4000, rate, 0, 0);     // 16 bit
+            fetches.clear();
+            vw(1, 0, 0x01);
+            vw(2, 0, 0x11);
+            run(4000);
+            vw(1, 0, 0); vw(2, 0, 0);
+            int n8 = 0, n16 = 0;
+            for (size_t i = 0; i < fetches.size(); i++) {
+                uint32_t f = fetches[i];
+                if (f >= a8 && f < a8 + 0x4000) n8++;
+                else if (f >= a16 && f < a16 + 0x4000) n16++;
+            }
+            // the two may be one sample apart (they were started one write apart)
+            CHECK(std::abs(n8 - n16) <= 1, "rate %d: 8 bit %d samples, 16 bit %d (#972)", rate, n8, n16);
+        }
+    }
+    reset_all();
+
     printf("%d checks, %d failed\n", checks, fails);
     printf(fails ? "tb_sampler FAIL\n" : "tb_sampler PASS\n");
     return fails ? 1 : 0;
