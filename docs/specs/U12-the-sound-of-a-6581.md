@@ -143,25 +143,34 @@ vo   = vx - (vc >> 14)
 So three distinct tables, four lookups, three multiplies, and one piece of state (`vc`) per
 integrator. The tables are chip constants, not per-SID, which is the good news.
 
-**D1b — The tables cannot be copied, and that is measured, not feared.** In libresidfp they are
-`vcr_nVg[1<<16]`, `vcr_n_Ids_term[1<<16]` and `opamp_rev[1<<16]` (`FilterModelConfig6581.h:82-83`,
-`FilterModelConfig.h:101`), 16 bit each: **384 KB, which is 85 BRAM36 tiles**. This part
-(Artix-7 50T) has **75 tiles in total**, 56.5 are in use and T25.1 §5 puts the ceiling at 60 — so
-the headroom is **3.5 tiles, about 15.75 KB**, and T25.1 already names BRAM as the tight resource.
-A direct port is out by a factor of 24.
+**D1b — The tables cannot be copied, and the real figure is worse than the first one in this spec.**
+A first pass counted the integrator's three (`vcr_nVg`, `vcr_n_Ids_term`, `opamp_rev`, each
+`1<<16` x 16 bit = 384 KB together). Reading on, the filter's **summing, mixing, volume and
+resonance nodes each have their own stack of tables** as well
+(`FilterModelConfig.h:150-225`): `summer` 20 x 65536, `mixer` 28 x 65536 + 1, `volume` 16 x 65536,
+the resonance gain another 16 x 65536. With the three above that is **about 5.44 million 16 bit
+entries, 10.9 MB, roughly 2 400 BRAM36 tiles**. This part (Artix-7 50T) has **75**, of which 56.5
+are in use with T25.1 §5's ceiling at 60 — **3.5 tiles free**, and T25.1 already names BRAM as the
+tight resource. Not a factor of 24 out: a factor of about 700.
 
-They go in as **1024-entry tables with linear interpolation**: 3 x 1024 x 16 bit = 48 Kb, **1.5
-tiles as three RAMB18**, which fits the headroom with room to spare. All three functions are smooth
-(a square root, `ln^2(1+e^x)`, and the measured opamp curve), so the question is not whether
-interpolation works but where the error lands: the knee of the Ids term is where a uniform grid is
-worst, and the decision of how to grid it is **taken against a measurement** (D1d), not by eye.
+**But all of those tables are one function.** Every entry is `opampModel.solve(n, vin)`
+(`OpAmp.cpp:33`), a Newton-Raphson over the **measured opamp transfer curve** —
+`f(x) = (n+1)(Vddt-x)^2 - n(Vddt-vi)^2 - (Vddt-opamp(x))^2` — tabulated once per discrete gain `n`
+(2..6 summer inputs, 0..7 mixer inputs, 16 volume steps, 16 resonance steps). So what has to go into
+the gateware is **the curve and the solve**, not the tables: one shared 1024-entry spline of value
+and slope (1024 x 32 bit = 32 Kb, one RAMB36, replicated two or three times for read ports) and two
+or three Newton steps of two multiplies each.
 
-**D1c — The filter stage becomes a streaming pipeline.** Today each SID's filter is four clocks with
-its own arithmetic (`trx_sid_engine.v`, t = 12 + 4s). The 6581 path needs, for 8 filters x 2
-integrators, about **48 lookups and 48 multiplies per C64 cycle**, and a frame is **64 clk2x**. One
-port per table does 64 lookups in a frame and one DSP does 64 multiplies, so it fits - but only if
-the stage streams the eight SIDs through shared arithmetic instead of giving each its own. That is
-the real work of D1, and it is a change to the schedule, so T25.1 §4a's table moves with it.
+**D1c — The arithmetic budget, counted.** A frame is **64 clk2x** and carries all eight SIDs. Per
+SID and C64 cycle the full model wants roughly six opamp solves (the summer's three outputs, the
+mixer, the volume, the resonance gain) plus the two integrators' four lookups and three multiplies.
+At three Newton steps per solve that is about **26 lookups and 60 multiplies per SID**, so **210
+lookups and 480 multiplies per frame** for eight. Against 64 clocks that needs about **8 DSPs** (we
+use 14 of 120, so that part is free) and **four read ports** on the curve (two replicated RAMB36,
+dual-ported). The arithmetic therefore fits; what is not free is the LUT and the routing of a
+pipeline that deep, in a region at 68.5 % LUT with a measured routing ceiling near 80 %
+(the `fpga-gateware` note on `pb_l2`). **This is not a step, it is a piece of work the size of U7 or
+larger, and it may not fit at all.** Hence Q7.
 
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
@@ -227,6 +236,27 @@ that a test shows is then chased in the tables.
   are not lost in an inbox.
 
 ## §5 Questions for Alex
+
+**Q7 — How much 6581 do we build, now that the model has been counted?** D1a-D1c measured what
+libresidfp's 6581 really is: one measured opamp curve solved by Newton-Raphson at every summing,
+mixing, volume and resonance node, which is also **where the distortion of D2 actually lives** — in
+residfp there is no separate distortion stage, the dirt is those opamp solves. Three honest shapes,
+cheapest first:
+
+- **(a) The output stage only.** The opamp non-linearity at the mixer and the volume ladder, the
+  integrators left as they are. One or two solves per SID and cycle, so 1-3 DSPs and one curve
+  table: it fits today's schedule with a small change. It is where most of what an ear calls "6581"
+  sits, and it is **not** residfp-exact.
+- **(b) The whole filter, streaming.** D1c's 210 lookups and 480 multiplies a frame. Arithmetically
+  possible, a deep pipeline, a rewrite of the filter stage, and a real risk of not routing in
+  `pb_l2`. This is what "sounds like a 6581" in the strict sense.
+- **(c) Neither, for now.** Keep the linear path, take the 6581 cutoff curve that already exists
+  (D3, which is cheap), and leave the topology until someone has heard (a) against a real 6581.
+
+I would build **(a)** first and listen with `tb_wav` before deciding whether (b) is worth its risk,
+because (a) is also the honest prerequisite of (b): the curve, its table and its solve are the same
+in both. What I will not do is start (b) blind — the `fpga-gateware` rule is read, compare, plan,
+and the plan now says the thing might not route.
 
 **Q6 — Where do register traces of real tunes come from?** D5 plays a built-in demo and any log in
 `gen_logs.py`'s format, which is enough to compare two builds of ours. To hear *Meanwhile the
