@@ -203,6 +203,42 @@ Side observation, not chased: on `adsr.log` our model's output stays at 0 while 
 not. Either that log never opens our volume or something in the DC path differs; it is a lead, not
 a finding.
 
+**D1f — (a) built in the model and measured, 2026-11-09.** Three things went into `sidref.cpp`
+behind options that are **off by default**, so every existing bench is untouched (`tb_sid`: 2.6 M
+cycles, 0 mismatches after the change):
+
+- `cfg.opamp_drive` — the 6581's measured op-amp transfer (33 points, `OPAMP[]`) as a waveshaper at
+  the **mixing node**, scaled for unity small-signal gain around the working point (4.54 V). The
+  parameter is how many volts of the curve full scale reaches into.
+- `cfg.wav_sat` — libresidfp's cubic saturation of the waveform DAC (`1.1x - 0.11x^3`).
+- `cfg.voice_dc` — its envelope-dependent per-voice DC (0.2143 V at full envelope) in place of our
+  constant one.
+
+Measured with `filt_cmp` on `filter.log`, 200 000 cycles, `EXTFILT=1`, against libresidfp's 6581:
+
+| | correlation | residual |
+|---|---|---|
+| as it ships (Digis Level Medium, linear mixer) | 0.8868 | -6.40 dB |
+| + the op-amp mixer, drive 0.5 V | **0.9429** | **-9.33 dB** |
+| Digis Level High, linear mixer | 0.9399 | -9.11 dB |
+| Digis Level High + op-amp, drive 0.3 V | **0.9625** | **-11.11 dB** |
+
+**The op-amp node is worth building: it improves at every DC setting, and 4.7 dB at the best pair.**
+Two other results are worth more than that one, though:
+
+- **The cubic DAC saturation measures nothing** (±0.005 correlation anywhere). Not built.
+- **Our "Digis Level" is doing part of the 6581's work by accident.** With a *linear* mixer the
+  agreement rises monotonically with it — 0.746 / 0.832 / 0.887 / 0.940 for Off / Low / Medium /
+  High. In a linear chain a DC offset cannot change the sound, so what it changes is where the
+  signal sits against the **20 bit saturation** of `out`: one-sided clipping, which is a crude
+  non-linearity standing in for the missing one. The two knobs therefore interact (High + 0.5 V is
+  *worse* than High + 0.3 V), and the drive has to be fitted against whatever DC ships, not in
+  isolation.
+- **`digi.log` and the fuzz logs are untouched by all of this** (0.44 to 0.71 before and after).
+  Whatever dominates there is neither the mixer node nor the DAC; the next measurement, not the next
+  build, has to find it. The filter topology itself (D1c, option (b)) and the DC content of the
+  combined waveforms are the candidates.
+
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
 difference the way U7 reported dB, and the same sweeps F20 uses. The interpolated tables are

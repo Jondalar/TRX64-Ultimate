@@ -430,6 +430,50 @@ static int64_t sat(int64_t v, int bits)
 
 // Linear analog part (T25.1 §3.4/§3.5): DCA, voice DC (digis), Chamberlin SVF
 // with the app's cutoff curve, mixer and master volume.
+// U12 (a): the 6581's op-amp voltage transfer function, 33 points measured on a
+// chip marked MOS 6581R4AR 0687 14, from libresidfp's FilterModelConfig6581.cpp
+// (GPL-2.0-or-later; this file is GPL-3.0-or-later, which that permits). The
+// amplifier inverts, saturates at 10.31 V and 0.81 V, and has its working point
+// at 4.54 V where vi = vo. libresidfp solves it by Newton-Raphson at every
+// summing node; what is used here is the curve itself as a waveshaper around
+// that point, scaled so that small signals pass with unity gain - U12 §5 Q7 (a).
+static const double OPAMP[33][2] = {
+    { 0.81, 10.31}, { 2.40, 10.31}, { 2.60, 10.30}, { 2.70, 10.29}, { 2.80, 10.26},
+    { 2.90, 10.17}, { 3.00, 10.04}, { 3.10,  9.83}, { 3.20,  9.58}, { 3.30,  9.32},
+    { 3.50,  8.69}, { 3.70,  8.00}, { 4.00,  6.89}, { 4.40,  5.21}, { 4.54,  4.54},
+    { 4.60,  4.19}, { 4.80,  3.00}, { 4.90,  2.30}, { 4.95,  2.03}, { 5.00,  1.88},
+    { 5.05,  1.77}, { 5.10,  1.69}, { 5.20,  1.58}, { 5.40,  1.44}, { 5.60,  1.33},
+    { 5.80,  1.26}, { 6.00,  1.21}, { 6.40,  1.12}, { 7.00,  1.02}, { 7.50,  0.97},
+    { 8.50,  0.89}, {10.00,  0.81}, {10.31,  0.81},
+};
+static const double OPAMP_VI0 = 4.54;           // vi = vo
+static const double OPAMP_SLOPE0 = -5.1;        // (4.19 - 5.21) / (4.60 - 4.40)
+
+// vo for a vi, linear between the measured points (the gateware will carry a
+// resampled table; the shape is what matters here, not the interpolation order)
+static double opamp_vo(double vi)
+{
+    if (vi <= OPAMP[0][0]) return OPAMP[0][1];
+    for (int i = 1; i < 33; i++) {
+        if (vi <= OPAMP[i][0]) {
+            const double t = (vi - OPAMP[i - 1][0]) / (OPAMP[i][0] - OPAMP[i - 1][0]);
+            return OPAMP[i - 1][1] + t * (OPAMP[i][1] - OPAMP[i - 1][1]);
+        }
+    }
+    return OPAMP[32][1];
+}
+
+// x in our DCA units (full scale about +-0x800 * 0xff), out in the same units:
+// identity for small x, the op-amp's own compression for large x. `drive` is how
+// many volts of the curve full scale reaches into.
+static int32_t opamp_shape(int32_t x, double drive)
+{
+    const double full = 2048.0 * 255.0;
+    const double vi = OPAMP_VI0 + (double)x * drive / full;
+    const double vo = opamp_vo(vi);
+    return (int32_t)((vo - OPAMP_VI0) / (OPAMP_SLOPE0 * drive / full));
+}
+
 void Sid::analog()
 {
     const int32_t zero = cfg.is8580 ? 0x800 : 0x380;
@@ -437,8 +481,24 @@ void Sid::analog()
     const unsigned filt = reg[0x17] & 7, res = reg[0x17] >> 4, mode = reg[0x18];
     int32_t vi = 0, vnf = 0;
     for (unsigned v = 0; v < 3; v++) {
-        vo[v] = (int32_t(w[v].wav_out) - zero) * int32_t(e[v].counter);
-        int32_t x = vo[v] + dc;
+        // U12: the waveform DAC saturates (libresidfp Dac.cpp: 1.1 x - 0.11 x^3
+        // on the unipolar value, "two NMOS source followers"). Applied before
+        // the centre is taken off, as it is there.
+        int32_t wv = int32_t(w[v].wav_out);
+        if (cfg.wav_sat) {
+            const double u = (double)wv / 4095.0;
+            const double d = 1.1 * u - 0.11 * u * u * u;
+            const double z = (double)zero / 4095.0;
+            const double dz = 1.1 * z - 0.11 * z * z * z;
+            vo[v] = (int32_t)((d - dz) * 4095.0 * (double)e[v].counter);
+        } else {
+            vo[v] = (wv - zero) * int32_t(e[v].counter);
+        }
+        // U12: either our constant offset, or libresidfp's envelope-dependent one
+        const int32_t dcv = cfg.voice_dc > 0.0
+            ? (int32_t)(cfg.voice_dc * 2048.0 * 255.0 * (double)e[v].counter / 255.0)
+            : dc;
+        int32_t x = vo[v] + dcv;
         if (filt & (1u << v)) vi += x;
         else if (!(v == 2 && (mode & 0x80))) vnf += x;
     }
@@ -451,7 +511,12 @@ void Sid::analog()
     vlp = int32_t(sat(vlp - dvlp, 25));
     vhp = int32_t(sat(((int64_t(vbp) * divq) >> 10) - vlp - vi, 25));
     int64_t vf = ((mode & 0x10) ? vlp : 0) + ((mode & 0x20) ? int64_t(vbp) : 0) + ((mode & 0x40) ? int64_t(vhp) : 0);
-    out = int32_t(sat(((vnf + vf) * int64_t(mode & 15)) >> 7, 20));
+    int64_t mix = vnf + vf;
+    // U12 (a): the mixing node is an op-amp, not an adder. The 8580's is nearly
+    // linear and stays as it was; the 6581's is where its dirt comes from.
+    if (cfg.opamp_drive > 0.0 && !cfg.is8580)
+        mix = opamp_shape(int32_t(sat(mix, 25)), cfg.opamp_drive);
+    out = int32_t(sat((mix * int64_t(mode & 15)) >> 7, 20));
 }
 
 void Sid::clock()

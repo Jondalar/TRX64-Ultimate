@@ -62,6 +62,9 @@ int main(int argc, char** argv)
     m.cfg.res_high = res_high != 0;
     m.cfg.digi = digi;
     if (!curve.empty()) m.cfg.curve = curve.data();
+    m.cfg.opamp_drive = getenv("OPAMP") ? atof(getenv("OPAMP")) : 0.0;
+    m.cfg.wav_sat = getenv("WAVSAT") && atoi(getenv("WAVSAT")) != 0;
+    m.cfg.voice_dc = getenv("VDC") ? atof(getenv("VDC")) : 0.0;
     m.reset();
 
     FILE* f = fopen(argv[3], "r");

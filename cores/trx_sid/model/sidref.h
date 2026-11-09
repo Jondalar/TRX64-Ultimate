@@ -78,6 +78,17 @@ struct Config {
     bool res_high = false;         // C64_EMUSIDn_RES
     unsigned digi = 2;             // C64_EMUSIDn_DIGI 0..3
     const uint16_t* curve = nullptr; // 1024 entries (app filter curve RAM)
+    // U12 (a): volts of op-amp input excursion at full scale, 0 = the linear
+    // mixer of before. Only the 6581 has it.
+    double opamp_drive = 0.0;
+    // U12: libresidfp's cubic saturation of the waveform DAC (Dac.cpp:62-68),
+    // 1.1 x - 0.11 x^3 on the unipolar DAC value. Off by default.
+    bool wav_sat = false;
+    // U12: libresidfp's per-voice DC, which grows with the envelope
+    // (FilterModelConfig6581.cpp:181, 0.2143 V at full envelope) instead of
+    // being the constant our Digis Level adds. As a fraction of full scale;
+    // 0 keeps the constant.
+    double voice_dc = 0.0;
 };
 
 extern const uint16_t ADSR_TABLE[16];
