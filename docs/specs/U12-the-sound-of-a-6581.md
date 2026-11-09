@@ -172,6 +172,37 @@ pipeline that deep, in a region at 68.5 % LUT with a measured routing ceiling ne
 (the `fpga-gateware` note on `pb_l2`). **This is not a step, it is a piece of work the size of U7 or
 larger, and it may not fit at all.** Hence Q7.
 
+**D1e — The instrument, and the baseline it measured. BUILT 2026-11-09.**
+`cores/trx_sid/model/filt_cmp.cpp` runs the same register log through libresidfp's SID and through
+ours, samples both every C64 cycle, aligns them by the best correlation lag, matches their levels
+and reports the residual in dB. It exists because **`compare_resid` only ever checked the digital
+part** — accumulator, LFSR, waveform, envelope — so our filter and mixer had never been measured
+against anything but themselves. `EXTFILT=1` runs the C64's own output stage (a 16 kHz RC low-pass
+and a 1.6 Hz DC blocker, the time constants of libresidfp's `ExternalFilter.h`) over our samples,
+because libresidfp has it and T25.3 decimates instead; leaving that in the number blames the filter
+for the C64's wiring. The lag search is not decoration: without it the same comparison reported a
+residual near 0 dB, which is what two unaligned signals always report.
+
+Baseline, `filter.log`, 200 000 cycles, `EXTFILT=1`:
+
+| | correlation | residual |
+|---|---|---|
+| ours as 6581 (curve 2) vs libresidfp 6581 | **0.887** | **-6.4 dB** |
+| ours as 8580 (curve 0) vs libresidfp 8580 | **0.831** | **-4.7 dB** |
+
+Two things follow, and the second one matters more than D1 did. The external stage alone moves the
+6581 figure from -3.8 to -6.4 dB and the best lag from 8 samples to 1, so a good part of what looked
+like a filter difference was the C64's output network. And **our 8580 path is further from
+libresidfp's 8580 than our 6581 config is from its 6581** — the 8580 path is the one we claim
+follows reSID 1.0, so the gap is not a 6581 problem. What is shared by both is the analog tail:
+the voice and envelope DAC imperfections libresidfp models (`Dac.cpp`), its per-voice DC
+(`voiceDC`), and the opamp non-linearity that sits in **both** models' summer, mixer and volume
+nodes. Before any of D1's deep pipeline, that tail is where the measurable distance is.
+
+Side observation, not chased: on `adsr.log` our model's output stays at 0 while libresidfp's does
+not. Either that log never opens our volume or something in the DC path differs; it is a lead, not
+a finding.
+
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
 difference the way U7 reported dB, and the same sweeps F20 uses. The interpolated tables are
@@ -237,7 +268,14 @@ that a test shows is then chased in the tables.
 
 ## §5 Questions for Alex
 
-**Q7 — How much 6581 do we build, now that the model has been counted?** D1a-D1c measured what
+**Q7 — answered 2026-11-09, Alex: (a).** *"A ist ok"* - the opamp non-linearity at the output
+stage, the integrators left alone, and listen before anything deeper is considered. D1e's baseline
+says that is also where the measurable distance is for **both** chip models, so (a) is no longer
+only the cheap option: it is the one the measurement points at. The order of work is the model
+first (`sidref.cpp`, measured with `filt_cmp`), then the RTL, because the benches compare the RTL
+against that model bit for bit.
+
+**Q7 (as asked) — How much 6581 do we build, now that the model has been counted?** D1a-D1c measured what
 libresidfp's 6581 really is: one measured opamp curve solved by Newton-Raphson at every summing,
 mixing, volume and resonance node, which is also **where the distortion of D2 actually lives** — in
 residfp there is no separate distortion stage, the dirt is those opamp solves. Three honest shapes,
