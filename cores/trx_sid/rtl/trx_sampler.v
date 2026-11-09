@@ -159,6 +159,12 @@ reg  [2:0] sv = 3'd0, fv = 3'd0;
 reg        f_b16 = 1'b0;
 reg  [1:0] f_a10 = 2'd0;
 reg [31:0] f_d = 32'd0;
+// U11: a 16 bit sample at byte offset 3 of the word has its high byte in the next
+// one, so that fetch is two reads. f_split marks such a fetch, f_half says the
+// first read is back, f_lo holds its low byte until the second lands.
+reg        f_split = 1'b0;
+reg        f_half = 1'b0;
+reg  [7:0] f_lo = 8'd0;
 
 // visit: j0 read counter, j1 read rate, j2 decide and write the counter, j3 read word 0, j4 read the sample's high byte
 // E = ticks x 256 to the next sample minus 1 (signed 24 bit): every frame E - T, when that is negative a step is
@@ -218,8 +224,13 @@ wire        wrap_c = rep_h && (e_b || e_len);
 wire        stop_c = !rep_h && e_len;
 wire [23:0] rel_n  = rel_h + (b16_h ? 24'd2 : 24'd1);
 wire [26:0] fa     = {rd[2:0], rd24} + {3'd0, rel_h};
+// U11 D1: the two bytes at the address, low byte first, whatever its parity -
+// offset 0 [15:0], 1 [23:8], 2 [31:16], 3 the second read's byte 0 over the held
+// low byte. 8 bit takes the one byte and puts it in the high half.
+wire        f_first = f_split && !f_half;   // the first read of a split sample is back
 wire [15:0] smp_in = !run[fv] ? 16'd0 :
-                     f_b16 ? (f_a10[1] ? f_d[31:16] : f_d[15:0]) : {f_d[8 * f_a10 +: 8], 8'h00};
+                     !f_b16   ? {f_d[8 * f_a10 +: 8], 8'h00} :
+                     f_split  ? {f_d[7:0], f_lo} : f_d[8 * f_a10 +: 16];
 wire [7:0]  chg_lo_m = chg & (~chg + 8'd1);   // lowest set bit
 wire [2:0]  chg_lo   = chg_lo_m[1] ? 3'd1 : chg_lo_m[2] ? 3'd2 : chg_lo_m[3] ? 3'd3 : chg_lo_m[4] ? 3'd4 :
                        chg_lo_m[5] ? 3'd5 : chg_lo_m[6] ? 3'd6 : chg_lo_m[7] ? 3'd7 : 3'd0;
@@ -242,10 +253,10 @@ always @* begin
         end
     end else if (t == 6'd42) begin
         ra = {fv, 3'd6};
-        if (fret && !fkill) begin we = 4'b1000; wd = {smp_in[7:0], 24'd0}; end
+        if (fret && !fkill && !f_first) begin we = 4'b1000; wd = {smp_in[7:0], 24'd0}; end
     end else if (t == 6'd43) begin
         ra = {fv, 3'd7};
-        if (fq && !fkill) begin we = 4'b1000; wd = {smp_in[15:8], 24'd0}; end
+        if (fq && !fkill && !f_first) begin we = 4'b1000; wd = {smp_in[15:8], 24'd0}; end
     end else if (hm == 2'd1) begin
         case (hs)
             6'd0: ra = {hv, 3'd0};
@@ -347,19 +358,32 @@ always @(posedge clk2x) begin
     // the sample back from DDR2
     if (t == 6'd42) begin fq <= fret; lo_old <= rd[31:24]; end
     if (vis && vj == 3'd3 && sw_m[vv] != 8'd128) sw_m[vv] <= 8'd128;
-    if (t == 6'd43 && fq && !fkill) begin sold_m[fv] <= {rd[31:24], lo_old}; sw_m[fv] <= f_w; end
+    if (t == 6'd43 && fq && !fkill && !f_first) begin sold_m[fv] <= {rd[31:24], lo_old}; sw_m[fv] <= f_w; end
     if (hm == 2'd1 && hs == 6'd2) sw_m[hv] <= 8'd128;
     if (t == 6'd43 && fq) begin
-        fret  <= 1'b0;
-        fq    <= 1'b0;
-        fbusy <= 1'b0;
-        fkill <= 1'b0;
+        fret <= 1'b0;
+        fq   <= 1'b0;
+        if (f_first && !fkill) begin
+            // U11 D2: hold the low byte and ask for the next word. Nothing of this
+            // sample is written yet, so only the whole of it is ever played; it
+            // lands one C64 cycle later than an aligned sample.
+            f_lo      <= f_d[31:24];
+            f_addr    <= f_addr + 27'd1;        // offset 3 + 1 = byte 0 of the next word
+            f_req_tgl <= ~f_req_tgl;
+            f_half    <= 1'b1;
+        end else begin
+            // D3: a cancelled split drops the held byte with the rest of it
+            fbusy   <= 1'b0;
+            fkill   <= 1'b0;
+            f_split <= 1'b0;
+            f_half  <= 1'b0;
+        end
     end
 
     // the handler
     if (t == 6'd43) begin
         if (chg != 8'd0) begin hm <= 2'd1; hv <= chg_lo; end
-        else if (sv_valid && (!fbusy || fq)) begin hm <= 2'd2; hv <= sv; end
+        else if (sv_valid && (!fbusy || (fq && !f_first))) begin hm <= 2'd2; hv <= sv; end
         else hm <= 2'd0;
     end
     if (hm == 2'd1) begin
@@ -383,6 +407,8 @@ always @(posedge clk2x) begin
                     f_b16     <= b16_h;
                     f_w       <= sv_w;
                     f_a10     <= fa[1:0];
+                    f_split   <= b16_h && fa[1:0] == 2'd3;
+                    f_half    <= 1'b0;
                     if (wrap_c && irq_h) irq_pend[hv] <= 1'b1;
                 end else begin
                     run[hv] <= 1'b0;
@@ -397,6 +423,7 @@ always @(posedge clk2x) begin
     if (r) begin
         run <= 8'd0; chg <= 8'd0; irq_pend <= 8'd0;     // a_pend is never reset: the app waits for its answer
         sv_valid <= 1'b0; fbusy <= 1'b0; fret <= 1'b0; fq <= 1'b0; fkill <= 1'b0; hm <= 2'd0;
+        f_split <= 1'b0; f_half <= 1'b0;
     end
 end
 

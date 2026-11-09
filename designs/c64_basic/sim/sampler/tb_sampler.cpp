@@ -241,7 +241,6 @@ int main(int argc, char **argv)
         bool ok = fetches.size() == 8;
         for (size_t i = 0; i < fetches.size() && i < 8; i++) ok = ok && fetches[i] == REU + 0x1000 + 2 * i;
         CHECK(ok, "16 bit fetches step 2 (%zu)", fetches.size());
-        // unaligned 16 bit start (bit 0 set) reads the sample at the even address below? no: bytes 2,3 of the word
         std::vector<int> l = seq(true);
         bool lz = true; for (int x : l) if (std::abs(x) > 5000) lz = false;   // pan 0: left is exactly 0
         bool l0 = true; for (int x : l) if (x != 0) l0 = false;
@@ -482,6 +481,59 @@ int main(int argc, char **argv)
         (void)per_v;
         for (int v = 0; v < 8; v++) vw(v, 0, 0);
     }
+
+    // ---- 10. U11: a 16 bit sample starts at any byte address
+    {
+        const uint32_t base = REU + 0x9000;
+        int16_t smp[] = {1000, -2000, 32767, -32768, 5, -1, 12345, -300};
+        for (int off = 0; off < 4; off++) {
+            uint32_t start = base + off;
+            for (int i = 0; i < 16; i++) ddr[start + i] = 0;
+            for (int i = 0; i < 8; i++) {
+                ddr[start + 2 * i]     = smp[i] & 0xFF;
+                ddr[start + 2 * i + 1] = (smp[i] >> 8) & 0xFF;
+            }
+            fetches.clear();
+            vsetup(1, start, 16, 300, 40, 0);
+            log_.clear(); logging = true;
+            vw(1, 0, 0x11);
+            run(900);
+            logging = false;
+            vw(1, 0, 0);
+            std::vector<int> r = seq(false);
+            if (!r.empty() && r.front() == 0) r.erase(r.begin());
+            if (!r.empty() && r.back() == 0) r.pop_back();
+            std::vector<int> e;
+            for (int i = 0; i < 8; i++) e.push_back(mixr(smp[i], 40, 0));
+            CHECK(r == e, "16 bit at byte offset %d: the values at that address (%zu vs %zu)",
+                  off, r.size(), e.size());
+            if (r != e) dump("offset", r, e);
+            // one read per sample, two only where the sample crosses the 32 bit word
+            std::vector<uint32_t> ef;
+            for (int i = 0; i < 8; i++) {
+                uint32_t a = start + 2 * i;
+                ef.push_back(a);
+                if ((a & 3) == 3) ef.push_back(a + 1);
+            }
+            bool ok = fetches.size() == ef.size();
+            for (size_t i = 0; i < fetches.size() && i < ef.size(); i++) ok = ok && fetches[i] == ef[i];
+            CHECK(ok, "16 bit at byte offset %d: %zu reads for 8 samples, expected %zu",
+                  off, fetches.size(), ef.size());
+        }
+        // D5: rel steps by 2 from 0, so an odd LENGTH is the even one below it
+        int ends[3][2] = {{8, 4}, {9, 4}, {10, 5}};
+        for (int k = 0; k < 3; k++) {
+            for (int i = 0; i < 16; i++) ddr[base + i] = (uint8_t)(0x40 + i);
+            fetches.clear();
+            vsetup(1, base, ends[k][0], 300, 40, 0);
+            vw(1, 0, 0x11);
+            run(900);
+            vw(1, 0, 0);
+            CHECK((int)fetches.size() == ends[k][1], "16 bit LENGTH %d stops after %d samples (%zu)",
+                  ends[k][0], ends[k][1], fetches.size());
+        }
+    }
+    reset_all();
 
     printf("%d checks, %d failed\n", checks, fails);
     printf(fails ? "tb_sampler FAIL\n" : "tb_sampler PASS\n");

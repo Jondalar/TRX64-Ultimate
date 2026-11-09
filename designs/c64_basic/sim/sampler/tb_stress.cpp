@@ -51,7 +51,7 @@ struct V {
 } vm[8];
 static long fails_r = 0, fails_f = 0, fails_s = 0, fetch_n = 0, checks_s = 0, stale_lo = 0, stale_hi = 0, stray = 0;
 
-static uint16_t ddr16(uint32_t a) { a &= ~1u; return ddr[a] | ddr[a + 1] << 8; }
+static uint16_t ddr16(uint32_t a) { return ddr[a] | ddr[a + 1] << 8; }   // U11: any byte address
 
 // the high byte of the 16 bit word and the low byte are written to the voice's RAM in two slots; look at the engine's
 // RAM directly at the visit
@@ -77,7 +77,8 @@ static void tick()
         else { d->clk2x = 0; }
         bool pre_vis = rp->trx_sampler__DOT__vis;
         int pre_vj = rp->trx_sampler__DOT__vj, pre_vv = rp->trx_sampler__DOT__vv;
-        if (clk2x_edge && rp->trx_sampler__DOT__t == 43 && rp->trx_sampler__DOT__fq) {
+        bool split_first = rp->trx_sampler__DOT__f_split && !rp->trx_sampler__DOT__f_half;
+        if (clk2x_edge && rp->trx_sampler__DOT__t == 43 && rp->trx_sampler__DOT__fq && !split_first) {
             V &c = vm[rp->trx_sampler__DOT__fv];
             // a fetch the engine drops (fkill) is not a sample; one that was requested before a restart must not
             // clear `fresh` (and must not show up as a sample either: rule R)
@@ -123,10 +124,15 @@ static void tick()
         V &v = vm[fv];
         fetch_n++;
         req_epoch = v.epoch;
-        uint32_t fa = d->f_addr & ~1u;
+        // U11: the second read of a split sample (16 bit at byte offset 3) carries
+        // its high byte - the same sample, counted when its first read went out.
+        bool second = d->rootp->trx_sampler__DOT__f_split && d->rootp->trx_sampler__DOT__f_half;
+        if (second) fetch_n--;
+        uint32_t fa = d->f_addr;
         uint32_t prev_fa = v.last_fa; int prev_ep = v.last_ep;
-        v.last_ep = v.epoch; v.last_fa = fa;
-        if (!v.run) { stray++; }
+        if (!second) { v.last_ep = v.epoch; v.last_fa = fa; }
+        if (second) { /* answered above; the sample is still the one in flight */ }
+        else if (!v.run) { stray++; }
         else {
             // within one run of the voice (no restart in between) the address goes on by 2; the first one of a run is START
             // (not checked here: the model sets the new START ahead of the engine's restart)
@@ -208,7 +214,7 @@ int main(int argc, char **argv)
             int v = rnd() % 7;
             if (getenv("DISTINCT") && used[v]) continue;
             used[v] = true;
-            uint32_t start = REU + ((rnd() % 0x80000) & ~3u);
+            uint32_t start = REU + (rnd() % 0x80000);        // U11: any byte address
             uint32_t len = (500 + rnd() % 16000) & ~1u;
             int rate = 40 + rnd() % 200;
             wr(v, 0, 0x10);
