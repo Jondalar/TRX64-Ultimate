@@ -19,6 +19,14 @@ nice -n 15 verilator --cc --exe --build -j 1 -O2 -Wno-fatal -Wno-WIDTHEXPAND -Wn
   --top-module trx_sid -GMEMDIR="\"$root/cores/trx_sid/mem\"" \
   -CFLAGS "-O2 -std=c++17 -I$M" --Mdir "$b/obj_bus" -o "$b/tb_sid_bus" \
   "$root/cores/trx_sid/rtl/trx_sid.v" "$root/cores/trx_sid/rtl/trx_sid_engine.v" "$here/tb_sid_bus.cpp" "$M/sidref.cpp"
+# U12 D5: the whole chain to a .wav, for listening on a host
+nice -n 15 verilator --cc --exe --build -j 1 -O2 -Wno-fatal -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --public-flat-rw \
+  --top-module c64_trx_sid -GMEMDIR="\"$root/cores/trx_sid/mem\"" \
+  -CFLAGS "-O2 -std=c++17" --Mdir "$b/obj_wav" -o "$b/tb_wav" \
+  "$root/cores/trx_sid/rtl/c64_trx_sid.v" "$root/cores/trx_sid/rtl/trx_sid.v" \
+  "$root/cores/trx_sid/rtl/trx_sid_engine.v" "$root/cores/trx_sid/rtl/trx_audio.v" \
+  "$root/cores/icepi/cdc/cdc_handshake.v" "$here/tb_wav.cpp"
+
 # T25.3 decimator bench
 nice -n 15 verilator --cc --exe --build -j 1 -O2 -Wno-fatal -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --public-flat-rw \
   --top-module trx_audio -GMEMDIR="\"$root/cores/trx_sid/mem\"" \

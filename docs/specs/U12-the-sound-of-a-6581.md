@@ -138,11 +138,33 @@ a user who wants a specific chip's cutoff keeps choosing it.
 the present four levels kept as presets so nothing changes for anyone who does not touch it. What it
 is tuned against is a measurement of bit depth, not an opinion.
 
-**D5 — Ours gets heard on a host, from our own RTL.** Verilator already turns `trx_sid_engine.v`
-into C++ for the benches; the same object, wrapped so that it can be fed a register trace and asked
-for samples, gives a `.wav` beside reSID's for the same tune. That is the reviewer's suggestion
-without taking his code: no VICE patch is needed to start, and the reference stays a GPL model we
-already use.
+**D5 — Ours gets heard on a host, from our own RTL. BUILT 2026-11-09.**
+`designs/c64_basic/sim/sid/tb_wav.cpp`, built by that directory's `build.sh`, is a Verilator bench
+on **`c64_trx_sid`** — the very module `c64_top` instantiates, so `trx_sid` (decode and the T25.1
+engine) *and* T25.3's `trx_audio` (mixer gains, CIC, halfbands, fractional FIR, DC blocker) are in
+it. What it writes is what the board sends to I2S:
+
+    designs/c64_basic/sim/sid/build/tb_wav <memdir> <curve.mem|-> <trace|-> <out.wav> [cycles]
+    env: MODEL8580=0|1  DIGI=0..3  RES=0|1  VMODE=0..3
+
+`<curve.mem>` is one of `cores/trx_sid/model/gen_curves.py`'s `curve0..6.mem` (`-` keeps the
+power-up content, which is `8580 Lo` — see §1); `<trace>` is a register log in the format
+`gen_logs.py` writes (`<idle> W <reg> <val>`, hex), and `-` plays a built-in demo (two notes, a
+cutoff sweep, a release) so the tool runs with no input file at all. It prints frames, peak and RMS,
+so a difference can be stated before anyone argues about it.
+
+First measurement, the same demo through four configurations (1.2 s each, PAL):
+
+| | peak | rms |
+|---|---|---|
+| curve 0 (`8580 Lo`), model 6581 | 2 912 260 | 509 617 |
+| curve 2 (`6581`), model 6581 | 1 892 932 | 443 712 |
+| curve 0, model 8580 | 1 904 380 | 435 759 |
+| curve 2, `DIGI=0` (the DC offset off) | 1 429 106 | 391 455 |
+
+So every knob this spec is about moves the output, and from here on D1-D4 can be judged by ear and
+by number without a board. What it is **not** yet: a real tune. That needs a register trace of one,
+which siddump or VICE produces and we do not generate ourselves (§5 Q6).
 
 **D6 — Combined waveforms are tested before they are touched.** WL13 (GPZ's back-engineered routine
 in VICE's `sidcheck`) and WL14 (which depends on the accumulator reaching a particular value, and on
@@ -160,6 +182,12 @@ that a test shows is then chased in the tables.
   are not lost in an inbox.
 
 ## §5 Questions for Alex
+
+**Q6 — Where do register traces of real tunes come from?** D5 plays a built-in demo and any log in
+`gen_logs.py`'s format, which is enough to compare two builds of ours. To hear *Meanwhile the
+Planet* or Mechanicus, something has to turn a `.sid` into that log: `siddump` (external, Tony's own
+route), VICE, or our own c64re runtime, which already stores bus events and is ours. The third is
+the only one that costs no new dependency, and none of the three is built.
 
 **Q5 — Is the IRQ status register a per-voice flag or a mask of all voices?** This decides whether
 his test program can pass on our hardware at all, and it is the one thing in the review that is a
