@@ -16,14 +16,15 @@
 # Read from GITHUB_REF_NAME, GITHUB_REF_TYPE, GITHUB_EVENT_NAME, UE2_INPUT (the
 # dispatch input; a called workflow does not see the caller's event inputs, so the
 # pipeline passes it on with `with: ue2:`) and the message of HEAD, so the same
-# call answers on the Mac for the checkout there.
+# call answers on the Mac for the checkout there. CI_MSG, when set (also empty),
+# stands in for that message (ci/lint.sh tests the answers without HEAD's message).
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ref="${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}"
 event="${GITHUB_EVENT_NAME:-}"
 release=no
 { [ "${GITHUB_REF_TYPE:-}" = tag ] || [[ "$ref" == release/* ]]; } && release=yes
-msg="$(git -C "$ROOT" log -1 --format=%B)"
+msg="${CI_MSG-$(git -C "$ROOT" log -1 --format=%B)}"
 case "${1:?sims-tier, ue2 or update}" in
   sims-tier)
     if [ "$ref" = main ] || [[ "$ref" == integ-* ]] || [ "$release" = yes ] || [ "$event" = workflow_dispatch ] || [[ "$msg" == *"[sims]"* ]]; then echo 2; else echo 1; fi ;;

@@ -318,6 +318,12 @@ Decisions: [ADR-0028 One integration branch integ-m1](../adr/0028-d10-one-integr
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-13, lint failed on the first `[sims]` commit (run 1775).** Lint's self-test of `ci/select.sh`
+  expects tier 1 for a push to `t40`, but `select.sh` also reads HEAD's message, and `edf7387` was the first
+  pushed HEAD to carry `[sims]`: the answer was 2. `select.sh` now takes `CI_MSG` (set, also empty, it stands
+  in for HEAD's message); the lint test sets it empty and checks the marker itself (`t40` push with
+  `[sims]` = 2). Same run: repo variable `CI_RUNNER` set to `dockerbuild` (Alex: run on the NAS) instead of
+  deleted; both send the stages to the NAS runners.
 - **2026-10-30, the bitstream cache was never skipping bench edits.** `gateware_key()` carried
   `':(exclude)designs/*/sim'`, and a pathspec without a trailing `/**` matches the directory entry
   rather than the files under it: all 226 files below `designs/*/sim` were still in the key, so every

@@ -37,7 +37,7 @@ check "verilog syntax" bash -c '
   done; exit $rc'
 
 check "select.sh" bash -c '
-  t() { [ "$(env -i HOME="$HOME" PATH="$PATH" "${@:2}" ci/select.sh $1)" = "$EXPECT" ]; }
+  t() { [ "$(env -i HOME="$HOME" PATH="$PATH" CI_MSG= "${@:2}" ci/select.sh $1)" = "$EXPECT" ]; }
   EXPECT=no  t ue2 GITHUB_REF_NAME=main GITHUB_EVENT_NAME=push &&
   EXPECT=no  t ue2 GITHUB_REF_NAME=main GITHUB_EVENT_NAME=workflow_dispatch UE2_INPUT=false &&
   EXPECT=yes t ue2 GITHUB_REF_NAME=main GITHUB_EVENT_NAME=workflow_dispatch UE2_INPUT=true &&
@@ -52,7 +52,8 @@ check "select.sh" bash -c '
   EXPECT=yes t update GITHUB_REF_NAME=t40 UPDATE_FORCE=true &&
   EXPECT=1   t sims-tier GITHUB_REF_NAME=t40 GITHUB_EVENT_NAME=push &&
   EXPECT=2   t sims-tier GITHUB_REF_NAME=main GITHUB_EVENT_NAME=push &&
-  EXPECT=2   t sims-tier GITHUB_REF_NAME=integ-m1 GITHUB_EVENT_NAME=push'
+  EXPECT=2   t sims-tier GITHUB_REF_NAME=integ-m1 GITHUB_EVENT_NAME=push &&
+  EXPECT=2   t sims-tier GITHUB_REF_NAME=t40 GITHUB_EVENT_NAME=push "CI_MSG=x [sims]"'
 check "workflow" python3 - <<'PY'
 import glob, os, sys, yaml
 ok = True
