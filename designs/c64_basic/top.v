@@ -1129,10 +1129,10 @@ module top #(
     rv_dbg rvd (.clk(cpu_clk), .rst(cpu_rst), .tap(rv_tap), .snap_req(rv_snap_tgl),
                 .clr_req(rv_clr_tgl), .hold(rv_hold));
 `ifdef NO_JTAG_DBG
-    // T46 (Alex, 2026-11-13: "Schmeiss es raus"; as the MultiCore host does it): no JTAG debug master. build.tcl
-    // defines NO_JTAG_DBG unless TRX_FEATURES lists jtag. Every debug register, the console and keyboard-edge
-    // read-out, the RISC-V tap and the JTAG DDR2 / C64 RAM / trx ports fall away with it; the registers JTAG
-    // writes keep their power-up values, which are the ones the machine runs with.
+    // T46 (Alex, 2026-11-13): no JTAG debug master. build.tcl defines NO_JTAG_DBG unless TRX_FEATURES lists jtag.
+    // Every debug register, the console and keyboard-edge read-out, the RISC-V tap and the JTAG DDR2 / C64 RAM /
+    // trx ports fall away with it; the registers JTAG writes keep their power-up values, which are the ones the
+    // machine runs with.
     assign dbg_addr = 24'd0;
     assign dbg_wdata = 32'd0;
     assign dbg_re = 1'b0;
