@@ -2,15 +2,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Builds the flattened GitHub export of TRX64 Ultimate (docs/todo/T68.md).
 
-The GitHub repository Jondalar/TRX64-Ultimate is private and holds the current
-tree without history: the submodule software/ultimate-app as a plain folder at
-its pinned commit, no ROMs, no task list, and nothing that names the other
-project. This script does all of that, checks the result and commits it; it
-pushes only when told to.
+The GitHub repository Jondalar/TRX64-Ultimate is private and holds exports of
+the tree, never the host repository's own history: the submodule
+software/ultimate-app as a plain folder at its pinned commit, no ROMs, no task
+list, and nothing that names the other project. Up to 0.2.0 it was one commit;
+since then each host commit goes out as an export commit of its own (--replay).
+This script does all of that, checks the result and commits it; it pushes only
+when told to.
 
     tools/gh_export.py --check                 # stage and check, touch nothing
     tools/gh_export.py -m "U5: ..."            # stage, check, sync, commit
     tools/gh_export.py -m "U5: ..." --push     # and push to GitHub
+    tools/gh_export.py --replay 1eb3944c --onto bb3ffb4
+                                               # one export commit per host commit
+                                               # since 1eb3944c, in the clone only
 
 The checks are the point: an export that would carry the other project's name,
 a link to a file that is not exported, or a binary the last export did not have
@@ -483,6 +488,161 @@ def digest(stage_dir):
     return h.hexdigest()[:12]
 
 
+def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
+    """Stage the export of `ref` into stage_dir and run the checks. Returns (app commit, the
+    report lines of every check that failed); an empty list means the tree may go out."""
+    host_rev = run(["git", "-C", HOST_REPO, "rev-parse", "--short", ref])
+    app_commit = stage(ref, stage_dir)
+    dropped = drop_excluded(stage_dir)
+    write_placeholders(stage_dir)
+    notes = write_submodule_notes(stage_dir, app_commit)
+    errors = apply_rewrites(stage_dir)
+    stripped = strip_links_to_excluded(stage_dir)
+
+    files = sum(1 for _ in walk(stage_dir))
+    out("export of host %s, app %s: %d files, %d paths left out, %d placeholders, "
+        "%d submodule notes, %d rewrites, %d links stripped"
+        % (host_rev, app_commit[:8], files, len(dropped), len(PLACEHOLDERS),
+           len(notes), len(REWRITES), len(stripped)))
+
+    problems = []
+    if errors:
+        problems.append("rewrite rules that no longer fit:")
+        problems += ["  " + e for e in errors]
+    hits = scan_forbidden(stage_dir)
+    if hits:
+        problems.append("the other project's name is in the export (%d lines):" % len(hits))
+        problems += ["  " + h for h in hits[:60]]
+        if len(hits) > 60:
+            problems.append("  ... and %d more" % (len(hits) - 60))
+    links = scan_links(stage_dir)
+    if links:
+        problems.append("links to files that are not exported (%d):" % len(links))
+        problems += ["  " + l for l in links[:60]]
+        if len(links) > 60:
+            problems.append("  ... and %d more" % (len(links) - 60))
+    bins = [] if allow_new_binaries else scan_new_binaries(stage_dir, clone_dir)
+    if bins:
+        problems.append("binary files the last export did not have (%d):" % len(bins))
+        problems += ["  " + b for b in bins[:40]]
+    return app_commit, problems
+
+
+# ------------------------------------------------------------------- the replay
+
+# One export commit per host commit (Alex, 2026-11-13: "jetzt duerfen die Commits mit", from 0.2.0 on),
+# instead of one commit for the whole tree. The history of the host repository itself never goes out: it
+# carries what EXCLUDE keeps back (ROMs, specs, the task list) and the other project's name. So every host
+# commit is exported through the same rules as a single export, and its message goes with it:
+#   - a commit whose export changes nothing (specs, ADRs, the task list only) makes no export commit;
+#   - a commit whose tree fails the checks is folded into the next one that passes (its change goes out
+#     there, with both messages);
+#   - a message that names the other project needs an entry below, or the replay stops.
+# MESSAGES: host commit (prefix) -> the message that goes out instead; "" leaves the message out (the
+# change still goes out in the export commit it lands in).
+MESSAGES = {
+    # T46 named the other project in its comments (folded into 8f4761ee) and in its message
+    "7a9c5bb4": """T46: the c64u build leaves out the JTAG debug master
+
+U13 did not place (Place 30-99): with U11 it added 793 LUT to a c64u build
+that had no room left (27,406 LUT, 99.98 % of the slices). Alex: out with
+the JTAG debug master.
+
+top.v has `ifdef NO_JTAG_DBG around jtag_dbg (its outputs tied to 0);
+build.tcl defines it unless TRX_FEATURES lists jtag; gateware_key carries
+features=. The debug registers, the console and keyboard-edge read-out, the
+RISC-V tap and the JTAG ports into DDR2, C64 RAM and the trx registers fall
+away with it (about 850 LUT). The registers JTAG writes keep their power-up
+values of 0. A softload does not use it: the loader that starts a .cfw
+hands the app over in DDR2 with the boot magic at 0xFFFC. tools/trxdbg.sh
+needs a TRX_FEATURES=jtag build.""",
+    # the fix of those comments: on GitHub the comments never had the name
+    "8f4761ee": "",
+}
+
+
+def message_for(sha, text):
+    """The message a host commit's export carries (MESSAGES, else its own)."""
+    for prefix, replacement in MESSAGES.items():
+        if sha.startswith(prefix):
+            return replacement
+    return text
+
+
+def forbidden_in(text):
+    return [p for p in FORBIDDEN if re.search(p, text)]
+
+
+def export_message(parts, hosts, app_commit):
+    """The message of one export commit: the messages of the host commits it carries (oldest first),
+    with the line that names them after the first subject."""
+    msgs = [m.strip() for m in parts if m.strip()]
+    if not msgs:
+        raise Fail("no message for the export of %s" % ", ".join(hosts))
+    first = msgs[0].split("\n", 1)
+    line = "Export of TRX64 Ultimate %s (application %s)." % (", ".join(hosts), app_commit[:8])
+    head = first[0] + "\n\n" + line
+    rest = [first[1].strip()] if len(first) > 1 and first[1].strip() else []
+    return "\n\n".join([head] + rest + msgs[1:]) + "\n"
+
+
+def replay(since, ref, onto, clone_dir, allow_new_binaries):
+    commits = run(["git", "-C", HOST_REPO, "rev-list", "--reverse", "--first-parent",
+                   "%s..%s" % (since, ref)]).split()
+    if not commits:
+        raise Fail("no commits in %s..%s" % (since, ref))
+    for sha in commits:
+        msg = message_for(sha, run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha]))
+        if forbidden_in(msg):
+            raise Fail("the message of %s names the other project: give it an entry in MESSAGES"
+                       % sha[:8])
+    ensure_clone(clone_dir)
+    run(["git", "-C", clone_dir, "checkout", "--quiet", "-B", "main", onto])
+    print("replay of %d host commits %s..%s onto %s" % (len(commits), since, ref, onto))
+    pending, made, skipped, folded = [], [], [], []
+    for i, sha in enumerate(commits):
+        short = sha[:7]
+        msg = message_for(sha, run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha]))
+        stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
+        try:
+            app_commit, problems = build_export(sha, stage_dir, clone_dir, allow_new_binaries,
+                                                out=lambda *_: None)
+            if problems:
+                if i == len(commits) - 1:
+                    raise Fail("the last commit %s does not pass the checks:\n%s"
+                               % (short, "\n".join(problems)))
+                pending.append((short, msg))
+                folded.append(short)
+                print("  %s  fails the checks, folded into the next commit" % short)
+                continue
+            sync(stage_dir, clone_dir)
+        finally:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+        if not run(["git", "-C", clone_dir, "status", "--short"]):
+            skipped += [h for h, _ in pending] + [short]
+            pending = []
+            continue
+        hosts = [h for h, _ in pending] + [short]
+        body = export_message([m for _, m in pending] + [msg], hosts, app_commit)
+        who = run(["git", "-C", HOST_REPO, "log", "-1",
+                   "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
+        env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=who[1], GIT_AUTHOR_DATE=who[2],
+                   GIT_COMMITTER_NAME=who[3], GIT_COMMITTER_EMAIL=who[4], GIT_COMMITTER_DATE=who[5])
+        run(["git", "-C", clone_dir, "add", "-A"])
+        r = subprocess.run(["git", "-C", clone_dir, "commit", "-q", "-F", "-"], input=body, env=env,
+                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if r.returncode != 0:
+            raise Fail("commit of the export of %s failed: %s" % (short, r.stderr.strip()))
+        made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
+        print("  %s  -> %s" % (short, made[-1]))
+        pending = []
+    print("\n%d export commits, %d host commits without a change in the export (%s), %d folded (%s)"
+          % (len(made), len(skipped), " ".join(skipped) or "-", len(folded), " ".join(folded) or "-"))
+    print("in %s on main; nothing is pushed. A replay onto another commit than origin/main replaces "
+          "GitHub's history: push it with --force-with-lease, and only with Alex's OK." % clone_dir)
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the GitHub export (docs/todo/T68.md).")
     ap.add_argument("--ref", default="HEAD", help="the commit to export (default HEAD)")
@@ -494,7 +654,18 @@ def main():
     ap.add_argument("--allow-new-binaries", action="store_true",
                     help="let binary files the last export did not have through")
     ap.add_argument("--keep-stage", help="keep the staged tree in this directory")
+    ap.add_argument("--replay", metavar="SINCE",
+                    help="one export commit per host commit of SINCE..REF (first parent), committed in the "
+                         "clone, never pushed")
+    ap.add_argument("--onto", default="origin/main",
+                    help="with --replay: the export commit to build on (default origin/main)")
     args = ap.parse_args()
+
+    clone_dir = os.path.abspath(os.path.expanduser(args.clone_dir))
+    if args.replay:
+        if args.check or args.message or args.push or args.keep_stage:
+            ap.error("--replay takes none of --check, -m, --push, --keep-stage")
+        return replay(args.replay, args.ref, args.onto, clone_dir, args.allow_new_binaries)
 
     if not args.check and not args.message:
         ap.error("a commit needs -m/--message (or use --check)")
@@ -507,52 +678,13 @@ def main():
 
     stage_dir = args.keep_stage or tempfile.mkdtemp(prefix="trx64-gh-export-")
     os.makedirs(stage_dir, exist_ok=True)
-    clone_dir = os.path.abspath(os.path.expanduser(args.clone_dir))
 
     try:
         if not args.check:
             ensure_clone(clone_dir)
-        app_commit = stage(args.ref, stage_dir)
-        dropped = drop_excluded(stage_dir)
-        write_placeholders(stage_dir)
-        notes = write_submodule_notes(stage_dir, app_commit)
-        errors = apply_rewrites(stage_dir)
-        stripped = strip_links_to_excluded(stage_dir)
-
-        files = sum(1 for _ in walk(stage_dir))
-        print("export of host %s, app %s: %d files, %d paths left out, %d placeholders, "
-              "%d submodule notes, %d rewrites, %d links stripped"
-              % (host_rev, app_commit[:8], files, len(dropped), len(PLACEHOLDERS),
-                 len(notes), len(REWRITES), len(stripped)))
-
-        if errors:
-            print("\nrewrite rules that no longer fit:")
-            for e in errors:
-                print("  " + e)
-
-        hits = scan_forbidden(stage_dir)
-        if hits:
-            print("\nthe other project's name is in the export (%d lines):" % len(hits))
-            for h in hits[:60]:
-                print("  " + h)
-            if len(hits) > 60:
-                print("  ... and %d more" % (len(hits) - 60))
-
-        links = scan_links(stage_dir)
-        if links:
-            print("\nlinks to files that are not exported (%d):" % len(links))
-            for l in links[:60]:
-                print("  " + l)
-            if len(links) > 60:
-                print("  ... and %d more" % (len(links) - 60))
-
-        bins = [] if args.allow_new_binaries else scan_new_binaries(stage_dir, clone_dir)
-        if bins:
-            print("\nbinary files the last export did not have (%d):" % len(bins))
-            for b in bins[:40]:
-                print("  " + b)
-
-        if errors or hits or links or bins:
+        app_commit, problems = build_export(args.ref, stage_dir, clone_dir, args.allow_new_binaries)
+        if problems:
+            print("\n" + "\n".join(problems))
             print("\nnothing was changed. Fix the report above (a rewrite rule in %s, or a path "
                   "in EXCLUDE) and run again." % os.path.basename(__file__))
             return 1

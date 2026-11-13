@@ -288,5 +288,33 @@ class Tables(unittest.TestCase):
                 self.assertIn(rel + ".md", gx.PLACEHOLDERS, rel)
 
 
+class Replay(unittest.TestCase):
+    def test_a_message_with_an_entry_is_replaced(self):
+        self.assertEqual(gx.message_for("8f4761ee0123", "the fix"), "")
+        self.assertTrue(gx.message_for("7a9c5bb4abcd", "x").startswith("T46: "))
+        self.assertEqual(gx.message_for("0123abcd", "its own"), "its own")
+
+    def test_no_replacement_message_names_the_other_project(self):
+        for text in gx.MESSAGES.values():
+            self.assertEqual(gx.forbidden_in(text), [])
+
+    def test_the_other_projects_name_in_a_message_is_found(self):
+        self.assertTrue(gx.forbidden_in("as the " + "Multi" + "Core host does it"))
+        self.assertEqual(gx.forbidden_in("as the host does it"), [])
+
+    def test_the_export_line_follows_the_first_subject(self):
+        m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"], "f3c8e991aa")
+        self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6 (application f3c8e991)."
+                            "\n\nThe body.\n")
+
+    def test_folded_messages_follow_each_other_and_an_empty_one_goes(self):
+        m = gx.export_message(["T46: out\n\nwhy", ""], ["7a9c5bb", "8f4761e"], "fb3a7821")
+        self.assertTrue(m.startswith("T46: out\n\nExport of TRX64 Ultimate 7a9c5bb, 8f4761e"))
+        self.assertTrue(m.endswith("why\n"))
+
+    def test_no_message_at_all_is_an_error(self):
+        with self.assertRaises(gx.Fail):
+            gx.export_message(["", "  "], ["8f4761e"], "fb3a7821")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
