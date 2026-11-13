@@ -388,9 +388,12 @@ def digest(stage_dir):
     return h.hexdigest()[:12]
 
 
-def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
+def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes_out=None):
     """Stage the export of `ref` into stage_dir and run the checks. Returns (app commit, the
-    report lines of every check that failed); an empty list means the tree may go out."""
+    report lines of every check that failed); an empty list means the tree may go out. With
+    notes_out (a list), dead links are collected there instead of failing the export: a replay
+    passes it for the commits before the last, whose history may link ahead to a file a later
+    commit adds."""
     host_rev = run(["git", "-C", HOST_REPO, "rev-parse", "--short", ref])
     app_commit = stage(ref, stage_dir)
     dropped = drop_excluded(stage_dir)
@@ -410,6 +413,9 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
         problems.append("rewrite rules that no longer fit:")
         problems += ["  " + e for e in errors]
     links = scan_links(stage_dir)
+    if links and notes_out is not None:
+        notes_out += links
+        links = []
     if links:
         problems.append("links to files that are not exported (%d):" % len(links))
         problems += ["  " + l for l in links[:60]]
@@ -433,7 +439,8 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
 #   - a commit whose export changes nothing (one that touches only what EXCLUDE keeps back) makes no
 #     export commit;
 #   - a commit whose tree fails the checks is folded into the next one that passes (its change goes out
-#     there, with both messages).
+#     there, with both messages). A dead link does not fail a commit before the last: the host commit
+#     had it too (a link ahead to a file the next commit adds), and the last state must be clean.
 
 BASE_MESSAGE = """Specs, ADRs, the task list and the notes, as of {host}
 
@@ -502,9 +509,13 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
         short = sha[:7]
         msg = run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha])
         stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
+        dead = []
         try:
             app_commit, problems = build_export(sha, stage_dir, clone_dir, allow_new_binaries,
-                                                out=lambda *_: None)
+                                                out=lambda *_: None,
+                                                notes_out=dead if i < len(commits) - 1 else None)
+            for d in dead:
+                print("  %s  note: %s (as in the host commit itself)" % (short, d))
             if problems:
                 if i == len(commits) - 1:
                     raise Fail("the last commit %s does not pass the checks:\n%s"
