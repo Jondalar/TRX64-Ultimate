@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Builds the flattened GitHub export of TRX64 Ultimate (docs/todo/T68.md).
 
-The GitHub repository Jondalar/TRX64-Ultimate is private and holds exports of
-the tree, never the host repository's own history: the submodule
-software/ultimate-app as a plain folder at its pinned commit, no ROMs, no task
-list, and nothing that names the other project. Up to 0.2.0 it was one commit;
-since then each host commit goes out as an export commit of its own (--replay).
-This script does all of that, checks the result and commits it; it pushes only
-when told to.
+The GitHub repository Jondalar/TRX64-Ultimate holds exports of the tree, never
+the host repository's own history (that carries the ROMs): the submodule
+software/ultimate-app as a plain folder at its pinned commit, without
+Commodore's ROMs and the third-party test files. Up to 0.2.0 it was one commit
+and also kept back the working documents and the other project's name; since
+then (Alex, 2026-11-13) everything else goes out and each host commit is an
+export commit of its own (--replay). This script does that, checks the result
+and commits it; it pushes only when told to.
 
     tools/gh_export.py --check                 # stage and check, touch nothing
     tools/gh_export.py -m "U5: ..."            # stage, check, sync, commit
@@ -17,13 +18,13 @@ when told to.
                                                # one export commit per host commit
                                                # since 1eb3944c, in the clone only
 
-The checks are the point: an export that would carry the other project's name,
-a link to a file that is not exported, or a binary the last export did not have
-stops with a report instead of being committed.
+The checks are the point: an export with a link to a file that is not exported,
+or a binary the last export did not have, stops with a report instead of being
+committed.
 
-Rules live in the four tables below. REWRITES is the one that needs attention
-when a document changes: every rule must still find its text, or the run stops.
-This file names the other project, so it is not exported itself.
+Rules live in the tables below: EXCLUDE (what may not go out), PLACEHOLDERS
+(what stands in its place) and REWRITES (text changed in the staged copy only;
+empty since 2026-11-13, every rule must still find its text or the run stops).
 """
 
 import argparse
@@ -46,8 +47,7 @@ GH_REPO = "Jondalar/TRX64-Ultimate"
 # Paths (file or directory) that never go into the export, host paths and app
 # paths alike. docs/todo/T68.md says why each one is here.
 EXCLUDE = [
-    # the task list and the submodule wiring
-    "TODO.md",
+    # the submodule wiring: the application is a plain folder here
     ".gitmodules",
     # ROMs: Commodore content, replaced by a README that says where they are
     "roms",
@@ -59,43 +59,6 @@ EXCLUDE = [
     f"{APP_PREFIX}/software/u64/default_chars.bin",
     f"{APP_PREFIX}/software/ModPlayer_16k/module.bin",
     f"{APP_PREFIX}/target/pc/linux/iecdrive/_261763_8_gc.d64",
-    # the maintainer's own notes, the handover contract and the ADR about the
-    # two sessions: they are about the two projects working together
-    "docs/HANDOVER-maintainer.md",
-    "docs/contracts",
-    "docs/other-cores.md",
-    # the task list in every shape (Alex, 2026-10-31: "Die todos kommen alles raus
-    # bei GitHub"): a task's file says what is open, who decided what and when,
-    # and that is ours, not the reader's
-    "docs/todo",
-    # the working documents (Alex, 2026-11-01: "Alles was angestrichen ist, bleibt
-    # bitte NUR auf gitea, NICHT in Github"): this is a release repository, so it
-    # carries the firmware, the manual and the decisions (docs/adr), not the specs
-    # and not the analyses behind them
-    "docs/specs",
-    "docs/adr",
-    "docs/boot-chain-concept.md",
-    "docs/c64u-flash-layout.md",
-    "docs/lorenz-on-the-core.md",
-    "docs/lvgl_ui_project",
-    "docs/lvgl_ui_terminal",
-    "docs/AlexTest101026.md",
-    "docs/architecture-reset-2026-10-05.md",
-    "docs/board-tests-pending.md",
-    "docs/cart-vice-baseline.md",
-    "docs/done-audit-2026-10-04.md",
-    "docs/gap-audit-gideon-app.md",
-    "docs/gideon-menu-tree.md",
-    "docs/lut-budget.md",
-    "docs/machine-pause.md",
-    "docs/refactor-candidates-2026-10-10.md",
-    "docs/turbo-measurements-gideon.md",
-    "docs/ultimate-app-hw-spec.md",
-    # the publishing tooling: this script and its test name the other project,
-    # and the wiki script belongs with them
-    "tools/gh_export.py",
-    "tools/test_gh_export.py",
-    "tools/gh_wiki.py",
 ]
 
 EXCLUDE_GLOBS = [
@@ -149,54 +112,9 @@ for _p in (
 # Each rule replaces `old` with `new` in `path`, in the staged copy only. `old`
 # must occur exactly `count` times, so a document that changed under a rule
 # stops the run instead of going out half-neutralised.
-REWRITES = [
-    {
-        "path": "BUILD.md",
-        "old": "What comes next and in which order: [TODO.md](TODO.md).\n",
-        "new": "",
-        "why": "the task list is not exported",
-    },
-    # ---- the CI files
-    {
-        "path": "ci/lib.sh",
-        "old": "; MultiCore does the same since its run 898",
-        "new": "",
-    },
-    {
-        "path": ".gitea/workflows/pipeline.yml",
-        "old": "(T31 decision 15, 2026-10-30; taken from\n  # MultiCore T100 D7). They",
-        "new": "(T31 decision 15, 2026-10-30). They",
-    },
-    # ---- the ADRs
-]
+REWRITES = []
 
 # ---------------------------------------------------------------------- the checks
-
-# A hit in the staged tree stops the run. fritz.box host names and lab IP
-# addresses are in the export on purpose (they are the defaults of the test
-# tooling); the other project's name never is.
-FORBIDDEN = [
-    r"MultiCore",
-    r"Multicore",
-    r"TRX64U-MC\b",
-    r"TRX64-MC\b",
-    r"TREX/TRX64U",
-]
-
-# Where the name may stand: the places that tell a reader what is in front of
-# them. The application fork is ours (contract §1 and §7: this project builds
-# the gateware and the application and may change the application, its config
-# code included, alone), and its sources describe a run-time interface the
-# shipped firmware really has, down to a popup the user sees — an export that
-# renamed a visible string or a comment about the handover block would describe
-# firmware nobody builds. The README is the other one (Alex, 2026-10-31: the
-# text has to point at the other project so the two are not confused). The rule
-# of docs/todo/T68.md is about our specs, ADRs and task files, where the name
-# carries internal process, and that is where it is enforced.
-FORBIDDEN_EXEMPT = (
-    APP_PREFIX + "/",
-    "README.md",
-)
 
 # Relative links that are allowed to point at nothing in the export.
 KNOWN_DANGLING = set()
@@ -397,24 +315,6 @@ def strip_links_to_excluded(stage_dir):
     return stripped
 
 
-def scan_forbidden(stage_dir):
-    pats = [re.compile(p) for p in FORBIDDEN]
-    hits = []
-    for rel, full in walk(stage_dir):
-        if not is_text(rel) or rel.replace(os.sep, "/").startswith(FORBIDDEN_EXEMPT):
-            continue
-        try:
-            with open(full, errors="replace") as fh:
-                for n, line in enumerate(fh, 1):
-                    for pat in pats:
-                        if pat.search(line):
-                            hits.append("%s:%d: %s" % (rel, n, line.strip()[:160]))
-                            break
-        except OSError:
-            continue
-    return hits
-
-
 def scan_links(stage_dir):
     """Relative links in exported Markdown that point at nothing. A document
     that links to an excluded file has to be rewritten, like BUILD.md was."""
@@ -509,12 +409,6 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
     if errors:
         problems.append("rewrite rules that no longer fit:")
         problems += ["  " + e for e in errors]
-    hits = scan_forbidden(stage_dir)
-    if hits:
-        problems.append("the other project's name is in the export (%d lines):" % len(hits))
-        problems += ["  " + h for h in hits[:60]]
-        if len(hits) > 60:
-            problems.append("  ... and %d more" % (len(hits) - 60))
     links = scan_links(stage_dir)
     if links:
         problems.append("links to files that are not exported (%d):" % len(links))
@@ -531,47 +425,27 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
 # ------------------------------------------------------------------- the replay
 
 # One export commit per host commit (Alex, 2026-11-13: "jetzt duerfen die Commits mit", from 0.2.0 on),
-# instead of one commit for the whole tree. The history of the host repository itself never goes out: it
-# carries what EXCLUDE keeps back (ROMs, specs, the task list) and the other project's name. So every host
-# commit is exported through the same rules as a single export, and its message goes with it:
-#   - a commit whose export changes nothing (specs, ADRs, the task list only) makes no export commit;
+# instead of one commit for the whole tree. The host repository's own history still never goes out: it
+# carries what EXCLUDE keeps back. So every host commit is exported through the same rules and committed
+# with its own message, author and dates:
+#   - first the export of SINCE itself, when it differs from the commit the replay builds on (the files
+#     the export kept back before the rules changed);
+#   - a commit whose export changes nothing (one that touches only what EXCLUDE keeps back) makes no
+#     export commit;
 #   - a commit whose tree fails the checks is folded into the next one that passes (its change goes out
-#     there, with both messages);
-#   - a message that goes out and names the other project needs an entry below, or the replay stops
-#     (the message of a commit that makes no export commit does not go out).
-# MESSAGES: host commit (prefix) -> the message that goes out instead; "" leaves the message out (the
-# change still goes out in the export commit it lands in).
-MESSAGES = {
-    # T46 named the other project in its comments (folded into 8f4761ee) and in its message
-    "7a9c5bb4": """T46: the c64u build leaves out the JTAG debug master
+#     there, with both messages).
 
-U13 did not place (Place 30-99): with U11 it added 793 LUT to a c64u build
-that had no room left (27,406 LUT, 99.98 % of the slices). Alex: out with
-the JTAG debug master.
+BASE_MESSAGE = """Specs, ADRs, the task list and the notes, as of {host}
 
-top.v has `ifdef NO_JTAG_DBG around jtag_dbg (its outputs tied to 0);
-build.tcl defines it unless TRX_FEATURES lists jtag; gateware_key carries
-features=. The debug registers, the console and keyboard-edge read-out, the
-RISC-V tap and the JTAG ports into DDR2, C64 RAM and the trx registers fall
-away with it (about 850 LUT). The registers JTAG writes keep their power-up
-values of 0. A softload does not use it: the loader that starts a .cfw
-hands the app over in DDR2 with the boot magic at 0xFFFC. tools/trxdbg.sh
-needs a TRX_FEATURES=jtag build.""",
-    # the fix of those comments: on GitHub the comments never had the name
-    "8f4761ee": "",
-}
+Export of TRX64 Ultimate {host} (application {app}).
 
-
-def message_for(sha, text):
-    """The message a host commit's export carries (MESSAGES, else its own)."""
-    for prefix, replacement in MESSAGES.items():
-        if sha.startswith(prefix):
-            return replacement
-    return text
-
-
-def forbidden_in(text):
-    return [p for p in FORBIDDEN if re.search(p, text)]
+Until 0.2.0 the export kept the working documents back (docs/specs,
+docs/adr, docs/todo, TODO.md, the maintainer's notes) and anything that
+named the other project. Alex, 2026-11-13: from now on they go out as
+well; only Commodore's ROMs and the third-party test files stay back.
+This commit adds what was kept back, at the state of {host}; the
+commits after it are the host commits one by one.
+"""
 
 
 def export_message(parts, hosts, app_commit):
@@ -587,6 +461,19 @@ def export_message(parts, hosts, app_commit):
     return "\n\n".join([head] + rest + msgs[1:]) + "\n"
 
 
+def commit_export(clone_dir, body, sha):
+    """Commit the synced clone with the author, committer and dates of host commit `sha`."""
+    who = run(["git", "-C", HOST_REPO, "log", "-1",
+               "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
+    env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=who[1], GIT_AUTHOR_DATE=who[2],
+               GIT_COMMITTER_NAME=who[3], GIT_COMMITTER_EMAIL=who[4], GIT_COMMITTER_DATE=who[5])
+    run(["git", "-C", clone_dir, "add", "-A"])
+    r = subprocess.run(["git", "-C", clone_dir, "commit", "-q", "-F", "-"], input=body, env=env,
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if r.returncode != 0:
+        raise Fail("commit of the export of %s failed: %s" % (sha[:8], r.stderr.strip()))
+
+
 def replay(since, ref, onto, clone_dir, allow_new_binaries):
     commits = run(["git", "-C", HOST_REPO, "rev-list", "--reverse", "--first-parent",
                    "%s..%s" % (since, ref)]).split()
@@ -595,10 +482,25 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
     ensure_clone(clone_dir)
     run(["git", "-C", clone_dir, "checkout", "--quiet", "-B", "main", onto])
     print("replay of %d host commits %s..%s onto %s" % (len(commits), since, ref, onto))
-    pending, made, skipped, folded = [], [], [], []
+    made = []
+    stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
+    try:
+        app_commit, problems = build_export(since, stage_dir, clone_dir, allow_new_binaries,
+                                            out=lambda *_: None)
+        if problems:
+            raise Fail("the export of %s does not pass the checks:\n%s" % (since, "\n".join(problems)))
+        sync(stage_dir, clone_dir)
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    if run(["git", "-C", clone_dir, "status", "--short"]):
+        host = run(["git", "-C", HOST_REPO, "rev-parse", "--short=7", since])
+        commit_export(clone_dir, BASE_MESSAGE.format(host=host, app=app_commit[:8]), since)
+        made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
+        print("  %s  -> %s" % (host, made[-1]))
+    pending, skipped, folded = [], [], []
     for i, sha in enumerate(commits):
         short = sha[:7]
-        msg = message_for(sha, run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha]))
+        msg = run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha])
         stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
         try:
             app_commit, problems = build_export(sha, stage_dir, clone_dir, allow_new_binaries,
@@ -619,19 +521,7 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
             pending = []
             continue
         hosts = [h for h, _ in pending] + [short]
-        body = export_message([m for _, m in pending] + [msg], hosts, app_commit)
-        if forbidden_in(body):
-            raise Fail("the message of %s names the other project: give it an entry in MESSAGES"
-                       % ", ".join(hosts))
-        who = run(["git", "-C", HOST_REPO, "log", "-1",
-                   "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
-        env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=who[1], GIT_AUTHOR_DATE=who[2],
-                   GIT_COMMITTER_NAME=who[3], GIT_COMMITTER_EMAIL=who[4], GIT_COMMITTER_DATE=who[5])
-        run(["git", "-C", clone_dir, "add", "-A"])
-        r = subprocess.run(["git", "-C", clone_dir, "commit", "-q", "-F", "-"], input=body, env=env,
-                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-        if r.returncode != 0:
-            raise Fail("commit of the export of %s failed: %s" % (short, r.stderr.strip()))
+        commit_export(clone_dir, export_message([m for _, m in pending] + [msg], hosts, app_commit), sha)
         made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
         print("  %s  -> %s" % (short, made[-1]))
         pending = []

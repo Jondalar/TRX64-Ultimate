@@ -38,9 +38,10 @@ class StageTree(unittest.TestCase):
         write(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin", "chars")
         dropped = gx.drop_excluded(self.d)
 
-        self.assertFalse(os.path.exists(os.path.join(self.d, "TODO.md")))
+        # since 2026-11-13 the task list and the working documents go out (Alex)
+        self.assertTrue(os.path.exists(os.path.join(self.d, "TODO.md")))
+        self.assertTrue(os.path.isdir(os.path.join(self.d, "docs/contracts")))
         self.assertFalse(os.path.isdir(os.path.join(self.d, "roms")))
-        self.assertFalse(os.path.isdir(os.path.join(self.d, "docs/contracts")))
         self.assertFalse(os.path.exists(os.path.join(self.d, "docs/.DS_Store")))
         self.assertFalse(os.path.exists(
             os.path.join(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin")))
@@ -151,52 +152,25 @@ class Checks(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    def test_the_other_projects_name_is_found(self):
-        write(self.d, "docs/specs/U5.md", "agreed with MultiCore on 2026-10-30\n")
-        write(self.d, "docs/specs/U4.md", "nothing to see\n")
-        hits = gx.scan_forbidden(self.d)
-        self.assertEqual(1, len(hits))
-        self.assertTrue(hits[0].startswith("docs/specs/U5.md:1:"))
-
-    def test_the_name_in_a_source_comment_is_found_too(self):
-        write(self.d, "software/x.cc", "// handed over to MultiCore\n")
-        self.assertEqual(1, len(gx.scan_forbidden(self.d)))
-
-    def test_lab_addresses_stay_allowed(self):
-        write(self.d, "tools/load.sh", "scp x builder.fritz.box:/tmp\nping 192.168.1.9\n")
-        self.assertEqual([], gx.scan_forbidden(self.d))
-
-    def test_the_name_stays_in_the_application_sources(self):
-        write(self.d, gx.APP_PREFIX + "/software/components/config.cc",
-              "// Started by MultiCore's host the flash belongs to that host\n")
-        self.assertEqual([], gx.scan_forbidden(self.d))
-
-    def test_the_name_stays_in_the_readme(self):
-        write(self.d, "README.md", "This firmware also runs as a core under MultiCore's host.\n")
-        write(self.d, "docs/manual/README.md", "decoupling moves to MultiCore\n")
-        hits = gx.scan_forbidden(self.d)
-        self.assertEqual(1, len(hits))
-        self.assertTrue(hits[0].startswith("docs/manual/README.md:1:"))
-
     def test_a_link_to_an_excluded_file_loses_its_link_and_keeps_its_text(self):
         write(self.d, "docs/manual/10-differences.md",
-              "see [the contract](../contracts/trx64u-firmware-handover.md) and "
+              "see [the constraints](../../constraints/c64u.xdc) and "
               "[0055](0055.md)\n")
         write(self.d, "docs/manual/0055.md", "there\n")
         stripped = gx.strip_links_to_excluded(self.d)
 
         with open(os.path.join(self.d, "docs/manual/10-differences.md")) as fh:
             out = fh.read()
-        self.assertIn("see the contract and [0055](0055.md)", out)
+        self.assertIn("see the constraints and [0055](0055.md)", out)
         self.assertEqual(1, len(stripped))
         self.assertEqual([], gx.scan_links(self.d))
 
     def test_stripping_leaves_links_to_exported_files_alone(self):
-        write(self.d, "docs/a.md", "[b](b.md) [TODO](../TODO.md)\n")
+        write(self.d, "docs/a.md", "[b](b.md) [ROMs](../roms)\n")
         write(self.d, "docs/b.md", "b\n")
         gx.strip_links_to_excluded(self.d)
         with open(os.path.join(self.d, "docs/a.md")) as fh:
-            self.assertEqual("[b](b.md) TODO\n", fh.read())
+            self.assertEqual("[b](b.md) ROMs\n", fh.read())
 
     def test_a_link_to_an_excluded_file_is_found(self):
         write(self.d, "BUILD.md", "see [TODO.md](TODO.md)\n")
@@ -267,9 +241,11 @@ class Tables(unittest.TestCase):
             self.assertEqual(rule.get("count", 1), s.count(rule["old"]),
                              "%s: %r" % (rule["path"], rule["old"][:60]))
 
-    def test_the_script_excludes_itself_and_its_test(self):
-        self.assertIn("tools/gh_export.py", gx.EXCLUDE)
-        self.assertIn("tools/test_gh_export.py", gx.EXCLUDE)
+    def test_only_roms_third_party_files_and_the_submodule_wiring_stay_out(self):
+        # Alex, 2026-11-13: specs, ADRs, the task list and the other project's name go out
+        for rel in gx.EXCLUDE:
+            self.assertTrue(rel == ".gitmodules" or rel.endswith("roms") or rel.endswith(".xdc")
+                            or os.path.splitext(rel)[1].lower() in gx.BINARY_SUFFIXES, rel)
 
     def test_the_dropped_rom_directories_get_a_readme(self):
         self.assertIn("roms", gx.EXCLUDE)
@@ -289,28 +265,15 @@ class Tables(unittest.TestCase):
 
 
 class Replay(unittest.TestCase):
-    def test_a_message_with_an_entry_is_replaced(self):
-        self.assertEqual(gx.message_for("8f4761ee0123", "the fix"), "")
-        self.assertTrue(gx.message_for("7a9c5bb4abcd", "x").startswith("T46: "))
-        self.assertEqual(gx.message_for("0123abcd", "its own"), "its own")
-
-    def test_no_replacement_message_names_the_other_project(self):
-        for text in gx.MESSAGES.values():
-            self.assertEqual(gx.forbidden_in(text), [])
-
-    def test_the_other_projects_name_in_a_message_is_found(self):
-        self.assertTrue(gx.forbidden_in("as the " + "Multi" + "Core host does it"))
-        self.assertEqual(gx.forbidden_in("as the host does it"), [])
-
     def test_the_export_line_follows_the_first_subject(self):
         m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"], "f3c8e991aa")
         self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6 (application f3c8e991)."
                             "\n\nThe body.\n")
 
-    def test_folded_messages_follow_each_other_and_an_empty_one_goes(self):
-        m = gx.export_message(["T46: out\n\nwhy", ""], ["7a9c5bb", "8f4761e"], "fb3a7821")
+    def test_folded_messages_follow_each_other(self):
+        m = gx.export_message(["T46: out\n\nwhy", "T46: the comments"], ["7a9c5bb", "8f4761e"], "fb3a7821")
         self.assertTrue(m.startswith("T46: out\n\nExport of TRX64 Ultimate 7a9c5bb, 8f4761e"))
-        self.assertTrue(m.endswith("why\n"))
+        self.assertTrue(m.endswith("why\n\nT46: the comments\n"))
 
     def test_no_message_at_all_is_an_error(self):
         with self.assertRaises(gx.Fail):
