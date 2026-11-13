@@ -537,7 +537,8 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print):
 #   - a commit whose export changes nothing (specs, ADRs, the task list only) makes no export commit;
 #   - a commit whose tree fails the checks is folded into the next one that passes (its change goes out
 #     there, with both messages);
-#   - a message that names the other project needs an entry below, or the replay stops.
+#   - a message that goes out and names the other project needs an entry below, or the replay stops
+#     (the message of a commit that makes no export commit does not go out).
 # MESSAGES: host commit (prefix) -> the message that goes out instead; "" leaves the message out (the
 # change still goes out in the export commit it lands in).
 MESSAGES = {
@@ -591,11 +592,6 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
                    "%s..%s" % (since, ref)]).split()
     if not commits:
         raise Fail("no commits in %s..%s" % (since, ref))
-    for sha in commits:
-        msg = message_for(sha, run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", sha]))
-        if forbidden_in(msg):
-            raise Fail("the message of %s names the other project: give it an entry in MESSAGES"
-                       % sha[:8])
     ensure_clone(clone_dir)
     run(["git", "-C", clone_dir, "checkout", "--quiet", "-B", "main", onto])
     print("replay of %d host commits %s..%s onto %s" % (len(commits), since, ref, onto))
@@ -624,6 +620,9 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
             continue
         hosts = [h for h, _ in pending] + [short]
         body = export_message([m for _, m in pending] + [msg], hosts, app_commit)
+        if forbidden_in(body):
+            raise Fail("the message of %s names the other project: give it an entry in MESSAGES"
+                       % ", ".join(hosts))
         who = run(["git", "-C", HOST_REPO, "log", "-1",
                    "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
         env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=who[1], GIT_AUTHOR_DATE=who[2],
