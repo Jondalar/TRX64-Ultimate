@@ -133,7 +133,7 @@ tool_versions() {
 # every bench edit rebuilt the bitstream (found 2026-10-30, U5). Check with
 #   git ls-files designs ':(exclude)designs/*/sim/**' | grep -c /sim/   -> 0
 gateware_key() {
-  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-}" tree_key \
+  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key \
     designs constraints cores tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon \
     ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**'
 }

@@ -202,7 +202,15 @@ read_xdc pins.xdc
 read_xdc gtp_pins.xdc
 read_xdc usb_pins.xdc
 
-synth_design -top top -part $part -generic FPGA_TYPE=$fpga_type
+# T46 (Alex 2026-11-13): the JTAG debug master (jtag_dbg, tools/trxdbg.py) only in a dev build. TRX_FEATURES
+# names the optional blocks as in the MultiCore host; here jtag is the only one and it is off unless listed
+# (TRX_FEATURES=jtag). A softload does not need it: the MultiCore host hands the app over in DDR2.
+set top_defs {}
+set trx_on {}
+if {[info exists ::env(TRX_FEATURES)]} { set trx_on [split $::env(TRX_FEATURES) ", "] }
+if {"jtag" ni $trx_on} { lappend top_defs -verilog_define NO_JTAG_DBG; puts "=== JTAG debug: off (TRX_FEATURES without jtag)" } \
+else { puts "=== JTAG debug: on (TRX_FEATURES=jtag)" }
+synth_design -top top -part $part -generic FPGA_TYPE=$fpga_type {*}$top_defs
 read_checkpoint -cell c64 $core_dcp
 report_utilization -file $bdir/utilization_synth.rpt
 report_utilization -hierarchical -hierarchical_depth 8 -file $bdir/utilization_hier_synth.rpt

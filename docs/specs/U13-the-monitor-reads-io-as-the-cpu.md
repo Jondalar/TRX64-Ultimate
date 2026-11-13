@@ -130,8 +130,18 @@ GAME/EXROM). trxmon and the firmware share `trx_lens.c`; `hw_lk`/`fw_lk` and the
 No block RAM. LUTs: the VIC view (48:1 x 8), the CIA views (2 x 16:1 x 8), the SID look port, the turbo and sampler
 functions, the decode a second time, the look mux, the lens unit's states: estimated 400-500 LUT.
 
+Measured (Vivado, run 1776 and an out-of-context synthesis of `c64_core` on the builder, against run 1318): `c64_core`
++566 LUT (U11's sampler change included, about +49), the whole chip +793 (28,199 after synthesis, 86.5 %); per module
+roughly SID look +115, REU +99, `c64_top`'s look mux +89, CIAs +81, the arbiter's second decode +68, cartridge +33,
+turbo +20, with module-to-module noise of up to +-100. The last green c64u build (27,406, 84.1 %; slices 99.98 %) had no
+room left: placement failed (`Place 30-99`). Room made by T46: the c64u build leaves out the JTAG debug master
+(about 850 LUT, Alex 2026-11-13).
+
 ## Status and history
 
+- **2026-11-13, the first CI build did not place (run 1776, `Place 30-99: failed to commit all instances`).** U13 and
+  U11 together +793 LUT over the last green c64u build, which was already full (§6). Alex: the JTAG debug master goes
+  out of the c64u build (T46, `NO_JTAG_DBG` unless `TRX_FEATURES=jtag`).
 - **2026-11-13, built and green in the benches.**
   - Equivalence (yosys `equiv_make`/`equiv_induct` against the commit before, the new look ports taken out): the arbiter
     with `io_decode()` 380 of 380 cells proven (a swapped CIA 1/2 in the gate: 2 unproven, the negative control);

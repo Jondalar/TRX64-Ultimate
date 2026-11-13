@@ -18,6 +18,9 @@ Alex 2026-10-05: **RC/release without JTAG debug** (jtag_dbg, rv_dbg, con_ring: 
 
 T46 (release build switch) carries it; debugging a release board = dev bitstream in SRAM.
 
+Update 2026-11-13 (Alex: "Schmeiss es raus", the c64u had no room for U13): every c64u build without
+`TRX_FEATURES=jtag` leaves it out, CI's included; a dev build sets `TRX_FEATURES=jtag` (as the MultiCore host does).
+
 ## Links
 
 - [T46](../../docs/todo/T46.md)

@@ -136,7 +136,7 @@ T83-T94 live in `TREX/TRX64U-MultiCore` (TODO.md, docs/specs, docs/todo there). 
 | T27 | ⏸ | Idea: port TRX64 Ultimate to the old U64 (Cyclone V) | Does not fit (120 % ALM); Alex decides | [T27](docs/specs/T27-u64-cyclone-port.md) |
 | T34 | ⏸ | Replace the reDIP CIAs (needed only before a source release) | Alex's call whether still needed | [T34](docs/todo/T34.md) |
 | T44 | ⏸ | Flash write gate | WEL=1 probe never run; protection returns with T50 | [T44-flash-write-gate](docs/specs/T44-flash-write-gate.md#status-and-history) |
-| T46 | ⏸ | Release build switch: leave out jtag_dbg | Not built | [T46](docs/todo/T46.md) |
+| T46 | ✅ | Release build switch: leave out jtag_dbg | - | [T46](docs/todo/T46.md) |
 | T50 | ⏸ | T+R+X flash unlock for updates | Not needed while the gate is open; protection returns with T44/T50 | [T50-update-unlock](docs/specs/T50-update-unlock.md#status-and-history) |
 | T70 | ⏸ | TRX64 RE core for the old U64 (Cyclone V), minimal: C64, 1541, 2 SIDs, carts, Timewarp, monitor, C64RE, 576p | Next: real DDR2 and pins | [T70](docs/specs/T70-u64-re-minimal.md#status-and-history) |
 

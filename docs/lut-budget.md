@@ -22,7 +22,7 @@ Budget: T29 turbo up to 82 %; T25 multi-SID needs about 3k more later.
 | pixel layer | 731 | 41 SRL |
 | REU | 541 | drop-in feature |
 | freeze responder | 531 | |
-| `jtag_dbg` (dev access) | 482 | release-switch candidate |
+| `jtag_dbg` (dev access) | 482 | off unless `TRX_FEATURES=jtag` (T46, 2026-11-13) |
 | UDP video + audio stream | 528 | drop-in feature (Gideon's data streams), hardware only |
 
 ## External review (2026-10-03), checked against the numbers
@@ -41,4 +41,5 @@ Budget: T29 turbo up to 82 %; T25 multi-SID needs about 3k more later.
 A release build without `jtag_dbg` saves about 480 LUT with no user-visible
 loss: guests are loaded through the FPGA's configuration JTAG (T26), not
 through it. Debugging a release board then means loading a dev bitstream into
-SRAM. TODO T46.
+SRAM. Built 2026-11-13 (T46): off in every build without `TRX_FEATURES=jtag`, CI's
+included; run 1318's report puts it at about 850 LUT with `con_ring` and `rv_dbg`.
