@@ -1,9 +1,9 @@
 # TRX64 Ultimate user manual
 
 How to use TRX64 Ultimate on the C64 Ultimate and the Ultimate 64 Elite II: every menu, every
-function and the apps. It describes release `0.2.0`, build `main-63761352` (host `6376135`, app
-`99fccc38`). The release before it, `b151154b`, is the state before the monitor moved into the
-firmware. For installing and going back to the stock firmware see [INSTALL.md](../../INSTALL.md).
+function and the apps. It describes release `0.3.0`, build `main-8f1dc184` (host `8f1dc18`, app
+`fb3a7821`). The release before it is `0.2.0`, build `main-63761352`. For installing and going back to
+the stock firmware see [INSTALL.md](../../INSTALL.md).
 
 | Chapter | What it covers |
 |---|---|

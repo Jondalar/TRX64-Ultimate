@@ -287,7 +287,8 @@ Found on the way, all fixed in this branch:
 ## 8. Builder runner (2026-10-05, branch ci-builder)
 
 A second machine, `builder` (Debian 13, 16 cores, 27 GB, 192.168.242.166), takes the heavy
-iteration; afterwards the NAS alone is enough again.
+iteration. The NAS is enough for tier 1 and the bitstream, not for tier 2: six of its benches end in
+their timeouts there (run 1785, history 2026-11-13), so a run with tier 2 goes to the builder.
 
 - **Switch, not mix (decided Alex, 2026-10-05):** every stage has
   `runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}`. Repo variable `CI_RUNNER=builder` sends all
@@ -312,12 +313,22 @@ The TODO.md table is an overview only; the row detail lives here (convention at 
 
 T31: Multi-stage CI (Gitea job graph)
 
-Milestone M1, status ✅. Open (one line, as in the TODO table): `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw
+Milestone M1, status ✅. Open (one line, as in the TODO table): `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw; `release.yml` input `ref` collides with the dispatch form's branch field
 
 Decisions: [ADR-0028 One integration branch integ-m1](../adr/0028-d10-one-integration-branch.md).
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-14, a dispatch of `release.yml` from the web form passes `refs/heads/main` as `ref`.** The
+  workflow's input is called `ref`, and so is the form field that names the branch to run on: Gitea takes
+  the first value for both, the clone step got `--branch refs/heads/main` and failed (run 1834). A dispatch
+  that sends `ref=main` once works (run 1835). Open: rename the input or strip `refs/heads/`.
+- **2026-11-13, tier 2 does not fit the NAS (run 1785).** 35 of 41 benches passed; six ended in their own
+  timeout, none with a FAIL line: flash_boot (900 s), ultsys (900 s), redip_new (600 s), dbgsess (1200 s),
+  turbo (2400 s) and slot (3600 s), each with its checks passing up to the cut. The NAS is a Celeron
+  N5095 run at `--cpus=3`. The same six on the builder, same tree (`8f1dc184`, app `fb3a7821`), own
+  container: ultsys 297 s, redip_new 336 s, dbgsess 567 s, slot 1847 s, turbo 2235 s alone, flash_boot a
+  cached PASS of the same key. `CI_RUNNER` is `builder` again (Alex), and run 1826 on `main` passed there.
 - **2026-11-13, lint failed on the first `[sims]` commit (run 1775).** Lint's self-test of `ci/select.sh`
   expects tier 1 for a push to `t40`, but `select.sh` also reads HEAD's message, and `edf7387` was the first
   pushed HEAD to carry `[sims]`: the answer was 2. `select.sh` now takes `CI_MSG` (set, also empty, it stands
