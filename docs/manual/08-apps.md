@@ -1,7 +1,7 @@
 # 8. Apps
 
 Functions beyond the base firmware come as apps: `.u2a` files that the firmware loads and runs.
-Release 0.2.0 has four: `trex_crt` ([5.](05-cartridges.md)), `c64re`, `softboot` and `unzip`. The
+Release 0.3.0 has four: `trex_crt` ([5.](05-cartridges.md)), `c64re`, `softboot` and `unzip`. The
 monitor ([6.](06-monitor.md)) was one until it became part of the firmware.
 
 ## Installing
