@@ -41,6 +41,11 @@ module trx_sid #(
     input  wire  [9:0] ra,
     output wire        fhit,
     output wire  [7:0] frd,
+    // U13: the monitor's look (c64_top): what a CPU read of la would return now, without the read's op (a read of
+    // $19-$1C sets the bus value, any other read halves its age: the engine's op, which the look never makes)
+    input  wire  [9:0] la,
+    output wire        lhit,
+    output wire  [7:0] lrd,
     output wire        f_full,              // 24 or more ops queued
     output wire        f_empty,
     output wire        f_quiet,             // empty, and the last op has been in the engine for two C64 cycles: a read sees it
@@ -163,31 +168,28 @@ wire [191:0] rb_all;
 reg  [191:0] rb_c = 192'd0;
 always @(posedge clk) rb_c <= rb_all;
 wire [23:0] rb_s = rb_c[24*sid +: 24];
-wire [7:0] rb_osc3 = rb_s[7:0], rb_env3 = rb_s[15:8], rb_bus = rb_s[23:16];
-wire       std_pot = addr[9:5] == 5'd0;     // $D419/$D41A themselves
-reg  [7:0] rd;
-always @(*)
-    case (addr[4:0])
-    5'h19: rd = std_pot ? potx : 8'hff;
-    5'h1a: rd = std_pot ? poty : 8'hff;
-    5'h1b: rd = rb_osc3;
-    5'h1c: rd = rb_env3;
-    default: rd = rb_bus;
+// a read of register r of one SID's read-back {bus value, ENV3, OSC3}: the bus read, the turbo CPU's fast read
+// and the monitor's look (U13) all take their byte from here. POT only at $D419/$D41A themselves (std_pot).
+function [7:0] rdsel(input [4:0] r, input std_pot, input [7:0] px, input [7:0] py, input [23:0] rb);
+    case (r)
+    5'h19: rdsel = std_pot ? px : 8'hff;
+    5'h1a: rdsel = std_pot ? py : 8'hff;
+    5'h1b: rdsel = rb[7:0];
+    5'h1c: rdsel = rb[15:8];
+    default: rdsel = rb[23:16];
     endcase
+endfunction
+wire [7:0] rd = rdsel(addr[4:0], addr[9:5] == 5'd0, potx, poty, rb_s);
 assign dout = rd;
 
 // the fast read: the same bytes for the CPU's address
-wire [23:0] frb_s = rb_c[24*rsid +: 24];
-reg  [7:0] frd_r;
-always @(*)
-    case (ra[4:0])
-    5'h19: frd_r = ra[9:5] == 5'd0 ? potx : 8'hff;
-    5'h1a: frd_r = ra[9:5] == 5'd0 ? poty : 8'hff;
-    5'h1b: frd_r = frb_s[7:0];
-    5'h1c: frd_r = frb_s[15:8];
-    default: frd_r = frb_s[23:16];
-    endcase
-assign frd = frd_r;
+assign frd = rdsel(ra[4:0], ra[9:5] == 5'd0, potx, poty, rb_c[24*rsid +: 24]);
+
+// the look (U13): the same decode and the same bytes for la
+wire       lh0 = ({2'b01, la[9:4]} & mask0) == base0, lh1 = ({2'b01, la[9:4]} & mask1) == base1;
+wire [2:0] lsid = fsel(la, mask0, base0, split);
+assign lhit = lh0 || lh1;
+assign lrd  = rdsel(la[4:0], la[9:5] == 5'd0, potx, poty, rb_c[24*lsid +: 24]);
 
 // ---- op FIFO (T29) and the op latch at the end of each C64 cycle; a toggle starts the pass
 // The FIFO holds the turbo CPU's fast writes. Only the fast push writes it (one write port: the CPU's bus ops are

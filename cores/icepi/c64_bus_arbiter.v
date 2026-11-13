@@ -119,9 +119,6 @@ module c64_bus_arbiter (
   input  wire        reu_dma_we,
 
   input  wire        reu_present,
-  // a read of IO2 now would go to the REU, not the cartridge (the decode
-  // below for a read; for a side-effect-free look, T12 §11 Q2)
-  output wire        pk_reu,
 
   input  wire        cart_present,
   input  wire        cart_game,
@@ -175,6 +172,13 @@ module c64_bus_arbiter (
   // answer a CPU read of the VIC's page 0 while the machine is at normal speed
   input  wire        tr_oe,
   input  wire [7:0]  tr_dout,
+  // U13: the monitor's look at an I/O address: the device io_decode() picks for a read of lk_addr with I/O mapped,
+  // the socket select, whether our own responder's range (io_ext_sel) covers it, and the open bus
+  input  wire [15:0] lk_addr,
+  output wire [3:0]  lk_dev,
+  output wire [1:0]  lk_sock,
+  output wire        lk_xsel,
+  output wire [7:0]  lk_last,
 
   input  wire        cass_sense_n,
   output reg         cass_motor_n,
@@ -358,10 +362,8 @@ reg [15:0] bus_addr;
 reg        bus_we;
 
 wire [3:0] bus_addr_msn;
-wire [3:0] bus_addr_io;
 
 assign bus_addr_msn = bus_addr[15:12];
-assign bus_addr_io  = bus_addr[11:8];
 
 reg [7:0] last_bus;
 reg [7:0] bus;
@@ -427,7 +429,6 @@ always @(*) begin
     bus = io_ext_dout;
 end
 
-assign pk_reu = reu_present && (!cart_io_present || (cart_io_game && cart_io_exrom && reu_override));
 
 assign io_ext_sel = io_enable && bus_addr[15:9] == 7'b1101111 && sock_sel == 2'b00;
 assign io_ext_we  = bus_we;
@@ -454,9 +455,67 @@ c64_pla pla (
   .roml(pla_roml), .romh(pla_romh)
 );
 
+// The I/O decode: the device an I/O-mapped access to a reaches, and the socket select (U13). The bus path below and
+// the monitor's look both call it, so the look cannot pick another device than a read would.
+localparam [3:0] IO_NONE = 4'd0, IO_VIC = 4'd1, IO_SID = 4'd2, IO_CRAM = 4'd3, IO_CIA1 = 4'd4, IO_CIA2 = 4'd5,
+                 IO_CART1 = 4'd6, IO_CART2 = 4'd7, IO_REU = 4'd8;
+function [5:0] io_decode(input [15:0] a, input we, input c_present, input r_present, input ci_present,
+                         input ci_game, input ci_exrom, input c2_we_valid, input r_override,
+                         input [1:0] s_en, input [15:0] s_base, input [15:0] s_mask);
+  reg [3:0] d;
+  reg [1:0] s;
+  begin
+    d = IO_NONE;
+    case (a[11:8])
+      4'h0, 4'h1, 4'h2, 4'h3: d = IO_VIC;
+      4'h4, 4'h5, 4'h6, 4'h7: d = IO_SID;
+      4'h8, 4'h9, 4'ha, 4'hb: d = IO_CRAM;
+      4'hc: d = IO_CIA1;
+      4'hd: d = IO_CIA2;
+      4'he: if (c_present) d = IO_CART1;
+      4'hf: begin
+        if (!r_present && !c_present)
+          d = IO_NONE;
+        else if (!r_present && c_present)
+          d = IO_CART2;
+        else if (r_present && !ci_present)
+          d = IO_REU;
+        // here we assume we must arbitrate IO2 / REU access
+        else if (!ci_game || !ci_exrom)
+          d = IO_CART2;
+        else if (we)
+          d = c2_we_valid ? IO_CART2 : IO_REU;
+        else if (r_override)
+          d = IO_REU;
+        else
+          d = IO_CART2;
+      end
+      default: ;  /* read last bus state */
+    endcase
+    s[0] = s_en[0] && ((a[11:4] & s_mask[7:0])  == s_base[7:0]);
+    s[1] = s_en[1] && ((a[11:4] & s_mask[15:8]) == s_base[15:8]);
+    // a cartridge (plugged or from a .crt) keeps IO1/IO2: no socket select there (Q4, Alex 2026-10-16)
+    if (d == IO_CART1 || d == IO_CART2)
+      s = 2'b00;
+    // physical chip before FPGA: the REU does not see a socket cycle
+    if (s != 2'b00 && d == IO_REU)
+      d = IO_NONE;
+    io_decode = {s, d};
+  end
+endfunction
+
+reg [3:0] io_dev;
+
+assign {lk_sock, lk_dev} = io_decode(lk_addr, 1'b0, cart_present, reu_present, cart_io_present, cart_io_game,
+                                     cart_io_exrom, cart_io2_we_valid, reu_override, sock_en, sock_base, sock_mask);
+assign lk_xsel = lk_addr[15:9] == 7'b1101111 && lk_sock == 2'b00;
+assign lk_last = last_bus;
+
 // address decoding
 
 always @(*) begin
+  io_dev = IO_NONE;
+
   if (reu_dma_active) begin
     bus_addr = reu_dma_addr;
     bus_we   = reu_dma_we;
@@ -559,67 +618,18 @@ always @(*) begin
     end
 
     if (io_enable) begin
-      case (bus_addr_io)
-        4'h0,  /* fall-through */
-        4'h1,  /* fall-through */
-        4'h2,  /* fall-through */
-        4'h3: begin
-          vic_cen = 1'b0;
-        end
-        4'h4,  /* fall-through */
-        4'h5,  /* fall-through */
-        4'h6,  /* fall-through */
-        4'h7: begin
-          sid_cen = 1'b0;
-        end
-        4'h8,  /* fall-through */
-        4'h9,  /* fall-through */
-        4'ha,  /* fall-through */
-        4'hb: begin
-          ram_color_select = 1'b1;
-        end
-        4'hc: begin
-          cia1_cen = 1'b0;
-        end
-        4'hd: begin
-          cia2_cen = 1'b0;
-        end
-        4'he: begin
-          if (cart_present)
-            cart_io1_cen = 1'b0;
-        end
-        4'hf: begin
-          if (!reu_present && !cart_present) begin
-            /* no-op */
-          end else if (!reu_present && cart_present)
-            cart_io2_cen = 1'b0;
-          else if (reu_present && !cart_io_present)
-            reu_cen = 1'b0;
-          // here we assume we must arbitrate IO2 / REU access
-          else if (!cart_io_game || !cart_io_exrom)
-            cart_io2_cen = 1'b0;
-          else if (bus_we) begin
-            if (!cart_io2_we_valid)
-              reu_cen = 1'b0;
-            else
-              cart_io2_cen = 1'b0;
-
-          end else if (reu_override)
-            reu_cen = 1'b0;
-          else
-            cart_io2_cen = 1'b0;
-        end
-        default: ;  /* read last bus state */
-      endcase
-      sock_sel[0] = sock_en[0] && ((bus_addr[11:4] & sock_mask[7:0])  == sock_base[7:0]);
-      sock_sel[1] = sock_en[1] && ((bus_addr[11:4] & sock_mask[15:8]) == sock_base[15:8]);
-      // a cartridge (plugged or from a .crt) keeps IO1/IO2: no socket select there (Q4, Alex 2026-10-16)
-      if (!cart_io1_cen || !cart_io2_cen)
-        sock_sel = 2'b00;
-      if (sock_sel != 2'b00) begin
-        reu_cen = 1'b1;                     // physical chip before FPGA: the REU does not see a socket cycle
+      {sock_sel, io_dev} = io_decode(bus_addr, bus_we, cart_present, reu_present, cart_io_present, cart_io_game,
+                                     cart_io_exrom, cart_io2_we_valid, reu_override, sock_en, sock_base, sock_mask);
+      vic_cen          = io_dev != IO_VIC;
+      sid_cen          = io_dev != IO_SID;
+      ram_color_select = io_dev == IO_CRAM;
+      cia1_cen         = io_dev != IO_CIA1;
+      cia2_cen         = io_dev != IO_CIA2;
+      cart_io1_cen     = io_dev != IO_CART1;
+      cart_io2_cen     = io_dev != IO_CART2;
+      reu_cen          = io_dev != IO_REU;
+      if (sock_sel != 2'b00)
         sock_we = bus_we;                   // the port's R/W for a socket cycle, with or without a cartridge
-      end
     end
 
   end else begin

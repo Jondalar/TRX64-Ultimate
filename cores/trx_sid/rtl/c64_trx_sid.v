@@ -26,6 +26,9 @@ module c64_trx_sid #(
     input  wire  [9:0] ra,
     output wire        fhit,
     output wire  [7:0] frd,
+    input  wire  [9:0] la,                  // U13: the monitor's look (trx_sid.v)
+    output wire        lhit,
+    output wire  [7:0] lrd,
     output wire        f_full,
     output wire        f_empty,
     output wire        f_quiet,
@@ -61,6 +64,7 @@ trx_sid #(.MEMDIR(MEMDIR)) sid (
     .clk(clk), .rst(reset), .clk2x(clk2x), .phi2_n(phi2_n),
     .cen(cen), .we(we), .addr(addr), .din(din), .dout(dout), .hit(hit),
     .ps_v(ps_v), .ps_a(ps_a), .ps_d(ps_d), .ra(ra), .fhit(fhit), .frd(frd),
+    .la(la), .lhit(lhit), .lrd(lrd),
     .f_full(f_full), .f_empty(f_empty), .f_quiet(f_quiet),
     .pot_x(pot_x), .pot_y(pot_y),
     .cfg_base(cfg_base), .cfg_mask(cfg_mask), .cfg_split(cfg_split),

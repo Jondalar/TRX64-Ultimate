@@ -340,11 +340,19 @@ module c64_top #(
   output wire         sb_reu_busy,
   output wire  [23:0] sb_cpu_port,      // {$01 read, $01 latch, $00}
   output wire   [2:0] sb_cart,
-  // the REU's side of a side-effect-free look at IO2 (T12 §11 Q2): whether a
-  // read there would go to the REU now, and its register at pk_reu_addr
-  input  wire   [3:0] pk_reu_addr,
-  output wire         pk_reu,
-  output wire   [7:0] pk_reu_dout,
+  // U13: the monitor's look at an I/O address (c64_core, dma_win): the device the arbiter's io_decode() picks for a
+  // read of lk_addr with I/O mapped (its codes), the socket select, our own responder's range ($DE00-$DFFF without a
+  // socket), the open bus, and the byte of the devices in here: turbo registers, VIC, SID, CIAs, REU, the colour RAM's
+  // open high nibble (c64_core and dma_win add the cartridge, the responder, the sockets and the nibble). lk_open: bits
+  // of lk_data are the open bus; lk_na: no read view here (the SID of the two-SID reDIP build)
+  input  wire  [15:0] lk_addr,
+  output wire   [3:0] lk_dev,
+  output wire   [1:0] lk_sock,
+  output wire         lk_xsel,
+  output wire   [7:0] lk_last,
+  output reg    [7:0] lk_data,
+  output reg          lk_open,
+  output reg          lk_na,
 
   // Colour RAM second port (cram_clk, which keeps running while clk is
   // stopped by a machine pause): low nibble, read data one clock later
@@ -645,6 +653,9 @@ assign sid_f_full = 1'b0;
 assign sid_f_empty = 1'b1;
 assign sid_f_quiet = 1'b1;
 assign sid_lv_data = 8'd0;
+wire       lk_sid_na  = 1'b1;           // U13: no read view without a bus cycle
+wire       lk_sid_hit = 1'b0;
+wire [7:0] lk_sid_d   = 8'hFF;
 c64_redip_sid c64_redip_sid_0 (
   .clk                 (clk),
   .reset               (cpu_reset),
@@ -668,6 +679,9 @@ c64_redip_sid c64_redip_sid_0 (
   .pot_y               (sid_pot_y)
 );
 `else
+wire       lk_sid_na = 1'b0;
+wire       lk_sid_hit;
+wire [7:0] lk_sid_d;
 c64_trx_sid c64_trx_sid_0 (
   .clk                 (clk),
   .reset               (cpu_reset),
@@ -688,6 +702,9 @@ c64_trx_sid c64_trx_sid_0 (
   .ra                  (cpu_addr[9:0]),
   .fhit                (sid_fhit),
   .frd                 (sid_frd),
+  .la                  (lk_addr[9:0]),
+  .lhit                (lk_sid_hit),
+  .lrd                 (lk_sid_d),
   .f_full              (sid_f_full),
   .f_empty             (sid_f_empty),
   .f_quiet             (sid_f_quiet),
@@ -1196,6 +1213,7 @@ reg         reu_mem_valid;
 reg         reu_mem_ready;
 reg         reu_mem_rvalid;
 
+wire [7:0] pk_reu_dout;                 // U13: the REU's register at lk_addr for the look
 c64_reu c64_reu_0 (
   .clk              (clk),
   .rst              (cpu_reset),
@@ -1209,7 +1227,7 @@ c64_reu c64_reu_0 (
   .reu_dout         (reu_dout),
   .reu_we           (reu_we),
   .reu_cen          (reu_cen),
-  .pk_addr          (pk_reu_addr),
+  .pk_addr          (lk_addr[3:0]),     // U13: the look (T12 §11 Q2: without clearing the status)
   .pk_dout          (pk_reu_dout),
   .reu_dma_addr     (reu_dma_addr),
   .reu_dma_we       (reu_dma_we),
@@ -1499,7 +1517,6 @@ c64_bus_arbiter c64_bus_arbiter_0 (
   .reu_dma_active (reu_dma_active || ext_dma_cyc),
 
   .reu_present (reu_present),
-  .pk_reu      (pk_reu),
 
   .cart_present      (cart_present || ext_ultimax),
   .cart_game         (cart_game && !ext_ultimax),
@@ -1534,6 +1551,11 @@ c64_bus_arbiter c64_bus_arbiter_0 (
   .io_ext_dout (ext_io_dout),
   .tr_oe       (tr_oe),
   .tr_dout     (tr_dout),
+  .lk_addr     (lk_addr),
+  .lk_dev      (lk_dev),
+  .lk_sock     (lk_sock),
+  .lk_xsel     (lk_xsel),
+  .lk_last     (lk_last),
 
   .cass_sense_n (tape_cass_sense_n),
   .cass_motor_n (tape_cass_motor_n),
@@ -1575,6 +1597,8 @@ assign sb_cart = {cart_present, cart_exrom, cart_game};
 // the turbo engine (T29)
 // ---------------------------------------------------------------------------
 
+wire       lk_tr_hit;                   // U13: the turbo registers' read view for the look
+wire [7:0] lk_tr_d;
 c64_turbo #(.HOLD(TURBO_HOLD)) turbo (
   .clk(clk), .clk2x(clk2x), .rst(rst),
   .gate_ce(gate_ce), .run2(run2), .g_edge(g_edge),
@@ -1591,7 +1615,7 @@ c64_turbo #(.HOLD(TURBO_HOLD)) turbo (
   .cq_tgl(cq_tgl), .cq_we(cq_we), .cq_a(cq_a), .cq_d(cq_d), .cq_ack(cq_done), .cq_q(color_q_a),
   .addr_a(addr_a), .we_a(we_a), .dout_a(dout_a),
   .nw_sel(!vic_cen && vic_we && !reu_dma_active && !ext_dma_cyc),
-  .tr_oe(tr_oe), .tr_dout(tr_dout),
+  .tr_oe(tr_oe), .tr_dout(tr_dout), .lk_a(lk_addr), .lk_hit(lk_tr_hit), .lk_dout(lk_tr_d),
   .tb_addr(tb_addr), .tb_raddr(tb_raddr), .tb_we(tb_we), .tb_wdata(tb_wdata),
   .tb_ram_lo(tb_ram_lo), .tb_ram_hi(tb_ram_hi), .tb_rom_lo(tb_rom_lo), .tb_rom_hi(tb_rom_hi), .tb_took(tb_took),
   .fw_we(fw_we), .fw_a(fw_a), .fw_d(fw_d),
@@ -1602,6 +1626,36 @@ c64_turbo #(.HOLD(TURBO_HOLD)) turbo (
   .iec_lines(cia2_iec_lines)
 );
 assign turbo_on = t_mode;
+
+// ---------------------------------------------------------------------------
+// U13: the monitor's look. The byte a CPU read of lk_addr with I/O mapped returns now, from the devices in here, in
+// the arbiter's priority (c64_bus_arbiter.v: the colour RAM before the I/O mux, then turbo registers, VIC, socket, SID,
+// CIA 1, CIA 2, REU, cartridge; the socket, the cartridge and our own responder are c64_core's). The device codes are
+// io_decode()'s. No strobe, no bus cycle: each read view is the device's own (sb_regs, pk_dout, the look ports).
+// ---------------------------------------------------------------------------
+always @(*) begin
+  lk_data = lk_last;                    // the open bus
+  lk_open = 1'b1;
+  lk_na   = 1'b0;
+  case (lk_dev)
+  4'd1: begin                           // VIC: the turbo registers first, then the read case's bytes ($2F-$3F $FF)
+    lk_open = 1'b0;
+    lk_data = lk_tr_hit ? lk_tr_d : lk_addr[5:0] < 6'd48 ? sb_vic[lk_addr[5:0] * 8 +: 8] : 8'hFF;
+  end
+  4'd2: begin                           // SID: an UltiSID that answers, else the open bus
+    lk_na = lk_sid_na;
+    if (lk_sid_hit) begin
+      lk_open = 1'b0;
+      lk_data = lk_sid_d;
+    end
+  end
+  4'd3: lk_data = {lk_last[7:4], 4'h0}; // colour RAM: the high nibble is the open bus, dma_win reads the low one
+  4'd4: begin lk_open = 1'b0; lk_data = sb_cia1[(4'd15 - lk_addr[3:0]) * 8 +: 8]; end
+  4'd5: begin lk_open = 1'b0; lk_data = sb_cia2[(4'd15 - lk_addr[3:0]) * 8 +: 8]; end
+  4'd8: begin lk_open = 1'b0; lk_data = pk_reu_dout; end   // the REU's registers without clearing the status
+  default: ;                            // nothing here, or the cartridge (c64_core)
+  endcase
+end
 
 always @(posedge clk) begin
   if (cpu_reset) begin

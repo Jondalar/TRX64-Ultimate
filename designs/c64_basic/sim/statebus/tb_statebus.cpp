@@ -31,6 +31,13 @@
 //     5. a stop without Ultimax is real: a bus write lands in the VIC
 //     7. GATE_CTRL b0 = 0 (reset value): the app's stop pauses only the CPU,
 //        bus cycles reach the chips, the program goes on afterwards
+//   tb_statebus look <state>   restore, then U13: the lens unit's look at the whole I/O page. A program sets
+//        a CIA 1 ICR flag (IRQ masked), a sprite-sprite collision, a finished REU transfer and the turbo
+//        registers ($D030 = 0, $D031 = $70: still 1 MHz); halted, every address $D000-$DFFF is looked at
+//        twice (the same bytes, no C64 clock edge, the state bus unchanged), then each address: a look, a
+//        REAL read (one bus cycle, side effects), a look: the REAL byte is the first or the second look
+//        outside the open-bus bits; the side effects are seen (first look != second) where they exist; the
+//        turbo registers, which a DMA read does not see, against the program's own reads of them
 //   Exit code 0 = ok.
 //
 //   build.sh && cd build/run && ../tb_statebus boot ../tb.state && ../tb_statebus run ../tb.state
@@ -814,6 +821,122 @@ static int run(const char *state)
     return fails ? 1 : 0;
 }
 
+// ---- U13: the look at the I/O page --------------------------------------------------------------
+// LK_REQ {REAL b18, class b17:16, address}, LK_RES {busy b31, open b13, refused b12, real b11, ext b10,
+// hit b9, done b8, data}
+static uint32_t lk(uint16_t a, int cls, bool real)
+{
+    bwr32(0x5020, uint32_t(a) | uint32_t(cls) << 16 | (real ? 1u << 18 : 0));
+    uint32_t r = 0;
+    for (int n = 0; n < 20000; n++) { r = brd32(0x5024); if (!(r >> 31)) return r; }
+    printf("FAIL: lens unit busy at %04X\n", a);
+    exit(4);
+}
+// program L at $C200: SEI, CIA 1 interrupts masked (pending flags read away: timer A keeps setting its
+// ICR flag), sprites 0 and 1 on top of each other (data block 13, the bench fills it), $D030 = 0 then
+// $D031 = $70 (speed index 0: 1 MHz), the CPU's own reads of $D030 $D031 $D03C $D071 $D131 into
+// $C310-$C314, a REU transfer C64 $0400 -> REU 0, 1 byte, then INC $C300 forever
+static const uint8_t PROG_L[] = {
+    0x78, 0xA9, 0x7F, 0x8D, 0x0D, 0xDC, 0xAD, 0x0D, 0xDC,
+    0xA9, 0x80, 0x8D, 0x00, 0xD0, 0x8D, 0x01, 0xD0, 0x8D, 0x02, 0xD0, 0x8D, 0x03, 0xD0,
+    0xA9, 0x03, 0x8D, 0x15, 0xD0,
+    0xA9, 0x00, 0x8D, 0x30, 0xD0,
+    0xA9, 0x70, 0x8D, 0x31, 0xD0,
+    0xAD, 0x30, 0xD0, 0x8D, 0x10, 0xC3, 0xAD, 0x31, 0xD0, 0x8D, 0x11, 0xC3, 0xAD, 0x3C, 0xD0, 0x8D, 0x12, 0xC3,
+    0xAD, 0x71, 0xD0, 0x8D, 0x13, 0xC3, 0xAD, 0x31, 0xD1, 0x8D, 0x14, 0xC3,
+    0xA9, 0x00, 0x8D, 0x02, 0xDF, 0x8D, 0x04, 0xDF, 0x8D, 0x05, 0xDF, 0x8D, 0x06, 0xDF, 0x8D, 0x08, 0xDF,
+    0xA9, 0x04, 0x8D, 0x03, 0xDF,
+    0xA9, 0x01, 0x8D, 0x07, 0xDF,
+    0xA9, 0x90, 0x8D, 0x01, 0xDF,
+    0xEE, 0x00, 0xC3, 0x4C, 0x64, 0xC2,                             // $C264
+};
+static int look(const char *state)
+{
+    restore(state);
+    // the app's turbo setting: all three registers on (TurboEnable Bit mode), menu speed 1 MHz
+    top->turbo_en = 0x07;
+    top->turbo_prefer = 0x80;
+    top->turbo_upd_tgl ^= 1;
+    run_ticks(100);
+    for (int i = 0; i < 64; i++) poke(0x0340 + i, 0xFF);
+    poke(0x07F8, 0x0D);
+    poke(0x07F9, 0x0D);
+    for (unsigned i = 0; i < sizeof PROG_L; i++) poke(0xC200 + i, PROG_L[i]);
+    type("SYS49664\r");
+    run_ms(80);
+    jhalt(true);
+
+    // looked at twice, all of it: the same bytes, no C64 clock edge, no state-bus word moved
+    uint32_t g0 = top->gclk_edges;
+    std::vector<uint32_t> sb0 = sb_dump();
+    std::vector<uint32_t> r1(4096), r2(4096);
+    for (int a = 0; a < 4096; a++) r1[a] = lk(0xD000 + a, 2, false);
+    for (int a = 0; a < 4096; a++) r2[a] = lk(0xD000 + a, 2, false);
+    std::vector<uint32_t> sb1 = sb_dump();
+    int notdone = 0, diff12 = 0, ext = 0, open = 0;
+    for (int a = 0; a < 4096; a++) {
+        if ((r1[a] & 0x1300) != 0x0300 && notdone++ < 4) printf("   look $%04X: LK_RES %08X\n", 0xD000 + a, r1[a]);
+        if (r1[a] != r2[a] && diff12++ < 4) printf("   look $%04X twice: %08X %08X\n", 0xD000 + a, r1[a], r2[a]);
+        ext += (r1[a] >> 10) & 1;
+        open += (r1[a] >> 13) & 1;
+    }
+    printf("U13 look: 2 x 4096 looks, C64 clock edges +%u, %d ext, %d with open-bus bits\n",
+           top->gclk_edges - g0, ext, open);
+    printf("   $D030 %02X $D031 %02X $D071 %02X $D01E %02X $D019 %02X $DC0D %02X $DF00 %02X $D41B %02X $D800 %02X\n",
+           r1[0x030] & 0xFF, r1[0x031] & 0xFF, r1[0x071] & 0xFF, r1[0x01E] & 0xFF, r1[0x019] & 0xFF,
+           r1[0xC0D] & 0xFF, r1[0xF00] & 0xFF, r1[0x41B] & 0xFF, r1[0x800] & 0xFF);
+    CHECK(notdone == 0, "%d looks not done, refused or without hit", notdone);
+    CHECK(diff12 == 0, "%d looks differ the second time", diff12);
+    CHECK(top->gclk_edges == g0, "the looks cost C64 clock edges");
+    CHECK(sb_diff(sb0, sb1, "before vs after the looks") == 0, "state-bus words moved over the looks");
+    CHECK(ext == 0, "%d looks answer ext (no socket, no port here)", ext);
+    // the turbo registers against the CPU's own reads (a DMA read does not see them: the arbiter answers them to the
+    // CPU only, U13 §4, so the REAL reads below give the VIC's $FF there)
+    static const uint16_t TA[5] = {0x030, 0x031, 0x03C, 0x071, 0x131};
+    for (int i = 0; i < 5; i++)
+        CHECK((r1[TA[i]] & 0xFF) == peek(0xC310 + i), "turbo register $%04X: look %02X, the CPU read %02X",
+              0xD000 + TA[i], r1[TA[i]] & 0xFF, peek(0xC310 + i));
+    CHECK((r1[0x031] & 0xFF) == 0x70 && (r1[0x131] & 0xFF) == 0xFF, "the turbo register $D031, not at $D131");
+    CHECK((r1[0x01E] & 0x03) == 0x03, "no sprite-sprite collision to look at");
+    CHECK(r1[0xC0D] & 0x01, "no CIA 1 timer A flag to look at");
+    CHECK(r1[0xF00] & 0x40, "no REU end of block to look at");
+
+    // each address: look, REAL read, look; the REAL byte is one of the two looks (time moves one cycle with the
+    // bus cycle), the open-bus bits aside
+    int bad = 0, seen = 0, real_bad = 0;
+    for (int a = 0; a < 4096; a++) {
+        uint16_t ad = 0xD000 + a;
+        uint32_t pre = lk(ad, 2, false);
+        uint32_t b = lk(ad, 2, true);
+        uint32_t post = lk(ad, 2, false);
+        if ((b & 0x1F00) != 0x0B00) { if (real_bad++ < 4) printf("   REAL $%04X: LK_RES %08X\n", ad, b); continue; }
+        uint8_t m = !(pre & 0x2000) ? 0xFF : (ad >= 0xD800 && ad < 0xDC00) ? 0x0F : 0x00;
+        bool treg = ad < 0xD100 && ((ad & 0x3F) == 0x30 || (ad & 0x3F) == 0x31 || (ad & 0x3F) == 0x3C);
+        if (treg) {                             // checked against the CPU above; a DMA read gets the VIC's $FF
+            if ((b & 0xFF) != 0xFF && bad++ < 8) printf("   $%04X: a DMA read of a turbo register %02X\n", ad, b & 0xFF);
+            continue;
+        }
+        bool ok = ((b ^ pre) & m) == 0 || ((b ^ post) & m) == 0;
+        if (!ok && bad++ < 8)
+            printf("   $%04X: look %02X, bus %02X, look %02X (mask %02X)\n", ad, pre & 0xFF, b & 0xFF, post & 0xFF, m);
+        if (((pre ^ post) & m) != 0) seen++;
+    }
+    printf("   4096 x look/REAL/look: %d differ from both looks, %d where the bus read changed the look\n", bad, seen);
+    CHECK(real_bad == 0, "%d REAL reads failed", real_bad);
+    CHECK(bad == 0, "%d bytes: the look is not what the bus read", bad);
+    CHECK(seen >= 3, "the side effects (ICR, collision, REU status) were not exercised");
+
+    // running: the look still answers, now from the live registers
+    jhalt(false);
+    run_ms(2);
+    uint32_t rr = lk(0xD031, 2, false);
+    printf("   running: $D031 %08X\n", rr);
+    CHECK((rr & 0x13FF) == 0x0370, "the look of $D031 while running");
+
+    printf(fails ? "%d FAILED\n" : "ok\n", fails);
+    return fails ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
     Verilated::commandArgs(argc, argv);
@@ -821,7 +944,8 @@ int main(int argc, char **argv)
     int rc = 3;
     if (argc >= 3 && !strcmp(argv[1], "boot")) rc = boot(argv[2]);
     else if (argc >= 3 && !strcmp(argv[1], "run")) rc = run(argv[2]);
-    else fprintf(stderr, "usage: %s boot|run <state>\n", argv[0]);
+    else if (argc >= 3 && !strcmp(argv[1], "look")) rc = look(argv[2]);
+    else fprintf(stderr, "usage: %s boot|run|look <state>\n", argv[0]);
     top->final();
     delete top;
     return rc;

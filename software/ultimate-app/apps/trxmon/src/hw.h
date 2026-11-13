@@ -153,6 +153,8 @@ uint8_t hw_rom(uint16_t off); /* the ROM block: char 0x0000, KERNAL 0x2000, BASI
  * the unit did not answer. */
 int hw_has_lk(void);
 uint32_t hw_lk(uint16_t a, int cls, int real);
+/* CAPS3 b1 (U13): the look at class 2/3 covers the whole I/O page as a CPU read would */
+int hw_has_iolook(void);
 
 /* One C64 bus cycle through the window (I/O writes, and sidefx reads on a bitstream
  * without the lens unit). Only while the gate is shut and the machine is held: by the

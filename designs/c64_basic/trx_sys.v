@@ -75,13 +75,15 @@
 //              SH_COMMIT: the freeze session responder of T12 is gone (SLIM D1, D3):
 //              writes are ignored, reads give 0
 //     020      LK_REQ      W    the lens unit (T21 §3.4.1, CAPS2 b4): b15:0 address,
-//                               b17:16 class (0 ROML, 1 ROMH, 2 IO1, 3 IO2), b18
-//                               REAL: one bus cycle with the select forced (the
+//                               b17:16 class (0 ROML, 1 ROMH, 2 IO1, 3 IO2; with
+//                               CAPS3 b1, 2 and 3 the whole I/O page by address, U13),
+//                               b18 REAL: one bus cycle with the select forced (the
 //                               machine must be paused) instead of the look
-//     024      LK_RES      R    b7:0 data, b8 done, b9 hit, b10 ext (the real port
-//                               serves it: take REAL), b11 data from a bus cycle,
-//                               b12 refused (REAL, machine not paused or no cycle
-//                               came), b31 busy
+//     024      LK_RES      R    b7:0 data, b8 done, b9 hit, b10 ext (no read view
+//                               without a bus cycle: the real port, a socket chip;
+//                               take REAL), b11 data from a bus cycle, b12 refused
+//                               (REAL, machine not paused or no cycle came), b13
+//                               open (bits of the data are the open bus, U13), b31 busy
 //     028      TX_VIEW     RW   what the C64 text layer (c64_text.v) takes for the VIC:
 //                               b15 $D011 ECM, b14 BMM, b13 $D016 MCM, b12:6 $D018 bits
 //                               7:1, b5:2 $D021 (background), b1:0 the CIA 2 bank pins

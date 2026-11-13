@@ -22,10 +22,11 @@ extern "C" {
 /* LK_RES (trx_sys page 5, freeze_resp.v): the answer of the lens unit */
 #define LK_DATA(r)    ((uint8_t)(r))
 #define LK_DONE       0x00000100u
-#define LK_HIT        0x00000200u /* the cartridge or the REU drives this read */
-#define LK_EXT        0x00000400u /* the real port serves it: take a REAL cycle */
+#define LK_HIT        0x00000200u /* the cartridge or the REU drives this read (I/O look: always) */
+#define LK_EXT        0x00000400u /* no read view: the real port serves it, or a socket chip; take a REAL cycle */
 #define LK_REAL       0x00000800u /* the data came from a bus cycle */
 #define LK_REFUSED    0x00001000u /* REAL, and the machine is not paused */
+#define LK_OPEN       0x00002000u /* I/O look (U13): bits of the data are the open bus */
 #define LK_BUSY       0x80000000u
 
 typedef struct
@@ -49,6 +50,10 @@ typedef struct
      * session, nothing reads it without a bus cycle otherwise): the byte, or -1 when no session
      * answers. May be NULL. */
     int (*session_read)(uint16_t a);
+    /* 1: the unit's look at class 2/3 answers the whole I/O page as a CPU read would, from every chip's
+     * own read view (CAPS3 b1, TRX64-Ultimate docs/specs/U13-the-monitor-reads-io-as-the-cpu.md);
+     * then the state bus serves only the PLA */
+    int io_look;
 } lens_hw_t;
 
 /* What the PLA decides, and the banking words the lenses need, taken once
@@ -74,8 +79,9 @@ int lens_pla(uint16_t a);
 int lens_valid(const char *lens);
 
 /* One byte through a lens; -1 when the lens cannot reach it without a bus
- * cycle it may not make (SID, colour RAM, the real port while the machine
- * runs, IO1/IO2 of a real cartridge without sidefx). sidefx: I/O reads are
+ * cycle it may not make: a socket chip and IO1/IO2 of a real cartridge
+ * without sidefx, the real port while the machine runs; on a bitstream
+ * without io_look also the SID and the colour RAM. sidefx: I/O reads are
  * bus cycles (real side effects) and need the machine paused. */
 int lens_peek(const lens_hw_t *hw, const char *lens, uint16_t a, int sidefx);
 

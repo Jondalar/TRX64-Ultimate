@@ -43,7 +43,8 @@
 //                              page 0 from 0x140;
 //                              b7 the trace former (page 2 LOG_CTRL b4/b9, LOG_CNT[3], T21 §4.11.1)
 //     006      CAPS3      R    b0 the SID is the 8-SID reDIP with the reSID8 filter control below
-//                              (T25.5; bitstreams without it read 0, Gideon's too)
+//                              (T25.5; bitstreams without it read 0, Gideon's too), b1 the lens unit's
+//                              look classes 2/3 cover the whole I/O page by address (U13)
 //     008-00B  BUILD      R    the bitstream's build stamp (USR_ACCESSE2, Vivado
 //                              BITSTREAM.CONFIG.USR_ACCESS TIMESTAMP); the boot
 //                              ROM compares it with the AXSS write of the

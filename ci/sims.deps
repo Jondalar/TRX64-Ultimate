@@ -60,6 +60,7 @@ still60: designs/c64_basic/sim/pixlayer/run_still.sh designs/c64_basic/sim/pixla
 
 drive_mem: designs/c64_basic/sim/drive_mem designs/c64_basic/drive_mem.vhd @mig @gideon
 uci: designs/c64_basic/sim/uci/run.sh designs/c64_basic/sim/uci/tb_uci.vhd designs/c64_basic/uci_unit.vhd @gideon
+uci_core: designs/c64_basic/sim/uci designs/c64_basic/uci_unit.vhd @vcore @gideon
 flash_gate: designs/c64_basic/sim/flash_gate designs/c64_basic/flash_gate.vhd designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd tools/flashgate_test.py tools/flashgate @gideon
   tools/flashgate_test.py tools/flashgate @gideon
 flash_boot: designs/c64_basic/sim/flash_boot designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @gideon

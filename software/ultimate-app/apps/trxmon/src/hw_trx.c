@@ -324,6 +324,7 @@ uint8_t hw_rom(uint16_t off)
 #define P5(o) (0x5000u + (o))
 
 int hw_has_lk(void) { return (s_regs[0x005] & 0x10) != 0; }
+int hw_has_iolook(void) { return (s_regs[0x006] & 0x02) != 0; }
 
 uint32_t hw_lk(uint16_t a, int cls, int real)
 {

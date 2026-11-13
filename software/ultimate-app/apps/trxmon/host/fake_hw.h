@@ -18,6 +18,9 @@ typedef struct
     /* the lens unit's cartridge */
     int has_lk, cart_ext, lk_calls;
     uint8_t cart_roml[0x2000], cart_romh[0x2000], cart_io[256];
+    /* U13: the look covers the I/O page (CAPS3 b1): its bytes, and where it has no read view (ext) */
+    int has_iolook;
+    uint8_t io_view[0x1000], io_ext[0x1000];
     int shut, running, stop_new, fw_stop, dbg_stop, owner, memonly;
     int stops, runs, last_cmd, bus_cycles, cpu_writes;
     uint64_t cycles;

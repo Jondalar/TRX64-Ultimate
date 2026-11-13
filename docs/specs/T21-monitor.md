@@ -238,7 +238,7 @@ possible:
 | `cpu` | the app works out the PLA from `$01` (state port) plus GAME/EXROM (cart taps), then RAM port, the ROM block, the state bus (I/O) or the cartridge as the `cart` lens does it (§3.4.1) | 0 | none |
 | `rom` | the core's own ROM BRAM through its port B (ARCH §7.8; the core does not read the firmware's windows) | 0 | none |
 | `cart` | ROML ($8000-$9FFF) and ROMH ($A000-$BFFF, $E000-$FFFF) as the cartridge answers them now, whatever the PLA maps: an emulated cartridge through the hardware look (`pk_*`, the decode a bus access would use, bank and mode included, §3.4.1), a cartridge on the real port through one bus cycle with a forced select (§3.4.1, T16 §8.4) | 0 (look) / 1 (real port) | none (look); the cartridge's own for a real one that banks on a ROM read |
-| `io` with `sidefx off` (default) | state bus (ARCH §5): VIC, CIA 1/2 including ICR, TOD, collisions, without side effects; IO1/IO2 of an emulated cartridge and the REU through the look (§3.4.1) | 0 | none |
+| `io` with `sidefx off` (default) | the lens unit's look at the whole I/O page ([U13](U13-the-monitor-reads-io-as-the-cpu.md), CAPS3 b1): the device the arbiter's decode picks and its read view, what a CPU read returns now; a socket chip and the real port have none (`--`). Older bitstreams: the state bus (VIC, CIA 1/2) and the look for IO1/IO2 of an emulated cartridge and the REU (§3.4.1) | 0 | none |
 | `io` with `sidefx on` | one bus cycle with a forced I/O select while the machine is paused (§3.4.1; no `C64_STOP` of the menu needed) | 1 per byte | real (ICR clears, TOD latches, collisions clear, cartridge I/O) |
 | colour RAM | second port on the colour RAM (ARCH, patch 0051) | 0 | none |
 | writes `wr`/`f`/`t` to RAM | RAM port | 0 | none |
@@ -310,13 +310,17 @@ block, drive RAM, LK request). Same bytes from REST and from the WebSocket by co
   unreadable. No cartridge present (state bus `present` 0): $FF.
 - `cpu`: the PLA decides the region as before; ROML/ROMH regions are `cart_byte` (so an
   emulated EasyFlashXl reads its mapped bank, a real cartridge is read over the port);
-  I/O is `io_peek`. Unreadable (SID, colour RAM, a real-port ROM read while the machine runs)
-  stays -1: `--` in the monitor, 0 in `read_memory` and REST.
-- `io`: VIC and CIA from the state bus; IO1/IO2 ($DE00-$DFFF) through the look for an
-  emulated cartridge and the REU (register values the way a read returns them, without the
-  read's side effect; the UCI shows what is below it and the AMD responder's ID mode is not
-  shown, T12 §14.3), `--` for the real port; `sidefx on`: REAL class I/O for everything in
-  $D000-$DFFF.
+  I/O is `io_peek`. Unreadable (a socket chip and the real port's I/O without `sidefx`, a real-port
+  ROM read while the machine runs; before U13 also the SID and the colour RAM) stays -1: `--` in the
+  monitor, 0 in `read_memory` and REST.
+- `io`: with CAPS3 b1 ([U13](U13-the-monitor-reads-io-as-the-cpu.md)) the look of class 2 at every
+  address of $D000-$DFFF: the turbo registers, VIC, SID, colour RAM (its high nibble the open bus),
+  CIAs, REU, the emulated cartridge, the sampler and the UCI as a read returns them now, without the
+  read's side effect and without a bus cycle; `--` for a socket chip and the real port. Before U13:
+  VIC and CIA from the state bus, IO1/IO2 ($DE00-$DFFF) through the look for an emulated cartridge
+  and the REU (the UCI showed what is below it, T12 §14.3), `--` for the SID, the colour RAM and the
+  real port, `$FF` for `$D030-$D03F` (the turbo registers too). `sidefx on`: REAL class I/O for
+  everything in $D000-$DFFF.
 
 **REST `machine:readmem`.** New optional parameter `lens=cpu|ram|rom|io|cart|drive8` and
 `sidefx=0|1`. **Decision: without `lens` the call is exactly Gideon's** (DMA bus read, the
@@ -2023,6 +2027,10 @@ Decisions: [ADR-0031 trxmon accepts exactly one RPC connection](../adr/0031-trxm
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-13, `io` reads the I/O page as the CPU would** ([U13](U13-the-monitor-reads-io-as-the-cpu.md)): §3.4 and
+  §3.4.1 changed. Without `sidefx` every byte of $D000-$DFFF comes from the lens unit's look (the arbiter's decode and
+  each chip's read view, no bus cycle); the state bus serves only the PLA. Found by MetalDust: `m d030 d031` showed
+  `FF FF` while the game had written `$0E` to `$D031`.
 - **2026-10-30, the monitor stopped being an app** (U5, [ADR-0060](../adr/0060-monitor-becomes-a-firmware-service.md)).
   These sources now compile into the firmware and run as its debug service, so the breakpoint table and
   the hardware arming no longer die when an app returns, and TCP 4312 answers with nothing loaded.

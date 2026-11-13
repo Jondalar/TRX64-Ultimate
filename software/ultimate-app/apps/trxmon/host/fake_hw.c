@@ -460,6 +460,7 @@ uint8_t hw_rom(uint16_t off) { return (off < sizeof(F.rom)) ? F.rom[off] : 0xFF;
 /* The lens unit: a cartridge of 8K ROML and 8K ROMH ($FF in the look's open bus below
  * the image), IO1 a register, a real-port flag; REAL needs a held machine */
 int hw_has_lk(void) { return F.has_lk; }
+int hw_has_iolook(void) { return F.has_iolook; }
 
 uint32_t hw_lk(uint16_t a, int cls, int real)
 {
@@ -475,6 +476,10 @@ uint32_t hw_lk(uint16_t a, int cls, int real)
         F.bus_cycles++;
         uint8_t v = (cls == 0) ? F.cart_roml[off] : (cls == 1) ? F.cart_romh[off] : F.cart_io[a & 0xFF];
         return LK_DONE | LK_HIT | LK_REAL | v;
+    }
+    if (F.has_iolook && cls >= 2) {
+        uint16_t o = a & 0x0FFFu;
+        return F.io_ext[o] ? (LK_DONE | LK_HIT | LK_EXT | 0xFF) : (LK_DONE | LK_HIT | F.io_view[o]);
     }
     if (F.cart_ext) {
         return LK_DONE | LK_EXT | 0xFF;

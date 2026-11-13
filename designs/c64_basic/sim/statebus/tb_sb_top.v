@@ -69,7 +69,11 @@ module tb_sb_top (
     output wire        o_de,
     output wire [11:0] o_cx,
     output wire [10:0] o_cy,
-    output reg  [31:0] tx_port_clocks = 0   // clocks the text layer had the RAM port
+    output reg  [31:0] tx_port_clocks = 0,  // clocks the text layer had the RAM port
+    // T29: the app's turbo setting (TURBOREGS_EN, SPEED_PREFER, a toggle per SPEED_UPDATE), for U13's look
+    input  wire  [7:0] turbo_en,
+    input  wire  [7:0] turbo_prefer,
+    input  wire        turbo_upd_tgl
 );
     wire gate_ce, gclk;
     reg  gate_l = 1'b1;
@@ -101,7 +105,8 @@ module tb_sb_top (
     wire  [1:0] cyc_force;
     wire [15:0] pk_addr;
     wire  [1:0] pk_cls;
-    wire        pk_hit, pk_mem;
+    wire        pk_hit, pk_mem, pk_ext;
+    wire        pk_on, pk_cram, pk_open, pk_wait;
     wire [23:0] pk_maddr;
     wire  [7:0] pk_data;
     wire        pkd_tgl;
@@ -124,7 +129,8 @@ module tb_sb_top (
         .cram_addr(win_cram_addr), .cram_we(cram_we), .cram_wdata(cram_wdata), .cram_rdata(cram_rdata), .cram_use(win_cram_use),
         .halted(halted), .app_ultimax(app_ultimax), .core_ultimax(core_ultimax),
         .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_hit(pk_hit), .pk_mem(pk_mem), .pk_maddr(pk_maddr),
-        .pk_data(pk_data), .cart_ext(1'b0),
+        .pk_data(pk_data), .cart_ext(pk_ext),
+        .pk_on(pk_on), .pk_cram(pk_cram), .pk_open(pk_open), .pk_wait(pk_wait),
         .lk_go(lk_go), .lk_req(lk_req), .lk_res(lk_res),
         .pkd_tgl(pkd_tgl), .pkd_addr(pkd_addr), .pkd_ack_tgl(pkd_tgl), .pkd_data(8'hEE)
     );
@@ -205,7 +211,9 @@ module tb_sb_top (
         .cap_every(cap_every), .cap_gen(cap_gen), .cap_tgl(cap_tgl), .cap_nosnap(cap_nosnap),
         .cram_addr(cram_addr), .cram_we(cram_we), .cram_wdata(cram_wdata), .cram_rdata(cram_rdata),
         .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_hit(pk_hit), .pk_mem(pk_mem), .pk_maddr(pk_maddr),
-        .pk_data(pk_data)
+        .pk_data(pk_data), .pk_ext(pk_ext),
+        .pk_on(pk_on), .pk_cram(pk_cram), .pk_open(pk_open), .pk_wait(pk_wait),
+        .turbo_en(turbo_en), .turbo_prefer(turbo_prefer), .turbo_upd_tgl(turbo_upd_tgl)
     );
     assign dbg_rdata = ram_rdata;
 endmodule

@@ -27,12 +27,13 @@ static struct
 
 /* The memory lenses are software/io/c64/trx_lens.c, the firmware's code too
  * (REST machine:readmem); this is the hardware under them (hw.h). */
-static lens_hw_t s_lens = {hw_sb_block, hw_ram_read, hw_rom, hw_drive_peek, hw_lk, hw_bus_read_held, hw_session_read};
+static lens_hw_t s_lens = {hw_sb_block, hw_ram_read, hw_rom, hw_drive_peek, hw_lk, hw_bus_read_held, hw_session_read, 0};
 
 /* State-bus words the lenses need, taken once per request */
 void mach_snapshot(void)
 {
     s_lens.lk = hw_has_lk() ? hw_lk : 0;
+    s_lens.io_look = s_lens.lk && hw_has_iolook();
     lens_snapshot(&s_lens);
 }
 

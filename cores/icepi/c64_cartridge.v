@@ -160,6 +160,7 @@ module c64_cartridge (
   input  wire        pk_io2,
   output wire        pk_io_sel,
   output wire  [7:0] pk_io_dout,
+  output wire  [7:0] pk_io_mask,  // the bits of pk_io_dout the cartridge drives (U13; dout_mask for pk_addr)
   output wire        pk_rom_sel,
   output wire [22:0] pk_rom_addr,
   output wire        pk_ram_sel,
@@ -433,6 +434,7 @@ assign pk_io_sel   = ar_enable ? ar_pk_io_sel : (pk_rd2_hit || pk_io_rd == 2'd1 
 assign pk_io_dout  = ar_enable ? ar_pk_io_dout :
                      pk_rd2_hit ? reg_2 :
                      pk_io_rd == 2'd3 ? (ee_dout ? do_bit : 8'd0) : !pk_addr[0] ? reg_0 : reg_1;
+assign pk_io_mask  = (!ar_enable && !pk_rd2_hit && pk_io_rd == 2'd3) ? do_bit : 8'hFF;
 assign pk_rom_sel  = ar_enable ? ar_pk_rom_sel : (pk_romh || pk_roml);
 assign pk_rom_addr = ar_enable ? {6'b0, ar_pk_rom_addr} : {bank, pk_romh && lay[0], pk_addr[12:0]};
 assign pk_ram_sel  = ar_enable ? ar_pk_ram_sel : pk_io_rd == 2'd2;

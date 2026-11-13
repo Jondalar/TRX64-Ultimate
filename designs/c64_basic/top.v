@@ -797,7 +797,7 @@ module top #(
         .ee_addr(cart_ee_addr), .ee_we(cart_ee_we), .ee_wdata(cart_ee_wdata), .ee_rdata(cart_ee_rdata),
         .p6_we(px_we), .p6_re(px_re), .p6_rdata(px_rdata), .ev_vsync(px_ev_vsync), .ev_flip(px_ev_flip),
         .build(usr_access), .ddr_cal(ddr_cal),
-        .caps3({7'd0, sid_resid8}), .rs8_cfg(sid_rs8),
+        .caps3({6'd0, 1'b1, sid_resid8}), .rs8_cfg(sid_rs8),   // b1: the lens unit's look covers the I/O page (U13)
         .sm_tgl(smp_a_tgl), .sm_addr(smp_a_addr), .sm_we(smp_a_we), .sm_wdata(smp_a_wdata),
         .sm_rs_tgl(smp_a_rs_tgl), .sm_rdata(smp_a_rdata)
     );
@@ -1242,6 +1242,7 @@ module top #(
     wire [15:0] pk_addr;
     wire  [1:0] pk_cls;
     wire        pk_hit, pk_mem, pk_ext;
+    wire        pk_on, pk_cram, pk_open, pk_wait;   // U13: the I/O look
     wire [23:0] pk_maddr;
     wire  [7:0] pk_data;
     wire  [7:0] cap_every;
@@ -1260,6 +1261,7 @@ module top #(
         .halted(c64_halted), .app_ultimax(app_s2[5]), .core_ultimax(core_ultimax),
         .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_hit(pk_hit), .pk_mem(pk_mem), .pk_maddr(pk_maddr),
         .pk_data(pk_data), .cart_ext(pk_ext),
+        .pk_on(pk_on), .pk_cram(pk_cram), .pk_open(pk_open), .pk_wait(pk_wait),
         .lk_go(lk_go), .lk_req(lk_req), .lk_res(lk_res),
         .pkd_tgl(pkd_tgl), .pkd_addr(pkd_addr), .pkd_ack_tgl(pkd_ack_tgl), .pkd_data(pkd_data)
     );
@@ -1395,7 +1397,8 @@ module top #(
         .slot_game(SLOT_GAMEn), .slot_exrom(SLOT_EXROMn), .slot_dma(SLOT_DMAn), .slot_irq(SLOT_IRQn),
         .slot_nmi(SLOT_NMIn), .slot_rst_i(SLOT_RST_I),
         .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_hit(pk_hit), .pk_mem(pk_mem), .pk_maddr(pk_maddr),
-        .pk_data(pk_data), .pk_ext(pk_ext)
+        .pk_data(pk_data), .pk_ext(pk_ext),
+        .pk_on(pk_on), .pk_cram(pk_cram), .pk_open(pk_open), .pk_wait(pk_wait)
     );
 
     drv_dbg ddbg (

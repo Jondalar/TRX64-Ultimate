@@ -3,9 +3,11 @@
  *
  * The PLA is worked out from $01 (state bus) and the cartridge's GAME/EXROM
  * lines; RAM, the ROM block and the state bus cost no bus cycle. The
- * cartridge is asked through the lens unit (freeze_resp.v LK): a look for an
+ * cartridge is asked through the lens unit (dma_win.v LK): a look for an
  * emulated one (the decode a bus access would use, banking registers as they
  * are), one bus cycle with the select forced for one on the physical port.
+ * The I/O page goes through the unit's look as well where the bitstream has
+ * it (CAPS3 b1, U13): the arbiter's decode and each chip's read view.
  */
 #include "trx_lens.h"
 
@@ -159,10 +161,11 @@ static int cart_byte(const lens_hw_t *hw, uint16_t a, int cls)
     return LK_DATA(r);
 }
 
-/* $D000-$DFFF: VIC, CIA 1/2 from the state bus; IO1/IO2 through the look for
- * an emulated cartridge and the REU. The colour RAM is read through the session's window
- * where one runs (a debugger stop is one, T12 §14.8). SID and the real port's I/O are bus
- * cycles only. */
+/* $D000-$DFFF. With io_look (U13): the lens unit's look, what a CPU read returns now from the
+ * chip's own read view, no bus cycle; LK_EXT (a socket chip, the real port) is unreadable without
+ * sidefx. Older bitstreams: VIC, CIA 1/2 from the state bus; IO1/IO2 through the look for an
+ * emulated cartridge and the REU; the colour RAM through the session's window where one runs (a
+ * debugger stop is one, T12 §14.8); SID and the real port's I/O are bus cycles only. */
 static int io_peek(const lens_hw_t *hw, uint16_t a, int sidefx)
 {
     if (sidefx) {
@@ -178,6 +181,10 @@ static int io_peek(const lens_hw_t *hw, uint16_t a, int sidefx)
                 return v;
             }
         }
+    }
+    if (hw->lk && hw->io_look) {
+        uint32_t r = lk_ask(hw, a, 2, 0);
+        return (r && !(r & LK_EXT)) ? (int)LK_DATA(r) : -1;
     }
     if ((a >= 0xD800) && (a < 0xDC00) && hw->session_read) {
         int v = hw->session_read(a);

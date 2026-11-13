@@ -19,17 +19,18 @@
 // where the pause left it. A bus cycle changes the chip
 // (a read of $DC0D clears the ICR, a write to $D019 acknowledges): that is the app's doing
 // on a stopped machine, as with a cartridge freezer on a real C64. The side-effect-free look
-// at a chip is the state bus (trx_sys.v page 1) and, for the cartridge, the lens unit below.
+// at a chip is the lens unit below (U13: the whole I/O page) and the state bus (trx_sys.v page 1).
 // The first bus cycle of a pause makes c64_core hold the CPU (RDY, as under the REU); c64_top's
 // cpu_paused follows at the next phi2 fall, so the CPU runs one or two cycles with the mapping
 // it has before that cycle comes. An app that sets Ultimax makes the first cycle of a freeze
 // with Ultimax off (C64::freeze reads $0002), later cycles find the CPU held.
 //
-// Lens unit (LK_REQ/LK_RES, T21 §3.4.1), in a stop or not: a look at the cartridge (c64_core
-// pk_*: the model's mapping with its banking registers as they are, IO registers as a read
-// would show them without the read's side effect, the REU's registers without clearing its
-// status; ROM image and cartridge RAM from DDR2 through cart_fill, pkd_*) for a class (ROML,
-// ROMH, IO1, IO2) and address the app gives, or with REAL one bus cycle with the select forced
+// Lens unit (LK_REQ/LK_RES, T21 §3.4.1), in a stop or not: a look, no bus cycle and no C64 clock
+// edge (c64_core pk_*): ROML/ROMH (classes 0, 1) as the cartridge's mapping answers them with its
+// banking registers as they are, ROM image and cartridge RAM from DDR2 through cart_fill (pkd_*);
+// classes 2 and 3 the whole I/O page by address (U13): the device the arbiter's decode picks and its
+// read view without the read's side effect, the colour RAM's nibble through its port, 8 clocks
+// for the answer (the UCI's longer, pk_wait). Or with REAL one bus cycle with the select forced
 // (cyc_force: ROML, ROMH or I/O, whatever the PLA maps) and the app's Ultimax off, which is how
 // a cartridge on the physical port (cart_ext) is read; REAL needs the machine paused. It runs in
 // the idle state behind the window's requests.
@@ -82,7 +83,13 @@ module dma_win (
     input  wire        pk_mem,
     input  wire [23:0] pk_maddr,
     input  wire  [7:0] pk_data,
-    input  wire        cart_ext,            // the cartridge is on the physical port (T16)
+    input  wire        cart_ext,            // the cartridge is on the physical port (T16); for I/O: no read view
+    // U13: classes 2 and 3 ask the whole I/O page (c64_core): pk_on while a look runs; pk_cram: the low nibble is the
+    // colour RAM's, read here through its port; pk_open: bits are the open bus; pk_wait: the UCI's answer is not there yet
+    output wire        pk_on,
+    input  wire        pk_cram,
+    input  wire        pk_open,
+    input  wire        pk_wait,
     // the lens unit (trx_sys.v page 5 LK_REQ / LK_RES): a pulse with the request
     // {REAL, class, address}; the result word
     input  wire        lk_go,
@@ -103,12 +110,12 @@ module dma_win (
 
     // ---- lens unit -------------------------------------------------------------------
     reg        lk_pend = 1'b0, lk_busy = 1'b0, lk_real = 1'b0;
-    reg        lk_done = 1'b0, lk_hit = 1'b0, lk_ext = 1'b0, lk_rdone = 1'b0, lk_refused = 1'b0;
+    reg        lk_done = 1'b0, lk_hit = 1'b0, lk_ext = 1'b0, lk_rdone = 1'b0, lk_refused = 1'b0, lk_open = 1'b0;
     reg [15:0] lk_a = 16'd0;
     reg  [1:0] lk_c = 2'd0;
     reg  [7:0] lk_data = 8'd0;
-    reg [17:0] lk_to = 18'd0;                   // a REAL cycle that never comes (the machine resumed)
-    assign lk_res = {lk_busy, 18'd0, lk_refused, lk_rdone, lk_ext, lk_hit, lk_done, lk_data};
+    reg [17:0] lk_to = 18'd0;                   // a REAL cycle that never comes (the machine resumed); an I/O look's wait
+    assign lk_res = {lk_busy, 17'd0, lk_open, lk_refused, lk_rdone, lk_ext, lk_hit, lk_done, lk_data};
 
     // the lens's REAL cycle decodes with the app's Ultimax off; every other cycle with the app's
     reg        cyc_out = 1'b0, cyc_lk = 1'b0;
@@ -117,9 +124,10 @@ module dma_win (
     // colour RAM port job: c_st 1 = the port is ours (address, and the write), 2 = the read data is there
     reg  [1:0] c_st = 2'd0;
     reg        c_pend = 1'b0;
-    assign cram_addr  = dma_addr[9:0];
-    assign cram_use   = c_st == 2'd1;
-    assign cram_we    = cram_use && dma_we;
+    reg        lk_cu = 1'b0;                    // the lens unit has the port (U13: a look at the colour RAM)
+    assign cram_addr  = lk_cu ? lk_a[9:0] : dma_addr[9:0];
+    assign cram_use   = c_st == 2'd1 || lk_cu;
+    assign cram_we    = c_st == 2'd1 && dma_we;          // the lens only reads
     assign cram_wdata = dma_wdata[3:0];
 
     // RAM port job
@@ -140,8 +148,9 @@ module dma_win (
     assign cyc_force = !cyc_lk ? 2'd0 : lk_c == 2'd0 ? 2'd1 : lk_c == 2'd1 ? 2'd2 : 2'd3;
     assign pk_addr   = lk_a;
 
-    localparam [2:0] S_IDLE = 3'd0, S_PKW = 3'd1, S_PK0 = 3'd2, S_PK1 = 3'd3, S_LKC = 3'd4;
+    localparam [2:0] S_IDLE = 3'd0, S_PKW = 3'd1, S_PK0 = 3'd2, S_PK1 = 3'd3, S_LKC = 3'd4, S_PKC = 3'd5, S_PKD = 3'd6;
     reg  [2:0] st = S_IDLE;
+    assign pk_on = st == S_PKW || st == S_PK0 || st == S_PK1 || st == S_PKC || st == S_PKD;
 
     always @(posedge clk) begin
         dreq_s    <= {dreq_s[1:0], dma_req_tgl};
@@ -161,7 +170,7 @@ module dma_win (
         end
         if (port_use) p_ram <= 1'b0;
         case (c_st)
-        2'd0: if (c_pend) begin c_pend <= 1'b0; c_st <= 2'd1; end
+        2'd0: if (c_pend && st != S_PKC && st != S_PKD) begin c_pend <= 1'b0; c_st <= 2'd1; end
         2'd1: if (dma_we) begin
                   dma_rdata <= 8'h00; dma_done_tgl <= ~dma_done_tgl; c_st <= 2'd0;
               end else
@@ -187,7 +196,7 @@ module dma_win (
         if (lk_go && !lk_busy) begin
             lk_busy <= 1'b1; lk_pend <= 1'b1;
             lk_a <= lk_req[15:0]; lk_c <= lk_req[17:16]; lk_real <= lk_req[18];
-            lk_done <= 1'b0; lk_hit <= 1'b0; lk_ext <= 1'b0; lk_rdone <= 1'b0; lk_refused <= 1'b0;
+            lk_done <= 1'b0; lk_hit <= 1'b0; lk_ext <= 1'b0; lk_rdone <= 1'b0; lk_refused <= 1'b0; lk_open <= 1'b0;
             lk_data <= 8'hFF;
         end
 
@@ -207,17 +216,35 @@ module dma_win (
                     end
                 end else begin
                     pk_cls <= lk_c;
+                    lk_to  <= 18'd0;
                     st <= S_PKW;
                 end
             end
-        S_PKW: st <= S_PK0;                 // pk_cls goes out (a clock for the model's decode)
+        S_PKW: begin                        // pk_cls goes out (a clock for the model's decode)
+            lk_to <= lk_to + 1'b1;
+            if (!lk_c[1])
+                st <= S_PK0;
+            else if (lk_to[13]) begin       // I/O: the UCI's answer never came (the bus stayed in $DE00-$DFFF)
+                lk_data <= 8'hFF; lk_hit <= 1'b1; lk_ext <= 1'b1;
+                lk_done <= 1'b1; lk_busy <= 1'b0;
+                st <= S_IDLE;
+            end else if (lk_to >= 18'd7 && !pk_wait)
+                st <= S_PK0;                // I/O: 8 clocks, so that every read view has seen the address
+        end
         S_PK0:                              // the model's answer
-            if (!pk_hit || cart_ext) begin
+            if (lk_c[1] && pk_cram && !cart_ext) begin
+                // the colour RAM: its port once the window's own colour RAM job is not using it
+                lk_data <= pk_data; lk_open <= pk_open;
+                if (c_st == 2'd0 && !c_pend) begin
+                    lk_cu <= 1'b1;
+                    st <= S_PKC;
+                end
+            end else if (!pk_hit || cart_ext) begin
                 lk_data <= 8'hFF; lk_hit <= pk_hit; lk_ext <= cart_ext;
                 lk_done <= 1'b1; lk_busy <= 1'b0;
                 st <= S_IDLE;
             end else if (!pk_mem) begin
-                lk_data <= pk_data; lk_hit <= 1'b1;
+                lk_data <= pk_data; lk_hit <= 1'b1; lk_open <= lk_c[1] && pk_open;
                 lk_done <= 1'b1; lk_busy <= 1'b0;
                 st <= S_IDLE;
             end else begin
@@ -231,6 +258,15 @@ module dma_win (
                 lk_done <= 1'b1; lk_busy <= 1'b0;
                 st <= S_IDLE;
             end
+        S_PKC: begin                        // the colour RAM's address is out; its byte comes one clock later
+            lk_cu <= 1'b0;
+            st <= S_PKD;
+        end
+        S_PKD: begin
+            lk_data <= {lk_data[7:4], cram_rdata}; lk_hit <= 1'b1;
+            lk_done <= 1'b1; lk_busy <= 1'b0;
+            st <= S_IDLE;
+        end
         S_LKC: begin                        // the lens unit's bus cycle
             lk_to <= lk_to + 1'b1;
             if (cyc_done) begin

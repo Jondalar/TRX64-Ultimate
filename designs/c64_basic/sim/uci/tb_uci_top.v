@@ -23,7 +23,16 @@ module tb_uci_top (
     output wire [9:0]  pix_x,
     output wire [8:0]  pix_y,
     output reg  [31:0] ev_reads = 0,        // UCI register reads/writes the C64 made
-    output reg  [31:0] ev_writes = 0
+    output reg  [31:0] ev_writes = 0,
+    // U13: the machine's stop and the lens unit's look (dma_win's side, driven by the bench)
+    input  wire        halt_req,
+    output wire        halted,
+    input  wire [15:0] pk_addr,
+    input  wire  [1:0] pk_cls,
+    input  wire        pk_on,
+    output wire  [7:0] pk_data,
+    output wire        pk_ext,
+    output wire        pk_wait
 );
     wire [3:0] pix_color; wire [4:0] leds;
     wire [23:0] reu_cmd_addr; wire reu_cmd_we, reu_cmd_valid; wire [15:0] reu_wdata; wire [1:0] reu_wdata_we;
@@ -40,7 +49,7 @@ module tb_uci_top (
     c64_core c64 (
         .dbg_req(1'b1),            // T29: the outside port is wanted in every clock here
         .vmode(2'd0),                   // T40: PAL
-        .clk(clk), .gclk(gclk), .gate_ce(gate_ce), .rst(rst), .halt_req(1'b0), .halted(),
+        .clk(clk), .gclk(gclk), .gate_ce(gate_ce), .rst(rst), .halt_req(halt_req), .halted(halted),
         .snd_clk(clk), .snd_rst(rst), .audio_sample_en(1'b0),
         .clk2x(clk2x),
         .audio_l(audio_l), .audio_r(audio_r),
@@ -71,7 +80,8 @@ module tb_uci_top (
         .resume_phase(20'd0), .rp_set(1'b0),
         .cram_addr(10'd0), .cram_we(1'b0), .cram_wdata(4'd0), .cram_rdata(),
         .bus_addr(bus_addr), .io_ev(ev), .io_ev_addr(ev_addr), .io_ev_data(ev_data),
-        .io_ev_we(ev_we), .io_ev_io(ev_io), .io_oe(uci_oe), .io_dout(uci_dout), .io_irq(uci_irq)
+        .io_ev_we(ev_we), .io_ev_io(ev_io), .io_oe(uci_oe), .io_dout(uci_dout), .io_irq(uci_irq),
+        .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_on(pk_on), .pk_data(pk_data), .pk_ext(pk_ext), .pk_wait(pk_wait)
     );
 
     uci_flat uci (

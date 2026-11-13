@@ -95,6 +95,13 @@ Hexadecimal everywhere, `$` optional. Decimal: frame numbers, `del` numbers, ste
 | `r` | Registers, `$01`, vectors, cycle count |
 | `r a=42 x=.. pc=..` | Set registers (while paused) |
 
+**Reading I/O.** `m`, `d` and `io` show `$D000-$DFFF` as a CPU read would return it at this moment: the
+VIC with the turbo registers (`$D030`, `$D031`), the SIDs, the colour RAM, the CIAs, the REU, the cartridge,
+Ultimate Audio and the command interface. Reading changes nothing: `$DC0D` keeps its flags, `$D01E` its
+collisions, and the machine does not move on. `--` marks what cannot be read without a bus cycle: a SID chip
+in a socket and a cartridge on the real port; `sidefx on` reads those with a real bus cycle, side effects
+included. Bits no chip drives (the colour RAM's high nibble, unused addresses) show the bus's last value.
+
 **Breakpoints and observers**
 
 | Command | Effect |
@@ -107,6 +114,10 @@ Hexadecimal everywhere, `$` optional. Decimal: frame numbers, `del` numbers, ste
 
 At most two observers on loads, stores or raster lines can be on at once (two hardware watch
 units).
+
+While an execution breakpoint, an observer, a raster stop or a step is set, the turbo runs at 1 MHz: the
+monitor stops at exact points only at normal speed. `bk clear`, `obs <name> del` and `rb -` give the turbo
+back; they stay set after `x` and `/quit`.
 
 **Rewind** (the Timewarp ring, [7.](07-timewarp.md))
 

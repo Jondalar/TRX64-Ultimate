@@ -35,6 +35,7 @@
 
 // CAPS3 (bitstreams without the byte read 0, Gideon's too; TRX64-Ultimate docs/specs/T25.5-resid8-menus.md)
 #define TRX_CAPS3_RESID8   0x01 // b0: the SID is the 8-SID reDIP (reSID8) with the filter control registers below
+#define TRX_CAPS3_IOLOOK   0x02 // b1: the lens unit's look (LK_REQ class 2/3) covers the whole I/O page (U13)
 
 // reSID8 filter control, page 0 0x040-0x04B (engine 1 / 2). Reset values (Auto, 245, -780) are the original reDIP.
 #define TRX_RS8_FCSEL(u)   (TRX_IO_BASE + 0x040 + (u))        // b1:0 0 the chip model's own filter, 1 own 6581 curve, 2 own 8580, 3 reserved (acts as 2)

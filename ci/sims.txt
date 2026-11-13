@@ -26,7 +26,9 @@
 2|flash_boot|900|sh designs/c64_basic/sim/flash_boot/run.sh
 1|uci|600|sh designs/c64_basic/sim/uci/run.sh
 1|dbgsess|1200|sh designs/c64_basic/sim/dbgsess/run.sh
-2|statebus|1800|cd designs/c64_basic/sim/statebus && JOBS=3 sh build.sh && cd build/run && ../tb_statebus boot ../tb.state && ../tb_statebus run ../tb.state && echo PASS
+2|statebus|1800|cd designs/c64_basic/sim/statebus && JOBS=3 sh build.sh && cd build/run && ../tb_statebus boot ../tb.state && ../tb_statebus run ../tb.state && ../tb_statebus look ../tb.state && echo PASS
+# U13: the UCI on the real 6510 (c64_core), and the lens unit's look at it, stopped and running
+2|uci_core|1800|cd designs/c64_basic/sim/uci && JOBS=3 sh build_core.sh && cd build/run && ../tb_uci_core
 2|ultsys|900|sh designs/c64_basic/sim/ultsys/run.sh
 1|dma_bus|600|sh designs/c64_basic/sim/dma_bus/run.sh
 1|eth|900|sh designs/c64_basic/sim/eth/run.sh

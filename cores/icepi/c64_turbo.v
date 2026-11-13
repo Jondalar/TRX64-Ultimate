@@ -106,6 +106,9 @@ module c64_turbo #(
   input  wire        nw_sel,         // the arbiter selects the VIC's page for a CPU write in this half
   output wire        tr_oe,          // a read of a turbo register at normal speed
   output wire  [7:0] tr_dout,
+  input  wire [15:0] lk_a,           // U13: the monitor's look: a read of lk_a now, from the same function
+  output wire        lk_hit,
+  output wire  [7:0] lk_dout,
   // c64_mem port B
   output wire [15:0] tb_addr,
   output wire [14:0] tb_raddr,
@@ -194,9 +197,7 @@ module c64_turbo #(
     wire        t_pg0 = ta[11:8] == 4'h0;
     wire        m_d030 = ta[5:0] == 6'h30, m_d031 = ta[5:0] == 6'h31;
     wire        m_d07a = ta[6] && ta[5:0] == 6'h3A, m_d07b = ta[6] && ta[5:0] == 6'h3B;
-    wire        m_d0bc = ta[5:0] == 6'h3C;
-    // the registers (reads below: $D0BD-$D0BF read $FF like the VIC)
-    wire        a_treg = m_d030 || m_d031 || m_d07a || m_d07b || m_d0bc;
+    // (reads, $D0BC included: treg() below; $D0BD-$D0BF read $FF like the VIC)
     wire        tw_n   = pn && !tmode && nw_sel && we_a;     // normal speed, snooped
     // (turbo: cls_treg below)
     wire        tw_t;
@@ -237,16 +238,25 @@ module c64_turbo #(
     // anything), the enable word, $D030 bit 0, $D031, the hold in units of 256 PHI2 cycles
     assign st_pack = {hold[22:8], d031, d030_b0, regs_en, prefer[7], prefer[3:0]};
 
-    // reads
-    reg [7:0] treg_rd;
-    always @(*) begin
-        treg_rd = 8'hFF;
-        if (m_d031) treg_rd = regs_en[0] ? d031 : 8'hFF;
-        else if (m_d030) treg_rd = regs_en[2] ? {7'h7F, d030_b0} : 8'hFF;
-        else if (m_d0bc) treg_rd = regs_en[1] ? 8'h01 : 8'hFF;
-    end
-    assign tr_oe   = t_pg0 && a_treg && !we_a && !tmode;
+    // reads: {a turbo register answers a, the byte}, for the CPU (ta) and the monitor's look (lk_a, U13)
+    function [8:0] treg(input [15:0] a, input [2:0] en, input [7:0] r031, input b030);
+        reg [7:0] v;
+        begin
+            v = 8'hFF;
+            if (a[5:0] == 6'h31) v = en[0] ? r031 : 8'hFF;
+            else if (a[5:0] == 6'h30) v = en[2] ? {7'h7F, b030} : 8'hFF;
+            else if (a[5:0] == 6'h3C) v = en[1] ? 8'h01 : 8'hFF;
+            treg = {a[11:8] == 4'h0 && (a[5:0] == 6'h30 || a[5:0] == 6'h31 || a[5:0] == 6'h3C ||
+                                        (a[6] && (a[5:0] == 6'h3A || a[5:0] == 6'h3B))), v};
+        end
+    endfunction
+    wire [8:0] tr_cpu = treg(ta, regs_en, d031, d030_b0);
+    wire [7:0] treg_rd = tr_cpu[7:0];
+    assign tr_oe   = tr_cpu[8] && !we_a && !tmode;
     assign tr_dout = treg_rd;
+    wire [8:0] tr_look = treg(lk_a, regs_en, d031, d030_b0);
+    assign lk_hit  = tr_look[8];
+    assign lk_dout = tr_look[7:0];
 
     // ---- the speed in force (§12.1) ------------------------------------------------
     reg  [3:0] idx;

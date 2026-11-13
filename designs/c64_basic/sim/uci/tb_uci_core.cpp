@@ -101,10 +101,52 @@ static int find_row(const char *prefix)
     return -1;
 }
 
+// ---- U13: the lens unit's look at the UCI (c64_core's side of it, driven as dma_win drives it) -------
+// pk_on with class 3 asks the I/O page by address; the UCI answers its slot bus address, which the look takes
+// over while the bus is elsewhere or the machine is halted (pk_wait until the answer has come through)
+static int look(uint16_t a, bool *ext)
+{
+    top->pk_addr = a; top->pk_cls = 3; top->pk_on = 1;
+    int n = 0;
+    while ((n < 8 || top->pk_wait) && n < 20000) { clk_tick(); n++; }
+    int v = top->pk_wait ? -1 : top->pk_data;
+    if (ext) *ext = top->pk_ext;
+    top->pk_on = 0;
+    clk_tick();
+    return v;
+}
+
 // ---- the app: command_intf.cc's ISR and task, DOS identify only -------------------
 static const char IDENT[] = "ULTIMATE-II DOS V1.2";
 static const char STAT[] = "00,OK";
 static int app_cmds;
+static int look_v[4];
+static bool looked;
+// U13: the machine stops (the program is frozen by its push), the app validates the response, the look reads
+// $DF1C-$DF1F twice: response and status there, their first bytes, no UCI read made, nothing moved
+static void look_halted()
+{
+    top->halt_req = 1;
+    for (int n = 0; n < 200000 && !top->halted; n++) clk_tick();
+    CHECK(top->halted, "U13: the machine did not stop");
+}
+static void look_check()
+{
+    uint32_t r0 = top->ev_reads;
+    int w[4];
+    bool x = false, xa = false;
+    for (int i = 0; i < 4; i++) { look_v[i] = look(0xDF1C + i, &x); xa |= x; }
+    for (int i = 0; i < 4; i++) w[i] = look(0xDF1C + i, &x);
+    printf("U13 look, halted: $DF1C-$DF1F %02X %02X %02X %02X\n", look_v[0], look_v[1], look_v[2], look_v[3]);
+    for (int i = 0; i < 4; i++) CHECK(look_v[i] == w[i] && look_v[i] >= 0, "U13: $DF%02X looked at twice: %d %d", 0x1C + i, look_v[i], w[i]);
+    CHECK(!xa, "U13: the look says ext");
+    CHECK(top->ev_reads == r0, "U13: the look made %u UCI reads", top->ev_reads - r0);
+    CHECK((look_v[0] & 0xC0) == 0xC0, "U13: response and status not there to look at (%02X)", look_v[0]);
+    CHECK(look_v[2] == IDENT[0] && look_v[3] == STAT[0], "U13: the first response and status bytes");
+    CHECK((look_v[1] & 0x7F) == 0x49, "U13: $DF1D, the identification");
+    looked = true;
+    top->halt_req = 0;
+}
 static void app_service()
 {
     if (!top->io_irq) return;
@@ -121,8 +163,10 @@ static void app_service()
         io_write(0xD, 0);
         io_write(0xC, strlen(IDENT));
         io_write(0xA, strlen(STAT));
+        look_halted();
         io_write(2, 0x10);                              // VALIDATE_LAST
         io_write(5, 0x01);
+        look_check();
     }
     if (flags & 0x06) io_write(5, flags & 0x06);
 }
@@ -192,6 +236,15 @@ int main(int argc, char **argv)
     CHECK(stat == STAT, "status");
     CHECK((peek(0xC1F4) & 0x30) == 0x00, "not idle after accept");
     CHECK(app_cmds == 1, "app saw %d commands", app_cmds);
+    CHECK(looked, "U13: no look");
+    {   // U13: the look while the machine runs (the program loops at $C04F, the bus is not in $DE00-$DFFF)
+        bool x = false;
+        uint32_t r0 = top->ev_reads;
+        int v = look(0xDF1D, &x);
+        printf("U13 look, running: $DF1D %02X\n", v);
+        CHECK(!top->halted && (v & 0x7F) == 0x49 && !x, "U13: the look of $DF1D while running");
+        CHECK(top->ev_reads == r0, "U13: the look while running made a UCI read");
+    }
     printf("freeze held the CPU for %llu clocks\n", (unsigned long long)freeze_clks);
     CHECK(freeze_seen && !top->freeze, "freeze");
     // the program's accesses: 2 command bytes, push, accept = 4 writes;

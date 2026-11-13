@@ -5,7 +5,7 @@
 //   RAM         the DMA window with C64_DMA_MEMONLY (no bus cycle)
 //   ROM block   the firmware's BASIC/KERNAL/CHAR apertures
 //   drive A     its 64 K image in DDR2 (drive_unit.vhd g_ram_base), written through by the drive
-//   lens unit   page 5: LK_REQ (+020), LK_RES (+024); CAPS2 b4
+//   lens unit   page 5: LK_REQ (+020), LK_RES (+024); CAPS2 b4; its look covers the I/O page with CAPS3 b1 (U13)
 
 #include "trx_lens_fw.h"
 #include "trx_lens.h"
@@ -97,7 +97,7 @@ static bool has_lens_unit(void)
     return (trx_io_caps() != 0) && ((ioRead8(TRX_CAPS2) & TRX_CAPS2_LENS) != 0);
 }
 
-static lens_hw_t s_hw = { fw_sb_block, fw_ram_read, fw_rom, fw_drive_peek, fw_lk, 0, 0 };
+static lens_hw_t s_hw = { fw_sb_block, fw_ram_read, fw_rom, fw_drive_peek, fw_lk, 0, 0, 0 };
 
 bool trx_lens_present(void) { return (trx_io_caps() & TRX_CAPS_STATEBUS) != 0; }
 
@@ -129,6 +129,7 @@ bool trx_lens_needs_pause(const char *lens)
 int trx_lens_read(const char *lens, uint16_t addr, uint8_t *buffer, uint32_t len, bool sidefx)
 {
     s_hw.lk = has_lens_unit() ? fw_lk : 0;
+    s_hw.io_look = (trx_io_caps3() & TRX_CAPS3_IOLOOK) != 0;
     uint32_t gate = 0;
     bool set_pause = s_hw.lk && trx_lens_needs_pause(lens) && C64_STOP;
     if (set_pause) {

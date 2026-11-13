@@ -242,7 +242,8 @@ module c64_core #(
     input  wire       cram_we,
     input  wire [3:0] cram_wdata,
     output wire [3:0] cram_rdata,
-    // the UCI's slot side (uci_unit.vhd, T28; clk): the bus address now;
+    // the UCI's slot side (uci_unit.vhd, T28; clk): the bus address now (or the lens unit's look address
+    // while the bus is elsewhere, U13);
     // io_ev pulses one clock after each phi2 falling edge with that edge's
     // address, data, direction and whether it was a real access to
     // $DE00-$DFFF with I/O mapped; a read takes io_dout while io_oe (before
@@ -321,7 +322,16 @@ module c64_core #(
     output wire       pk_mem,
     output wire [23:0] pk_maddr,
     output wire [7:0] pk_data,
-    output wire       pk_ext               // the real expansion port serves this read (no look)
+    output wire       pk_ext,              // the real expansion port serves this read (no look)
+    // U13: classes 2 and 3 ask the whole I/O page by address: the device the arbiter's decode picks for a read of
+    // pk_addr with I/O mapped, and its read view (c64_top, the cartridge, our own responder). pk_ext then: no read view
+    // without a bus cycle (a socket chip, the real port, the reDIP build's SID). pk_on while the lens unit's look runs;
+    // pk_cram: the low nibble is the colour RAM's (dma_win reads it through its port); pk_open: bits of pk_data are
+    // the open bus; pk_wait: the UCI's answer for pk_addr is not there yet
+    input  wire       pk_on,
+    output wire       pk_cram,
+    output wire       pk_open,
+    output wire       pk_wait
 );
     wire [23:0] mem_cmd_addr;
     wire        mem_cmd_we, mem_cmd_valid, mem_cmd_ready;
@@ -388,8 +398,15 @@ module c64_core #(
     reg  [383:0] g_cia1 = 384'd0, g_cia2 = 384'd0;
     wire  [23:0] l_port;
     wire   [2:0] l_cart;
-    wire         pk_reu, c_pk_hit, c_pk_mem;   // the cartridge look (pk_*)
-    wire   [7:0] pk_reu_dout, c_pk_data;
+    wire         c_pk_hit, c_pk_mem;           // the cartridge look (pk_*)
+    wire   [7:0] c_pk_data, c_pk_mask;
+    // U13: the I/O look from c64_top (its device codes are c64_bus_arbiter.v io_decode()'s)
+    wire         io_look = pk_cls[1];
+    wire   [1:0] c_pk_cls = io_look ? {1'b1, pk_addr[8]} : pk_cls;   // the cartridge: IO1 or IO2 by the address
+    wire   [3:0] lk_dev;
+    wire   [1:0] lk_sock;
+    wire         lk_xsel, lk_open, lk_na;
+    wire   [7:0] lk_last, lk_data;
     wire  [15:0] l_bank;
     wire         t_a, t_c, t_k;
     assign wa_we = ce && t_a;
@@ -466,7 +483,16 @@ module c64_core #(
         if (rst) begin pos_hold <= 1'b0; pos_arm <= 1'b0; sb_ldarm <= 5'd0; end
     end
     // the UCI's bus events: the edge that ends a CPU half (ce: gclk takes it)
-    assign bus_addr = xc_addr;
+    // U13: the UCI answers the slot bus address (uci_unit.vhd), its response and status through a pointer, so the look
+    // reads it there: while the look asks $DE00-$DFFF its address goes to the UCI whenever the bus master's is not in
+    // $DE00-$DFFF (a CPU or DMA read takes the UCI's byte only for an access there) or the machine is halted. The UCI
+    // registers its answer twice: it counts after 4 clocks of that.
+    wire       uci_sub = pk_on && io_look && pk_addr[15:9] == 7'b1101111 &&
+                         (halted_r || xc_addr[15:9] != 7'b1101111);
+    assign bus_addr = uci_sub ? pk_addr : xc_addr;
+    reg  [2:0] sub_n = 3'd0;
+    always @(posedge clk) sub_n <= !uci_sub ? 3'd0 : sub_n == 3'd7 ? 3'd7 : sub_n + 3'd1;
+    wire       uci_ok = sub_n >= 3'd4;
     always @(posedge clk) begin
         io_ev <= ce && xc_phi2_n;
         d7ff_ev <= ce && xc_phi2_n && x_dbg_we;
@@ -499,13 +525,14 @@ module c64_core #(
     assign reu_cmd_valid = g_reu_valid && ce;
 
     // T25.6: the Ultimate Audio sampler on the slot bus ($DF20-$DFFF), next to the UCI (or-ed above)
-    wire        smp_oe, smp_irq;
-    wire  [7:0] smp_dout;
+    wire        smp_oe, smp_irq, smp_l_oe;
+    wire  [7:0] smp_dout, smp_l_dout;
     wire signed [22:0] smp_l, smp_r;
     trx_sampler smp (
         .clk(clk), .clk2x(clk2x), .rst(rst), .vmode(vm), .c64_en(smp_en),
         .bus_addr(xc_addr), .io_ev(io_ev), .io_ev_addr(io_ev_addr), .io_ev_data(io_ev_data),
         .io_ev_we(io_ev_we), .io_ev_io(io_ev_io), .oe(smp_oe), .dout(smp_dout), .irq(smp_irq),
+        .la(pk_addr), .l_oe(smp_l_oe), .l_dout(smp_l_dout),
         .a_tgl(smp_a_tgl), .a_we(smp_a_we), .a_addr(smp_a_addr), .a_wdata(smp_a_wdata),
         .a_rs_tgl(smp_a_rs_tgl), .a_rdata(smp_a_rdata),
         .f_req_tgl(smp_f_req_tgl), .f_addr(smp_f_addr), .f_done_tgl(smp_f_done_tgl), .f_data(smp_f_data),
@@ -609,7 +636,8 @@ module c64_core #(
         .sb_ld_cia2(sb_ldarm[4]), .sb_stg_cia2(g_cia2[362:0]), .sb_cur_cia2(l_cia2f),
         .sb_vic_snap_ok(l_vok), .sb_vic_access(l_vacc), .sb_reu_busy(l_reu),
         .sb_cpu_port(l_port), .sb_cart(l_cart),
-        .pk_reu_addr(pk_addr[3:0]), .pk_reu(pk_reu), .pk_reu_dout(pk_reu_dout),
+                .lk_addr(pk_addr), .lk_dev(lk_dev), .lk_sock(lk_sock), .lk_xsel(lk_xsel), .lk_last(lk_last),
+        .lk_data(lk_data), .lk_open(lk_open), .lk_na(lk_na),
         .cram_clk(clk), .cram_addr(cram_addr), .cram_we(cram_we), .cram_wdata(cram_wdata),
         .cram_rdata(cram_rdata),
         .cram_tap_we(t_c), .cram_tap_addr(wc_addr), .cram_tap_din(wc_new), .cram_tap_old(wc_old)
@@ -634,16 +662,54 @@ module c64_core #(
         .ee_clk(cart_ee_clk), .ee_addr(cart_ee_addr), .ee_we(cart_ee_we), .ee_wdata(cart_ee_wdata),
         .ee_rdata(cart_ee_rdata), .freeze(freeze_btn),
         .wtap(t_k), .wtap_addr(wk_addr), .wtap_data(wk_new),
-        .pk_addr(pk_addr), .pk_cls(pk_cls), .pk_hit(c_pk_hit), .pk_mem(c_pk_mem), .pk_maddr(pk_maddr),
-        .pk_data(c_pk_data)
+        .pk_addr(pk_addr), .pk_cls(c_pk_cls), .pk_hit(c_pk_hit), .pk_mem(c_pk_mem), .pk_maddr(pk_maddr),
+        .pk_data(c_pk_data), .pk_mask(c_pk_mask)
     );
-    // the look: IO2 goes to the REU where a read would, else to the cartridge
-    wire       pk_to_reu = pk_cls == 2'd3 && pk_reu;
-    assign pk_hit  = pk_to_reu || c_pk_hit;
-    assign pk_mem  = !pk_to_reu && c_pk_mem;
-    assign pk_data = pk_to_reu ? pk_reu_dout : c_pk_data;
+
+    // ---- the look ------------------------------------------------------------------------------------------------
+    // ROML/ROMH (classes 0, 1): the cartridge's, or the real port's (no look). The I/O page (classes 2, 3, U13): the
+    // device the arbiter's io_decode() picks, in the arbiter's priority: the colour RAM before the I/O mux, then the
+    // VIC (turbo registers included), a socket chip, the SID, the CIAs, the REU and the cartridge (c64_top's lk_data
+    // for its own devices), and over $DE00-$DFFF without a socket our own responder (sampler, UCI) last.
+    reg        lk_x, lk_m, lk_c, lk_o, lk_w;
+    reg  [7:0] lk_d;
+    always @(*) begin
+        lk_x = 1'b0; lk_m = 1'b0; lk_c = 1'b0; lk_w = 1'b0;
+        lk_o = lk_open; lk_d = lk_data;
+        if (lk_dev == 4'd3)
+            lk_c = 1'b1;                                    // colour RAM
+        else if (lk_dev == 4'd1)
+            ;                                               // VIC
+        else if (lk_sock != 2'b00 || lk_na)
+            lk_x = 1'b1;                                    // a socket chip, or no read view here
+        else if (lk_dev == 4'd6 || lk_dev == 4'd7) begin    // the cartridge
+            if (pk_addr[8] ? s_io2_rd : s_io1_rd)
+                lk_x = 1'b1;                                // the real port's
+            else if (c_pk_hit && c_pk_mem)
+                lk_m = 1'b1;                                // its RAM: dma_win reads DDR2 at pk_maddr
+            else if (c_pk_hit) begin
+                lk_o = c_pk_mask != 8'hFF;                  // the EEPROM's DO bit drives one bit
+                lk_d = (c_pk_data & c_pk_mask) | (lk_last & ~c_pk_mask);
+            end                                             // else the open bus (lk_data)
+        end
+        if (lk_xsel) begin
+            if (smp_l_oe) begin
+                lk_x = 1'b0; lk_m = 1'b0; lk_o = 1'b0; lk_d = smp_l_dout;
+            end else if (!uci_ok)
+                lk_w = 1'b1;
+            else if (io_oe) begin
+                lk_x = 1'b0; lk_m = 1'b0; lk_o = 1'b0; lk_d = io_dout;
+            end
+        end
+    end
+    assign pk_hit  = io_look ? 1'b1 : c_pk_hit;
+    assign pk_mem  = io_look ? lk_m : c_pk_mem;
+    assign pk_data = io_look ? lk_d : c_pk_data;
     // a cartridge on the real port cannot be read without a bus cycle
-    assign pk_ext  = pk_cls[1] ? (pk_cls[0] ? s_io2_rd : s_io1_rd) : s_rom;
+    assign pk_ext  = io_look ? lk_x : s_rom;
+    assign pk_cram = io_look && lk_c;
+    assign pk_open = io_look && lk_o;
+    assign pk_wait = io_look && lk_w;
 
     // the real expansion port: ROML/ROMH/IO1/IO2 reads it serves, and reads of a SID socket (T37), take its data
     assign port_rd = ((!xc_roml || !xc_romh) && s_rom) || (!xc_io1 && s_io1_rd) || (!xc_io2 && s_io2_rd) ||

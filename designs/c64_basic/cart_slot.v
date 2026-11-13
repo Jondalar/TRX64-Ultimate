@@ -116,7 +116,8 @@ module cart_slot (
     output wire        pk_hit,
     output wire        pk_mem,
     output wire [23:0] pk_maddr,
-    output wire  [7:0] pk_data
+    output wire  [7:0] pk_data,
+    output wire  [7:0] pk_mask             // U13: the bits of pk_data the cartridge drives (the rest is the open bus)
 );
     // ---- register toggles into this clock --------------------------------------
     (* ASYNC_REG = "TRUE" *) reg [2:0] kill_s = 3'b000, force_s = 3'b000, ack_s = 3'b000;
@@ -191,7 +192,7 @@ module cart_slot (
         .ram_wdata_own(c_ram_own), .ram_ready(1'b1), .ram_dout(ram_byte), .ram_select(c_ram_sel),
         .st_bank(st_bank),
         .pk_addr(pk_addr), .pk_roml(pk_cls == 2'd0), .pk_romh(pk_cls == 2'd1), .pk_io1(pk_cls == 2'd2),
-        .pk_io2(pk_cls == 2'd3), .pk_io_sel(pk_io_sel), .pk_io_dout(pk_data), .pk_rom_sel(pk_rom_sel),
+        .pk_io2(pk_cls == 2'd3), .pk_io_sel(pk_io_sel), .pk_io_dout(pk_data), .pk_io_mask(pk_mask), .pk_rom_sel(pk_rom_sel),
         .pk_rom_addr(pk_rom_addr), .pk_ram_sel(pk_ram_sel), .pk_ram_addr(pk_ram_addr)
     );
 

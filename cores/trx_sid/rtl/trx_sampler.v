@@ -38,6 +38,10 @@ module trx_sampler (
     output reg         oe = 1'b0,
     output reg   [7:0] dout = 8'd0,
     output reg         irq = 1'b0,
+    // U13: the monitor's look: what a read of la would return now ({oe, dout} one clock late on the bus, at once here)
+    input  wire [15:0] la,
+    output wire        l_oe,
+    output wire  [7:0] l_dout,
 
     // the app (trx_io.v page 8): toggle handshake, address and data held until the answer toggles back
     input  wire        a_tgl,
@@ -64,14 +68,25 @@ localparam [7:0] VERSION = 8'h01;
 (* ASYNC_REG = "TRUE" *) reg [1:0] en_s = 2'b00;
 always @(posedge clk) en_s <= {en_s[0], c64_en};
 wire en = en_s[1];
-wire        rd_win = bus_addr[15:8] == 8'hDF && bus_addr[7:5] != 3'd0;
-wire  [2:0] rd_v   = bus_addr[7:5] - 3'd1;
 reg   [7:0] irq_pend = 8'd0;                // clk2x register, read here (a few ns of mux, a half-rate path)
+// a read of a: {the sampler answers, the byte}; the bus read and the monitor's look (U13) both take it from here
+function [8:0] rd_val(input [15:0] a, input e, input [7:0] ip);
+    reg [2:0] v;
+    begin
+        v = a[7:5] - 3'd1;
+        rd_val = {e && a[15:8] == 8'hDF && a[7:5] != 3'd0,
+                  a[4:0] == 5'd0 ? {7'd0, ip[v]} : a[4:0] == 5'd1 ? VERSION : 8'd0};
+    end
+endfunction
+wire  [8:0] rd_bus = rd_val(bus_addr, en, irq_pend);
 always @(posedge clk) begin
-    oe   <= en && rd_win;
-    dout <= bus_addr[4:0] == 5'd0 ? {7'd0, irq_pend[rd_v]} : bus_addr[4:0] == 5'd1 ? VERSION : 8'd0;
+    oe   <= rd_bus[8];
+    dout <= rd_bus[7:0];
     irq  <= en && (irq_pend != 8'd0);
 end
+wire  [8:0] rd_look = rd_val(la, en, irq_pend);
+assign l_oe   = rd_look[8];
+assign l_dout = rd_look[7:0];
 
 reg         tk_tgl = 1'b0, c_tgl = 1'b0;
 reg   [7:0] c_addr = 8'd0, c_data = 8'd0;

@@ -1118,7 +1118,7 @@ static void test_lens(void)
     F.game = 1;
     F.exrom = 0;
     uint8_t buf[4] = {9, 9, 9, 9};
-    CHECK(lens_read(&(lens_hw_t){hw_sb_block, hw_ram_read, hw_rom, hw_drive_peek, hw_lk, 0, 0}, "cart", 0x8000, buf, 4, 0) == 0);
+    CHECK(lens_read(&(lens_hw_t){hw_sb_block, hw_ram_read, hw_rom, hw_drive_peek, hw_lk, 0, 0, 0}, "cart", 0x8000, buf, 4, 0) == 0);
     CHECK(buf[0] == 1 && buf[1] == 2 && buf[3] == 4);
 
     /* the colour RAM: unknown without a bus cycle, read through the shadow session when one runs
@@ -1134,6 +1134,33 @@ static void test_lens(void)
     CHECK(mach_peek("io", 0xD400, 0) == -1);    /* SID: still unknown */
     F.session = 0;
     CHECK(mach_peek("io", 0xD805, 0) == -1);
+
+    /* U13: a bitstream whose look covers the I/O page (CAPS3 b1): every byte from the look, no bus cycle, the turbo
+     * register too; no read view (a socket chip) is unreadable without sidefx, a REAL cycle with it */
+    boot();
+    F.shut = 1;
+    F.has_lk = 1;
+    F.has_iolook = 1;
+    F.io_view[0x031] = 0x0E;
+    F.io_view[0x41B] = 0x99;
+    F.io_view[0x805] = 0xB7;
+    F.io_view[0xF1E] = 0x55;
+    F.io_ext[0x500] = 1;
+    F.cart_io[0x00] = 0x42;
+    mach_snapshot();
+    int bc3 = F.bus_cycles;
+    CHECK(mach_peek("io", 0xD031, 0) == 0x0E);
+    CHECK(mach_peek("io", 0xD41B, 0) == 0x99);
+    CHECK(mach_peek("io", 0xD805, 0) == 0xB7);
+    CHECK(mach_peek("io", 0xDF1E, 0) == 0x55);
+    CHECK(mach_peek("cpu", 0xD031, 0) == 0x0E); /* the PLA says I/O */
+    CHECK(F.bus_cycles == bc3);
+    CHECK(mach_peek("io", 0xD500, 0) == -1);    /* a socket chip: no read view */
+    CHECK(mach_peek("io", 0xD500, 1) == 0x42 && F.bus_cycles == bc3 + 1); /* sidefx: the bus cycle */
+    F.has_iolook = 0;
+    mach_snapshot();
+    CHECK(mach_peek("io", 0xD031, 0) == 0xFF);  /* an older bitstream: the state bus's VIC, $D030-$D03F $FF */
+    F.shut = 0;
 
     /* a debugger stop holds the machine without the menu's C64_STOP: the window's D page is open
      * (ultimate_sys, dbg_stop); without either the byte is unreadable and an I/O write is refused */
