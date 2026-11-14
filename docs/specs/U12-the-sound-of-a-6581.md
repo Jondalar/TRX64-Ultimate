@@ -1,10 +1,14 @@
 # U12 — The sound of a 6581: the filter's non-linearity, its dirt, and the bits for Mahoney
 
-**Status:** PROPOSED (2026-11-09). Nothing built; §5 has the questions that decide the scope.
+**Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a)). Built: D5 (`tb_wav`), the
+measuring instrument D1e (`filt_cmp`) and shape (a) in the model (D1f). Open: D1 (a) in the RTL, D3, D4; Q4.
+**Scope (Q1, Alex 2026-11-14):** U12 is D1 in shape (a) in the RTL, D3 and D4; D2 is part of D1 (a). D6 is
+[U14](../todo/U14.md), Q6 is [U15](../todo/U15.md), and the sampler's Q3 and Q5 belong to
+[T25.6](T25.6-sampler.md).
 **Repo:** TRX64-Ultimate (gateware: `cores/trx_sid/rtl/trx_sid_engine.v`; tables and model:
 `cores/trx_sid/model/`, `cores/trx_sid/mem/`; app: `software/io/audio/`, `software/u64/u64_config.cc`).
 **Number:** U12 (registry: the TODO table in `TODO.md`).
-**Milestone:** after the release U7-U11 are in (C64 Ultimate 0.2.x).
+**Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
 **Origin:** a review of our `trx_sid` RTL by Tony Bybell (`tbybell`), by e-mail to Alex, 2026-11-09,
 after his issue [#2](https://github.com/Jondalar/TRX64-Ultimate/issues/2) (which became
 [U11](U11-sampler-any-byte-address.md)). Alex, 2026-11-09: *"Cleanroom bleibt, aber: … dann eine
@@ -110,9 +114,9 @@ Scenario: Nothing that worked stops working
 |---|---|---|---|---|
 | S1 | P1 P3 | a 6581 tune sounds like one | `U12-6581` | board, ears |
 | S2 | P1 | the 6581 path matches libresidfp's 6581 filter per sample | `sid` bench vs the model | host |
-| S3 | P2 | the dirty guitar | `U12-DIRT` | board, ears |
+| S3 | P2 | the dirty guitar (D1 (a), D2 is part of it) | `U12-DIRT` | board, ears |
 | S4 | P4 | 7 bits or better, measured | `spur.py`-style measurement of a volume-register sample | host + board |
-| S5 | P5 | WL13 5/5, WL14 level checks | the two programs, GPZ's `sidcheck` | board |
+| S5 | P5 | WL13 5/5, WL14 level checks - **moved to [U14](../todo/U14.md)** | the two programs, GPZ's `sidcheck` | board |
 | S6 | — | **negative:** the 8580 path unchanged, F20 clean | the `sid` benches, `U12-F20` | host + board |
 | S7 | P6 | ours can be heard on a host against reSID | the C harness of D5 | host |
 
@@ -245,15 +249,22 @@ difference the way U7 reported dB, and the same sweeps F20 uses. The interpolate
 accepted when that error is below the 8580 path's own error against its model, and not before.
 `tb_wav` (D5) is for the ear afterwards, not for the proof.
 
-**D2 — Distortion is its own stage, switchable, and off until it has been heard.** It sits after the
-6581 path, per chip, so that a wrong fit cannot spoil the 8580 side or a 6581 that someone liked
-better without it. Mechanicus 2 and 3 are the listening test; F20 the stress test that it did not
-break the sweeps.
+**D2 — No distortion stage of its own: it is part of D1 (a).** The first draft put a switchable stage
+after the 6581 path. Reading libresidfp (D1b) showed there is no such stage: the dirt is the op-amp solves at
+the summing, mixing, volume and resonance nodes, and (a) is the first of them. Mechanicus 2 and 3 stay the
+listening test, now of D1 (a); F20 the stress test that it did not break the sweeps.
 
-**D3 — The chip model reaches the filter, and a 6581 powers up as a 6581.** `cfg_8580` picks the
-filter path as well as the waveform tables, and the curve RAM's power-up content becomes the curve
-that belongs to the configured model instead of `8580 Lo` for both. The seven curve selections stay:
-a user who wants a specific chip's cutoff keeps choosing it.
+**D3 — The chip model switches the filter (Q2 answered (A), Alex 2026-11-14,
+[ADR-0068](../adr/0068-ultisid-chip-model-switches-the-filter.md)).** UltiSID's menu item "Combined
+Waveforms" (6581/8580, default 6581, `u64_config.cc:470-471`) is the chip model in all but name: it is
+`cfg_8580` (`CFG_EMUSID*_WAVES`, the item reSID8 already calls "Chip Model"). It is renamed "Chip Model" and
+picks the waveform tables as today, the filter path (6581: the op-amp node of D1 (a); 8580: today's path, bit
+for bit) and, by default, the cutoff curve of that model; the curve RAM's power-up content follows the model
+too, instead of `8580 Lo` for both. The seven curve selections stay: a user who wants a specific chip's
+cutoff keeps choosing it. Today a UltiSID left at its defaults mixes 6581 waveforms with curve `8580 Lo`
+(the curve item's default 0) through the linear 8580 filter; after D3 it is a 6581. Open for the build: how
+"the model's curve by default" reaches a machine whose stored settings already hold `8580 Lo` - the value is
+an enum index, so a new entry goes at the end of the list, never at 0.
 
 **D4 — The DC offset becomes a number, not four steps.** Per chip, app-written like the curve, with
 the present four levels kept as presets so nothing changes for anyone who does not touch it. What it
@@ -300,7 +311,10 @@ that a test shows is then chased in the tables.
   (T25.1); the review confirms they are not the problem.
 - **`v78` of UltiSID, and any other HDL of Gideon's.** D6 of the clean room: declined, see §1.
 - **The sampler items of the same review.** They belong to T25.6 and U11, and §6 lists them so they
-  are not lost in an inbox.
+  are not lost in an inbox. Q3 and Q5 are answered and go to [T25.6](T25.6-sampler.md).
+- **The combined waveforms (D6)** are [U14](../todo/U14.md), and **register traces of real tunes (Q6)**
+  are [U15](../todo/U15.md) (Q1, Alex 2026-11-14): each is work of its own and neither is needed for a
+  UltiSID that sounds like a 6581.
 
 ## §5 Questions for Alex
 
@@ -332,13 +346,20 @@ because (a) is also the honest prerequisite of (b): the curve, its table and its
 in both. What I will not do is start (b) blind — the `fpga-gateware` rule is read, compare, plan,
 and the plan now says the thing might not route.
 
-**Q6 — Where do register traces of real tunes come from?** D5 plays a built-in demo and any log in
+**Q6 — moved to [U15](../todo/U15.md) (Q1, Alex 2026-11-14).**
+
+**Q6 (as asked) — Where do register traces of real tunes come from?** D5 plays a built-in demo and any log in
 `gen_logs.py`'s format, which is enough to compare two builds of ours. To hear *Meanwhile the
 Planet* or Mechanicus, something has to turn a `.sid` into that log: `siddump` (external, Tony's own
 route), VICE, or our own c64re runtime, which already stores bus events and is ours. The third is
 the only one that costs no new dependency, and none of the three is built.
 
-**Q5 — Is the IRQ status register a per-voice flag or a mask of all voices?** This decides whether
+**Q5 — answered 2026-11-14, Alex: the mask.** *"Maske, die anderen Programme sind fuer Gideons Cores,
+nicht meinen"*. The status byte of every voice window becomes the 8 bit pending mask of all voices;
+[ADR-0069](../adr/0069-ultimate-audio-status-is-the-mask-of-all-voices.md), built under
+[T25.6](T25.6-sampler.md). `U12-UA972` is expected to pass after that change.
+
+**Q5 (as asked) — Is the IRQ status register a per-voice flag or a mask of all voices?** This decides whether
 his test program can pass on our hardware at all, and it is the one thing in the review that is a
 defect rather than a missing feature.
 
@@ -360,20 +381,35 @@ defect rather than a missing feature.
   write it into T25.6 as a measured rule instead of a derived one. It is register-visible, so it is
   Alex's.
 
-**Q1 — How much of this is one piece of work?** D1 alone (a second filter topology, its benches and
+**Q1 — answered 2026-11-14, Alex: "Ja"** to: U12 is D1 (a) in the RTL, D3 and D4, with D2 part of D1 (a);
+D6 and Q6 get numbers of their own (U14, U15); Q5 is a correction in T25.6.
+
+**Q1 (as asked) — How much of this is one piece of work?** D1 alone (a second filter topology, its benches and
 its board test) is the size of U7. D1 + D3 is the smallest thing that makes a 6581 sound like one;
 D2 and D4 are each their own change with their own listening test; D5 is a tool. The spec is written
 so they can be built in that order, but "fertig" has to mean something, so it has to be said now
 which of them U12 is.
 
-**Q2 — Does the chip model switch the filter (D3), or stay a waveform setting?** Making it switch is
+**Q2 — answered 2026-11-14, Alex: (A).** The chip model switches the filter; see D3.
+
+**Q2 (as asked) — Does the chip model switch the filter (D3), or stay a waveform setting?** Making it switch is
 what the name promises and it changes what existing users hear without them asking. The alternative
 is a separate "Filter Model" item, which is honest and one more thing to explain.
 
-**Q3 — The sampler's late samples (§6).** The reviewer says dropping a late sample is permissible
+**Q3 — answered 2026-11-14, Alex: keep it** (*"So lassen und Doku korrigieren"*;
+[ADR-0070](../adr/0070-a-late-sample-is-caught-up-not-dropped.md)). The question as first asked was
+wrong about ours. Read in `trx_sampler.v`: the counter to the next sample keeps counting down while a voice
+waits (`:185`), a step that is not taken writes the counter back unchanged (`:207`, `:259`), and when it is
+taken the period is added to the old deadline, not to the moment the sample came. So the grid never shifts
+and the pitch does not drift - the "pacing slip" the reviewer warns of does not happen here. A sample more
+than a whole period late makes the voice catch up, the missed steps one after another, so no sample is lost
+and the position in the sample is right again; dropping would trade that short hurried moment for a missing
+sample, and only when DDR2 is held for more than a period (over 20 µs at 48 kHz). How often that happens on
+the board is not measured.
+
+**Q3 (as asked) — The sampler's late samples (§6).** The reviewer says dropping a late sample is permissible
 and better than letting the pacing slip. Ours waits, and a bench checks that it waits
-(`tb_sampler` section 8, *"the voice waits, no lost step"*). Changing it is audible on long samples;
-keeping it is audible when DDR2 is busy.
+(`tb_sampler` section 8, *"the voice waits, no lost step"*).
 
 **Q4 — The reply.** The reviewer offers `bybell@rocketmail.com` for files. Whether we answer, and
 with what, is Alex's.
@@ -401,7 +437,7 @@ Kept here so the e-mail's content survives in the repo, not to be built under th
   `.ext_io_irq(io_irq | smp_irq)`. His test program (`ua_972_check.prg`, posted in #972, sha256
   `bc1e0806c2e9b596216a1e50a0021aa404d95806920822fdd2293307d89c7439`) does exercise it, and reading
   its source turned up something bigger than the rate it was written for — **Q5**.
-- **Dropping late samples:** Q3.
+- **Dropping late samples:** Q3, answered: ours keeps waiting and catches up; its grid does not slip.
 - **The sub-cycle blend** (T25.6, 2026-10-08: 452 -> 639 LUT for -45 dB of step error) he suspects is
   overkill because the output resampler removes what it fixes. Worth measuring after the resampler
   rather than before, which no bench does today; if he is right, 187 LUT come back.
