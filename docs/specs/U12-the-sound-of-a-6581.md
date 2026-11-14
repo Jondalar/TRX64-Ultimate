@@ -1,7 +1,7 @@
 # U12 — The sound of a 6581: the filter's non-linearity, its dirt, and the bits for Mahoney
 
 **Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a)). Built: D5 (`tb_wav`), the
-measuring instrument D1e (`filt_cmp`) and shape (a) in the model (D1f). Open: D1 (a) in the RTL, D3, D4; Q4.
+measuring instrument D1e (`filt_cmp`) and shape (a) in the model (D1f). Open: D1 (a) in the RTL, D3, D4. The reply to the reviewer waits for a joint listening test (Q4).
 **Scope (Q1, Alex 2026-11-14):** U12 is D1 in shape (a) in the RTL, D3 and D4; D2 is part of D1 (a). D6 is
 [U14](../todo/U14.md), Q6 is [U15](../todo/U15.md), and the sampler's Q3 and Q5 belong to
 [T25.6](T25.6-sampler.md).
@@ -411,7 +411,11 @@ the board is not measured.
 and better than letting the pacing slip. Ours waits, and a bench checks that it waits
 (`tb_sampler` section 8, *"the voice waits, no lost step"*).
 
-**Q4 — The reply.** The reviewer offers `bybell@rocketmail.com` for files. Whether we answer, and
+**Q4 — answered 2026-11-14, Alex: not yet.** *"wir machen die Arbeit weiter und antworten erst wenn wir alles
+mal durchgehoert und getestet haben gemeinsam"* - no reply, by mail or on issue #2, until Alex and Claude have
+listened to and tested the result together on the board.
+
+**Q4 (as asked) — The reply.** The reviewer offers `bybell@rocketmail.com` for files. Whether we answer, and
 with what, is Alex's.
 
 ## §6 The same review on Ultimate Audio (T25.6 / U11)
