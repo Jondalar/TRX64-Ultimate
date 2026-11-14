@@ -78,6 +78,9 @@ int main(int argc, char** argv)
     if (!load_curve(std::string(argv[2]) + "/curve2.mem", curve[0]) ||
         !load_curve(std::string(argv[2]) + "/curve0.mem", curve[1]))
         return 2;
+    // U12 D1 (a): the 6581's mixing node, the same table the engine reads
+    static int32_t opamp[1024];
+    if (!trxsid::load_opamp((std::string(argv[1]) + "/sid_opamp6581.mem").c_str(), opamp)) return 2;
     std::vector<trxsid::Sid*> m;
     std::vector<std::deque<Op>> logs;
     for (int s = 0; s < 8; s++) {
@@ -87,6 +90,7 @@ int main(int argc, char** argv)
         x->cfg.res_high = u == 1;
         x->cfg.digi = u ? 3 : 2;
         x->cfg.curve = curve[u];
+        x->cfg.opamp = opamp;
         x->reset();
         m.push_back(x);
         logs.push_back(s < nsid ? load_log(argv[4 + s]) : std::deque<Op>());

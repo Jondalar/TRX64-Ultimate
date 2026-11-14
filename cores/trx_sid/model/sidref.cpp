@@ -4,6 +4,7 @@
 // (GPL-2.0-or-later) function by function; names in comments refer to it.
 #include "sidref.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -430,48 +431,32 @@ static int64_t sat(int64_t v, int bits)
 
 // Linear analog part (T25.1 §3.4/§3.5): DCA, voice DC (digis), Chamberlin SVF
 // with the app's cutoff curve, mixer and master volume.
-// U12 (a): the 6581's op-amp voltage transfer function, 33 points measured on a
-// chip marked MOS 6581R4AR 0687 14, from libresidfp's FilterModelConfig6581.cpp
-// (GPL-2.0-or-later; this file is GPL-3.0-or-later, which that permits). The
-// amplifier inverts, saturates at 10.31 V and 0.81 V, and has its working point
-// at 4.54 V where vi = vo. libresidfp solves it by Newton-Raphson at every
-// summing node; what is used here is the curve itself as a waveshaper around
-// that point, scaled so that small signals pass with unity gain - U12 §5 Q7 (a).
-static const double OPAMP[33][2] = {
-    { 0.81, 10.31}, { 2.40, 10.31}, { 2.60, 10.30}, { 2.70, 10.29}, { 2.80, 10.26},
-    { 2.90, 10.17}, { 3.00, 10.04}, { 3.10,  9.83}, { 3.20,  9.58}, { 3.30,  9.32},
-    { 3.50,  8.69}, { 3.70,  8.00}, { 4.00,  6.89}, { 4.40,  5.21}, { 4.54,  4.54},
-    { 4.60,  4.19}, { 4.80,  3.00}, { 4.90,  2.30}, { 4.95,  2.03}, { 5.00,  1.88},
-    { 5.05,  1.77}, { 5.10,  1.69}, { 5.20,  1.58}, { 5.40,  1.44}, { 5.60,  1.33},
-    { 5.80,  1.26}, { 6.00,  1.21}, { 6.40,  1.12}, { 7.00,  1.02}, { 7.50,  0.97},
-    { 8.50,  0.89}, {10.00,  0.81}, {10.31,  0.81},
-};
-static const double OPAMP_VI0 = 4.54;           // vi = vo
-static const double OPAMP_SLOPE0 = -5.1;        // (4.19 - 5.21) / (4.60 - 4.40)
-
-// vo for a vi, linear between the measured points (the gateware will carry a
-// resampled table; the shape is what matters here, not the interpolation order)
-static double opamp_vo(double vi)
+// U12 D1 (a): the 6581's mixing node is an op-amp, not an adder. The curve and
+// its scaling are in gen_opamp.py; here only the lookup, exactly as
+// trx_sid_engine.v does it: x clamped to 24 bits, 1024 knots 16384 apart,
+// linear between two knots with a floor shift.
+static int32_t opamp_lookup(const int32_t* t, int64_t mix)
 {
-    if (vi <= OPAMP[0][0]) return OPAMP[0][1];
-    for (int i = 1; i < 33; i++) {
-        if (vi <= OPAMP[i][0]) {
-            const double t = (vi - OPAMP[i - 1][0]) / (OPAMP[i][0] - OPAMP[i - 1][0]);
-            return OPAMP[i - 1][1] + t * (OPAMP[i][1] - OPAMP[i - 1][1]);
-        }
-    }
-    return OPAMP[32][1];
+    const int64_t x = sat(mix, 24);
+    const uint32_t u = uint32_t(x + (int64_t(1) << 23));
+    const unsigned i = u >> 14, i1 = i == 1023 ? 1023 : i + 1;
+    const int64_t f = u & 0x3fff;
+    return int32_t(t[i] + ((int64_t(t[i1] - t[i]) * f) >> 14));
 }
 
-// x in our DCA units (full scale about +-0x800 * 0xff), out in the same units:
-// identity for small x, the op-amp's own compression for large x. `drive` is how
-// many volts of the curve full scale reaches into.
-static int32_t opamp_shape(int32_t x, double drive)
+bool load_opamp(const char* path, int32_t* t)
 {
-    const double full = 2048.0 * 255.0;
-    const double vi = OPAMP_VI0 + (double)x * drive / full;
-    const double vo = opamp_vo(vi);
-    return (int32_t)((vo - OPAMP_VI0) / (OPAMP_SLOPE0 * drive / full));
+    FILE* fp = fopen(path, "r");
+    if (!fp) return false;
+    char line[128];
+    unsigned n = 0;
+    while (n < 1024 && fgets(line, sizeof line, fp)) {
+        if (line[0] == '/' || line[0] == '\n') continue;
+        const long v = strtol(line, nullptr, 16) & 0x3fffff;
+        t[n++] = int32_t(v & 0x200000 ? v - 0x400000 : v);
+    }
+    fclose(fp);
+    return n == 1024;
 }
 
 void Sid::analog()
@@ -512,10 +497,10 @@ void Sid::analog()
     vhp = int32_t(sat(((int64_t(vbp) * divq) >> 10) - vlp - vi, 25));
     int64_t vf = ((mode & 0x10) ? vlp : 0) + ((mode & 0x20) ? int64_t(vbp) : 0) + ((mode & 0x40) ? int64_t(vhp) : 0);
     int64_t mix = vnf + vf;
-    // U12 (a): the mixing node is an op-amp, not an adder. The 8580's is nearly
-    // linear and stays as it was; the 6581's is where its dirt comes from.
-    if (cfg.opamp_drive > 0.0 && !cfg.is8580)
-        mix = opamp_shape(int32_t(sat(mix, 25)), cfg.opamp_drive);
+    // U12 D1 (a): the 8580's mixing node is nearly linear and stays as it was;
+    // the 6581's is where its dirt comes from.
+    if (cfg.opamp && !cfg.is8580)
+        mix = opamp_lookup(cfg.opamp, mix);
     out = int32_t(sat((mix * int64_t(mode & 15)) >> 7, 20));
 }
 

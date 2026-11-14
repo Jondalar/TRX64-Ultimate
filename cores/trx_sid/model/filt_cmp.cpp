@@ -62,7 +62,12 @@ int main(int argc, char** argv)
     m.cfg.res_high = res_high != 0;
     m.cfg.digi = digi;
     if (!curve.empty()) m.cfg.curve = curve.data();
-    m.cfg.opamp_drive = getenv("OPAMP") ? atof(getenv("OPAMP")) : 0.0;
+    // U12 D1 (a): OPAMP=<table.mem> from gen_opamp.py (the drive is chosen there)
+    static int32_t opamp[1024];
+    if (getenv("OPAMP")) {
+        if (!trxsid::load_opamp(getenv("OPAMP"), opamp)) { fprintf(stderr, "cannot read %s\n", getenv("OPAMP")); return 1; }
+        m.cfg.opamp = opamp;
+    }
     m.cfg.wav_sat = getenv("WAVSAT") && atoi(getenv("WAVSAT")) != 0;
     m.cfg.voice_dc = getenv("VDC") ? atof(getenv("VDC")) : 0.0;
     m.reset();

@@ -75,9 +75,10 @@ Rules: a new decision gets the next number, a changed decision gets a new record
 | [0065](0065-sid-filter-fractional-bits.md) | The SID filter carries six fractional bits and rounds its shifts | 2026-11-07 | Accepted |  | U7, T25.4, ADR-0048 |
 | [0066](0066-milestones-end-with-the-multicore-split.md) | The milestones end with the MultiCore separation | 2026-11-07 | Accepted | supersedes 0003 | TODO.md, ADR-0052, ADR-0056 |
 | [0067](0067-c64re-format-2-binary-state-and-medium.md) | `.c64re` format 2: binary sections, the medium once | 2026-11-07 | Accepted | amends 0064 | U8, T66, T20 |
-| [0068](0068-ultisid-chip-model-switches-the-filter.md) | The UltiSID chip model switches the filter | 2026-11-14 | Accepted |  | U12 |
+| [0068](0068-ultisid-chip-model-switches-the-filter.md) | The UltiSID chip model switches the filter | 2026-11-14 | Accepted | superseded in part by 0071 | U12 |
 | [0069](0069-ultimate-audio-status-is-the-mask-of-all-voices.md) | The Ultimate Audio status byte is the pending mask of all voices | 2026-11-14 | Accepted |  | T25.6, U12 |
 | [0070](0070-a-late-sample-is-caught-up-not-dropped.md) | A late sample is caught up, not dropped | 2026-11-14 | Accepted |  | T25.6, U12 |
+| [0071](0071-u12-is-built-into-redip.md) | U12 is built into reDIP, the engine the release runs | 2026-11-14 | Accepted | supersedes 0068 in part | U12, T25.4, ADR-0001 |
 
 ## Decisions that were left where they are
 

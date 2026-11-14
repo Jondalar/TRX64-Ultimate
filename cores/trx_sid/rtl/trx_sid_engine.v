@@ -7,8 +7,10 @@
 // model); the benches in designs/c64_basic/sim/sid compare the two cycle by
 // cycle. Provenance as in the model: the digital voice follows libresidfp
 // (GPL-2.0-or-later), the filter reSID 1.0's linear 8580 path (GPL-2.0-or-
-// later); combined-waveform tables generated from libresidfp
-// (cores/trx_sid/mem). Written without UltiSID, reDIP or other HDL sources.
+// later), and for a 6581 the mixing node through the op-amp curve libresidfp
+// measured (U12 D1 (a), cores/trx_sid/model/gen_opamp.py); combined-waveform
+// tables generated from libresidfp (cores/trx_sid/mem). Written without
+// UltiSID, reDIP or other HDL sources.
 //
 // One pass per C64 cycle, started by `start` (one clock), on a clock of at
 // least 48 cycles per C64 cycle (the design target: 2 x dot4x, 64):
@@ -17,6 +19,7 @@
 //   t = 1..24   voice slot i = 3*sid + v enters (stage A at t = 1 + i)
 //   t = i+9     voice i written back; done for all at t = 32
 //   t = 12+4s   filter, mixer and bus value of SID s (4 clocks), done at t = 44
+//               (the samples follow three clocks later: the 6581's mixing node)
 // Read-back (OSC3, ENV3, bus value per SID) is valid from t = 44 to the next
 // start, so a CPU read in the C64 cycle that a pass runs in sees that pass.
 //
@@ -64,7 +67,7 @@ module trx_sid_engine #(
     output reg         smp_valid,
     output reg   [2:0] smp_sid,
     output reg  signed [19:0] smp_data,
-    output reg         sum_valid,           // one clock at t = 44
+    output reg         sum_valid,           // one clock, three clocks after the last SID's state write-back
     output reg  signed [19:0] sum_u0,       // SIDs 0-3, saturated
     output reg  signed [19:0] sum_u1,       // SIDs 4-7
     output wire        busy,
@@ -256,6 +259,10 @@ end
 // filter curve: 2048 x 16 with byte writes (one RAMB36)
 reg [15:0] cv [0:2047];
 initial $readmemh({MEMDIR, "/sid_curve_init.mem"}, cv);
+// U12 D1 (a): the 6581's mixing node, 1024 knots x 22 bit (gen_opamp.py), read at two neighbouring knots at once
+// (a dual-port ROM, one RAMB36)
+reg [21:0] oa [0:1023];
+initial $readmemh({MEMDIR, "/sid_opamp6581.mem"}, oa);
 always @(posedge cv_clk)
     if (cv_we) begin
         if (cv_addr[0]) cv[cv_addr[11:1]][15:8] <= cv_wdata;
@@ -919,7 +926,7 @@ always @(*) begin
     end
 end
 // stage registers: a name ending in k holds the SID that is in stage Fk
-reg  [8:1]  fv = 8'd0;
+reg  [11:1] fv = 11'd0;
 reg  [2:0]  fs1, fs2, fs3, fs4, fs5, fs6, fs7, fs8;
 reg  signed [22:0] fvi1, fvi2, fvi3, fvi4, fvi5;
 reg  signed [22:0] fvnf1, fvnf2, fvnf3, fvnf4, fvnf5, fvnf6;
@@ -931,13 +938,32 @@ reg  [27:0] fbs1, fbs2, fbs3, fbs4, fbs5, fbs6, fbs7, fbs8;
 reg  signed [42:0] m1, m2, m3;
 reg  signed [24:0] nhp5, nbp3, nlp3, nbp4, nlp4, nbp5, nlp5, nbp6, nlp6, nhp6, nbp7, nlp7, nhp7, nbp8, nlp8, nhp8;
 reg  signed [27:0] mix6;
-reg  signed [31:0] mv7;
-reg  signed [19:0] out8;
 wire signed [33:0] u_vhp = (m3 >>> 10) - nlp4 - fvi4;
 wire signed [26:0] h_vf  = (fmv5[4] ? nlp5 : 25'sd0) + (fmv5[5] ? nbp5 : 25'sd0) + (fmv5[6] ? nhp5 : 25'sd0);
-wire signed [24:0] out7  = mv7 >>> 7;
+// U12 D1 (a): the mixing node, F7..F9, then the volume (F10) and the saturation (F11). A 6581 goes through the
+// op-amp table, an 8580 bypasses it with the same latency, bit for bit what it was (ADR-0068). The filter state and
+// the bus value are written back at F8 as before; only the samples come three clocks later.
+// x clamped to 24 bits, u = x + 2^23: knot u[23:14], fraction u[13:0] (sidref.cpp opamp_lookup)
+wire signed [23:0] ox6  = mix6 > 28'sh07fffff ? 24'sh7fffff : mix6 < -28'sh0800000 ? -24'sh800000 : mix6[23:0];
+wire        [9:0]  oi6  = {~ox6[23], ox6[22:14]};
+wire        [9:0]  oi6n = oi6 == 10'h3ff ? 10'h3ff : oi6 + 10'd1;
+reg  signed [21:0] oy0_7, oy1_7, oy0_8;
+reg         [13:0] of7;
+reg  signed [37:0] om8;
+reg  signed [23:0] oy9;
+reg  signed [27:0] omx7, omx8, omx9;
+reg                osh7, osh8, osh9;
+reg         [3:0]  ovl7, ovl8, ovl9;
+reg         [2:0]  fso7, fso8, fso9, fso10, fso11;
+reg  signed [31:0] mv10;
+reg  signed [19:0] out11;
+wire signed [24:0] out10 = mv10 >>> 7;
 always @(posedge clk) begin
-    fv <= {fv[7:1], f0_v};
+    oy0_7 <= oa[oi6];
+    oy1_7 <= oa[oi6n];
+end
+always @(posedge clk) begin
+    fv <= {fv[10:1], f0_v};
     // F1: state, w0, 1/Q, bus value
     fs1 <= f0_sid; fvi1 <= f0_vi; fvnf1 <= f0_vnf; fw1 <= w0;
     fbp1 <= h_vbp; flp1 <= h_vlp; fhp1 <= h_vhp; fmv1 <= h_mv;
@@ -963,15 +989,25 @@ always @(posedge clk) begin
     mix6 <= fvnf5 + h_vf;
     nbp6 <= nbp5; nlp6 <= nlp5; nhp6 <= nhp5;
     fs6 <= fs5; fmv6 <= fmv5; fbs6 <= fbs5;
-    // F7: volume
-    mv7 <= mix6 * $signed({1'b0, fmv6[3:0]});
+    // F7: the two knots out of the table (above); fraction, chip model, the plain sum for an 8580
+    of7 <= ox6[13:0]; osh7 <= !cfg_8580[fs6[2]]; omx7 <= mix6; ovl7 <= fmv6[3:0]; fso7 <= fs6;
     nbp7 <= nbp6; nlp7 <= nlp6; nhp7 <= nhp6;
     fs7 <= fs6; fbs7 <= fbs6;
-    // F8: saturate; state written back from here
-    out8 <= out7 > 25'sh7ffff ? 20'sh7ffff : out7 < -25'sh80000 ? -20'sh80000 : out7[19:0];
+    // F8: (y1 - y0) x fraction; state written back from here
+    om8 <= (oy1_7 - oy0_7) * $signed({1'b0, of7});
+    oy0_8 <= oy0_7; osh8 <= osh7; omx8 <= omx7; ovl8 <= ovl7; fso8 <= fso7;
     nbp8 <= nbp7; nlp8 <= nlp7; nhp8 <= nhp7;
     fs8 <= fs7; fbs8 <= fbs7;
-    if (rst_run) fv <= 8'd0;
+    // F9: y = y0 + the interpolated step
+    oy9 <= oy0_8 + (om8 >>> 14);
+    osh9 <= osh8; omx9 <= omx8; ovl9 <= ovl8; fso9 <= fso8;
+    // F10: volume
+    mv10 <= (osh9 ? $signed({{4{oy9[23]}}, oy9}) : omx9) * $signed({1'b0, ovl9});
+    fso10 <= fso9;
+    // F11: saturate
+    out11 <= out10 > 25'sh7ffff ? 20'sh7ffff : out10 < -25'sh80000 ? -20'sh80000 : out10[19:0];
+    fso11 <= fso10;
+    if (rst_run) fv <= 11'd0;
 end
 // filter state, bus value: one write port each (reset, state port, F8)
 wire       h_wb   = fv[8];
@@ -994,19 +1030,20 @@ always @(posedge clk)
     if (fs_rst || h_wb)
         rbb[fs_wa] <= fs_rst ? 8'd0 : fbs8[7:0];
 
-// samples and the two UltiSID sums
+// samples and the two UltiSID sums, from F11
+wire       h_ow   = fv[11];
 reg  signed [20:0] acc_u;
-wire signed [20:0] acc_n = (fs8[1:0] == 2'd0 ? 21'sd0 : acc_u) + out8;
+wire signed [20:0] acc_n = (fso11[1:0] == 2'd0 ? 21'sd0 : acc_u) + out11;
 wire signed [19:0] acc_s = acc_n > 21'sh7ffff ? 20'sh7ffff : acc_n < -21'sh80000 ? -20'sh80000 : acc_n[19:0];
 always @(posedge clk) begin
-    smp_valid <= h_wb;
-    smp_sid <= fs8;
-    smp_data <= out8;
+    smp_valid <= h_ow;
+    smp_sid <= fso11;
+    smp_data <= out11;
     sum_valid <= 1'b0;
-    if (h_wb) begin
+    if (h_ow) begin
         acc_u <= acc_n;
-        if (fs8[1:0] == 2'd3) begin
-            if (fs8[2]) begin
+        if (fso11[1:0] == 2'd3) begin
+            if (fso11[2]) begin
                 sum_u1 <= acc_s;
                 sum_valid <= 1'b1;
             end else

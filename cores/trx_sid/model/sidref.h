@@ -78,9 +78,10 @@ struct Config {
     bool res_high = false;         // C64_EMUSIDn_RES
     unsigned digi = 2;             // C64_EMUSIDn_DIGI 0..3
     const uint16_t* curve = nullptr; // 1024 entries (app filter curve RAM)
-    // U12 (a): volts of op-amp input excursion at full scale, 0 = the linear
-    // mixer of before. Only the 6581 has it.
-    double opamp_drive = 0.0;
+    // U12 D1 (a): the 6581's mixing node, 1024 knots from gen_opamp.py
+    // (sid_opamp6581.mem, load_opamp); null = the linear mixer of before.
+    // Only a 6581 uses it (ADR-0068: the chip model switches the filter).
+    const int32_t* opamp = nullptr;
     // U12: libresidfp's cubic saturation of the waveform DAC (Dac.cpp:62-68),
     // 1.1 x - 0.11 x^3 on the unipolar DAC value. Off by default.
     bool wav_sat = false;
@@ -90,6 +91,9 @@ struct Config {
     // 0 keeps the constant.
     double voice_dc = 0.0;
 };
+
+// U12: read a gen_opamp.py table (1024 x 22 bit hex, two's complement)
+bool load_opamp(const char* path, int32_t* t);
 
 extern const uint16_t ADSR_TABLE[16];
 extern const uint16_t DIVQ_LOW[16];

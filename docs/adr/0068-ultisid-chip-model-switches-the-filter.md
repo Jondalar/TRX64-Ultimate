@@ -2,7 +2,9 @@
 
 Date: 2026-11-14
 
-Status: Accepted
+Status: Accepted; superseded in part by [0071](0071-u12-is-built-into-redip.md) - U12 is built into reDIP, whose menu
+already has "Chip Model" and a curve that follows it, so the rename and the curve default of the UltiSID store
+are not built. In `trx_sid_engine` the chip model does switch the filter path (U12 D1g).
 
 ## Context
 

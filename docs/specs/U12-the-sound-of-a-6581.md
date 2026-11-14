@@ -1,11 +1,20 @@
 # U12 — The sound of a 6581: the filter's non-linearity, its dirt, and the bits for Mahoney
 
-**Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a)). Built: D5 (`tb_wav`), the
-measuring instrument D1e (`filt_cmp`) and shape (a) in the model (D1f). Open: D1 (a) in the RTL, D3, D4. The reply to the reviewer waits for a joint listening test (Q4).
+**Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a), Q8 the engine is reDIP). Built:
+D5 (`tb_wav`), the measuring instrument D1e (`filt_cmp`), shape (a) in the model (D1f) and in `trx_sid_engine`
+(D1g, only in a `TRX_SID=1` build). Open: D1 (a) and D4 in reDIP, the release engine. The reply to the reviewer
+waits for a joint listening test (Q4).
+**Engine (Q8, Alex 2026-11-14: "B"):** the release bitstream runs reDIP with 8 SIDs (`build.tcl`: `TRX_SID`
+unset = `redip8`, menu "reSID8"); the T25.1 engine this spec was first written against, and the one the review
+read, is only in a `TRX_SID=1` build. U12 is therefore built into reDIP's `sid_filter.sv`, behind a parameter that
+leaves reDIP bit exact when it is off, as `FILTER_FRAC` does ([ADR-0065](../adr/0065-sid-filter-fractional-bits.md)).
+D3 is reSID8's already: its "Chip Model" item picks the model, and its "Filter Curve" defaults to "Chip Model".
+The work in `trx_sid_engine` stays (D1g). [ADR-0071](../adr/0071-u12-is-built-into-redip.md).
 **Scope (Q1, Alex 2026-11-14):** U12 is D1 in shape (a) in the RTL, D3 and D4; D2 is part of D1 (a). D6 is
 [U14](../todo/U14.md), Q6 is [U15](../todo/U15.md), and the sampler's Q3 and Q5 belong to
 [T25.6](T25.6-sampler.md).
-**Repo:** TRX64-Ultimate (gateware: `cores/trx_sid/rtl/trx_sid_engine.v`; tables and model:
+**Repo:** TRX64-Ultimate (gateware: reDIP's `cores/icepi/c64_redip_sid/reDIP-SID/gateware/sid_filter.sv`, the
+release engine, and `cores/trx_sid/rtl/trx_sid_engine.v`, the T25.1 engine (D1g); tables and model:
 `cores/trx_sid/model/`, `cores/trx_sid/mem/`; app: `software/io/audio/`, `software/u64/u64_config.cc`).
 **Number:** U12 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -243,6 +252,21 @@ Two other results are worth more than that one, though:
   build, has to find it. The filter topology itself (D1c, option (b)) and the DC content of the
   combined waveforms are the candidates.
 
+**D1g — (a) built in `trx_sid_engine`, 2026-11-14** (before Q8 moved U12 to reDIP; it stays). The table:
+`cores/trx_sid/model/gen_opamp.py` turns the 33 measured points into 1024 knots x 22 bit
+(`mem/sid_opamp6581.mem`, drive 0.5 V): the mixer sum clamped to 24 bits (+-16 full scale), knots 16384 apart,
+linear between two knots with a floor shift. The model (`sidref.cpp` `opamp_lookup`) and the engine do exactly that
+in integers, so the benches stay bit exact; the double-precision waveshaper of D1f is gone. In the engine the node
+is F7..F9 after the mixer (a dual-port ROM read of two neighbouring knots, one DSP for the step), the volume moves
+to F10 and the saturation to F11. An 8580 bypasses it with the same latency, bit for bit what it was; the filter
+state and the bus value are still written back at F8, only the samples come three clocks later. A 6581 always
+takes it: in this engine the chip model now switches the filter path. **Measured:** `tb_sid` 2 642 583 cycles,
+8 SIDs (four 6581, four 8580), 0 mismatches at 64 clocks per cycle; `tb_sid_bus` 300 000 cycles, 0 mismatches;
+`filt_cmp` with the integer table 0.9429 / -9.33 dB (0.5 V, Digis Medium) and 0.9625 / -11.11 dB (0.3 V, Digis
+High), the figures of D1f's double version to the last digit. At 48 clocks per cycle `tb_sid` reports 146
+mismatches, all in the state-port reads after the last pass; the engine before U12 gives the same 146 (not caused
+by this; the samples match there too). No Vivado run: the release does not build this engine.
+
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
 difference the way U7 reported dB, and the same sweeps F20 uses. The interpolated tables are
@@ -265,6 +289,9 @@ cutoff keeps choosing it. Today a UltiSID left at its defaults mixes 6581 wavefo
 (the curve item's default 0) through the linear 8580 filter; after D3 it is a 6581. Open for the build: how
 "the model's curve by default" reaches a machine whose stored settings already hold `8580 Lo` - the value is
 an enum index, so a new entry goes at the end of the list, never at 0.
+**Since Q8 not built for the UltiSID store:** reDIP's menu already does this (reSID8's "Chip Model", "Filter
+Curve" = "Chip Model" by default), and the rename and the curve default would only reach a `TRX_SID=1` build.
+In `trx_sid_engine` the filter path follows the chip model since D1g.
 
 **D4 — The DC offset becomes a number, not four steps.** Per chip, app-written like the curve, with
 the present four levels kept as presets so nothing changes for anyone who does not touch it. What it
@@ -305,8 +332,8 @@ that a test shows is then chased in the tables.
 
 ## §4 Out
 
-- **The reDIP / reSID8 engine.** A different implementation with its own filter (U7). Nothing here
-  touches it.
+- **The reDIP / reSID8 engine** was out in the first draft. Since Q8 it is where U12 is built (D1 (a), D4);
+  U7's precision work stays U7's.
 - **Voice multiplexing and microcoded filter arithmetic.** We have our own answers to both
   (T25.1); the review confirms they are not the problem.
 - **`v78` of UltiSID, and any other HDL of Gideon's.** D6 of the clean room: declined, see §1.
@@ -317,6 +344,11 @@ that a test shows is then chased in the tables.
   UltiSID that sounds like a 6581.
 
 ## §5 Questions for Alex
+
+**Q8 — answered 2026-11-14, Alex: "B".** Asked after D1g was built, when reading the app's menu showed that
+the release runs reDIP and not the engine U12 had been written for: A (stay with `trx_sid_engine`, heard by
+nobody unless the release changed engine, against [ADR-0001](../adr/0001-reDIP-stays-default-no-copper.md)),
+B (build it into reDIP, the release engine), C (both). B: [ADR-0071](../adr/0071-u12-is-built-into-redip.md).
 
 **Q7 — answered 2026-11-09, Alex: (a).** *"A ist ok"* - the opamp non-linearity at the output
 stage, the integrators left alone, and listen before anything deeper is considered. D1e's baseline

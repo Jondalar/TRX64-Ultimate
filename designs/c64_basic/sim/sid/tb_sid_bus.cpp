@@ -59,6 +59,8 @@ int main(int argc, char** argv)
     std::mt19937 rnd(argc > 4 ? atoi(argv[4]) : 1);
     static trxsid::Tables tab;
     if (!tab.load(argv[1])) return 2;
+    static int32_t opamp[1024];
+    if (!trxsid::load_opamp((std::string(argv[1]) + "/sid_opamp6581.mem").c_str(), opamp)) return 2;
     static uint16_t curve[2][1024];
     if (!load_curve(std::string(argv[2]) + "/curve3.mem", curve[0]) ||
         !load_curve(std::string(argv[2]) + "/curve1.mem", curve[1]))
@@ -70,6 +72,7 @@ int main(int argc, char** argv)
         m[s]->cfg.res_high = s < 4;
         m[s]->cfg.digi = s < 4 ? 1 : 0;
         m[s]->cfg.curve = curve[s >> 2];
+        m[s]->cfg.opamp = opamp;          // U12 D1 (a): used by the 6581s (SIDs 0-3)
         m[s]->reset();
     }
     Vtrx_sid* d = new Vtrx_sid;
