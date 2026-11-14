@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # T25.1: register-op logs for the SID model tests (compare_resid, the RTL
-# benches). Line format: "<idle> W <reg> <val>" / "<idle> R <reg>" (hex).
+# benches). Line format: "<idle> W <reg> <val>" / "<idle> R <reg>": idle in decimal (C64 cycles without an op
+# before this one), reg and val in hex.
 #   gen_logs.py <outdir>
 import os
 import random

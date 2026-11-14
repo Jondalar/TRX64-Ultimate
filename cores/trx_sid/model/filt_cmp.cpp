@@ -15,6 +15,11 @@
 //
 //   filt_cmp <memdir> <curve.mem|-> <log> [cycles] [6581|8580]
 //   env: DIGI=0..3 (default 2), RES=0|1 (default 0)
+//        OPAMP=<table.mem> (gen_opamp.py): the model's 6581 op-amp node on the filter output (U12 D1h)
+//        WAVSAT=1, VDC=<volts>: the model's cubic DAC saturation and envelope-dependent voice DC (U12 D1f, not built)
+//        EXTFILT=1: the C64's output RC low-pass and DC blocker on our side too; SMOOTH=<n>: average n samples on
+//        both sides; MAXLAG=<n>: the lag search window in cycles (default 256)
+//   The log's idle count is decimal (gen_logs.py), reg and val hex.
 //        OURS=<file>: our side from that file, one sample per C64 cycle (reDIP's output from
 //        designs/c64_basic/sim/redip/tb_cmp, U12), instead of the model; memdir and curve are then unused
 #include "sidref.h"
@@ -104,7 +109,7 @@ int main(int argc, char** argv)
         if (!eof) {
             if (!fgets(line, sizeof(line), f)) { eof = true; continue; }
             long idle; char rw; unsigned reg, val;
-            int k = sscanf(line, "%lx %c %x %x", &idle, &rw, &reg, &val);
+            int k = sscanf(line, "%ld %c %x %x", &idle, &rw, &reg, &val);
             if (k < 3) continue;
             for (long i = 0; i < idle && cyc < ncyc; i++) step();
             if (cyc >= ncyc) break;

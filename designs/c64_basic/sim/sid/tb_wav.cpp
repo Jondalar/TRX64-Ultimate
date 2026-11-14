@@ -14,7 +14,7 @@
 // <trace>      register ops, the format gen_logs.py writes:
 //                "<idle> W <reg> <val>"   wait <idle> C64 cycles, then write
 //                "<idle> R <reg>"         the same for a read
-//              all hex, <reg> is 00..1F of UltiSID 1 ($D400 + reg). "-" plays
+//              <idle> decimal, <reg> and <val> hex, <reg> is 00..1F of UltiSID 1 ($D400 + reg). "-" plays
 //              the built-in demo instead, so the tool runs with no input file.
 //
 // env: MODEL8580=0|1 (the chip model of UltiSID 1, waveform tables),
@@ -69,7 +69,7 @@ static std::vector<Op> read_trace(const char* path)
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         long idle; char rw; unsigned reg, val;
-        int n = sscanf(line, "%lx %c %x %x", &idle, &rw, &reg, &val);
+        int n = sscanf(line, "%ld %c %x %x", &idle, &rw, &reg, &val);
         if (n < 3) continue;
         t.push_back({idle, rw == 'W' || rw == 'w', (int)(reg & 0x1f), n >= 4 ? (int)(val & 0xff) : 0});
     }

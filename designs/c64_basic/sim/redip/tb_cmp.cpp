@@ -3,7 +3,7 @@
 // cores/trx_sid/model/filt_cmp (OURS=<file>), which compares it with libresidfp's. The op-amp table is read from
 // the run directory (sid_opamp_6581.mem), so a drive is tried by writing another table there, without a rebuild.
 //   tb_cmp <log> <cycles> <out> [6581|8580]
-// SID 0 plays the log (format of gen_logs.py: "<idle> W|R <reg> <val>", hex); UltiSID 1 runs as the app sets
+// SID 0 plays the log (format of gen_logs.py: "<idle> W|R <reg> <val>", idle decimal, reg and val hex); UltiSID 1 runs as the app sets
 // reSID8 by default: Filter Curve "Chip Model" (fc_sel 0), Resonance and Digis "Auto" (by the model), 6581 base
 // 245 and offset -780. 64 clocks per C64 cycle; the sample of a cycle is SID 0's output of that cycle's pass.
 #include "Vsid_multi.h"
@@ -55,7 +55,7 @@ int main(int argc, char** argv)
     char line[256];
     while (cyc < ncyc && fgets(line, sizeof line, lf)) {
         long idle; char rw; unsigned reg, val = 0;
-        if (sscanf(line, "%lx %c %x %x", &idle, &rw, &reg, &val) < 3) continue;
+        if (sscanf(line, "%ld %c %x %x", &idle, &rw, &reg, &val) < 3) continue;
         for (long i = 0; i < idle && cyc < ncyc; i++) pass(false, false, 0, 0);
         if (cyc >= ncyc) break;
         pass(true, rw == 'W' || rw == 'w', reg, val);

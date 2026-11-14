@@ -3,7 +3,7 @@
 **Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a), Q8 the engine is reDIP). Built:
 D5 (`tb_wav`), the measuring instrument D1e (`filt_cmp`), shape (a) in the model (D1f), in `trx_sid_engine` (D1g,
 only in a `TRX_SID=1` build) and in reDIP, the release engine (D1i), all on the filter output (D1h); benches green,
-Vivado and the board open. Open: D4 in reDIP. The reply to the reviewer waits for a joint listening test (Q4).
+Vivado routed (D1i), the board open. Open: D4 in reDIP. The reply to the reviewer waits for a joint listening test (Q4).
 **Engine (Q8, Alex 2026-11-14: "B"):** the release bitstream runs reDIP with 8 SIDs (`build.tcl`: `TRX_SID`
 unset = `redip8`, menu "reSID8"); the T25.1 engine this spec was first written against, and the one the review
 read, is only in a `TRX_SID=1` build. U12 is therefore built into reDIP's `sid_filter.sv`, behind a parameter that
@@ -240,6 +240,10 @@ Measured with `filt_cmp` on `filter.log`, 200 000 cycles, `EXTFILT=1`, against l
 **Corrected 2026-11-14 (D1h): measured on `filter.log` only, where every voice goes through the filter. On
 `tones.log` (direct voices) the curve on the whole sum makes it much worse - 0.987 -> 0.896 at Medium / 0.5 V,
 0.947 -> 0.574 at High / 0.3 V. The node now takes the filter output alone.**
+**Timing (2026-11-14):** every `filt_cmp` figure in D1f, and the first ones of D1h and D1i, read the log's idle
+count as hex; `gen_logs.py` writes it in decimal (`compare_resid` and `tb_sid` read it so). Both sides got the same
+stretched stimulus, so the comparisons held among themselves, but the logs did not play as written. D1h and D1i
+are re-measured with the fix; D1f's double-precision waveshaper is gone and is not.
 Two other results are worth more than that one, though:
 
 - **The cubic DAC saturation measures nothing** (±0.005 correlation anywhere). Not built.
@@ -278,14 +282,18 @@ libresidfp's 6581, `filt_cmp`, 200 000 cycles, `EXTFILT=1`, curve 2:
 
 | T25.1 model | filter | tones | fuzz0 | fuzz1 | fuzz2 | fuzz3 | digi |
 |---|---|---|---|---|---|---|---|
-| Digis Medium, linear | 0.887 | 0.987 | 0.437 | 0.706 | 0.669 | 0.616 | 0.714 |
-| Digis Medium, whole sum, 0.5 V | 0.943 | **0.896** | | | | 0.640 | |
-| Digis Medium, filter output, 0.5 V | **0.943** | 0.987 | 0.461 | 0.691 | 0.670 | 0.615 | 0.714 |
-| Digis High, linear | 0.940 | 0.947 | 0.402 | 0.687 | 0.659 | 0.629 | 0.714 |
-| Digis High, whole sum, 0.3 V | 0.963 | **0.574** | | 0.648 | | 0.647 | |
-| Digis High, filter output, 0.3 V | **0.963** | 0.947 | 0.430 | 0.669 | 0.661 | 0.630 | 0.714 |
+| Digis Medium, linear | 0.873 | 0.985 | 0.494 | 0.631 | 0.432 | 0.532 | 0.694 |
+| Digis Medium, filter output, 0.3 V | 0.912 | 0.985 | 0.504 | 0.623 | 0.418 | 0.518 | 0.694 |
+| **Digis Medium, filter output, 0.5 V** | **0.948** | 0.985 | 0.510 | 0.620 | 0.415 | 0.514 | 0.694 |
+| Digis Medium, filter output, 0.7 V | 0.938 | 0.985 | 0.520 | 0.616 | 0.407 | 0.511 | 0.694 |
+| Digis High, linear | 0.932 | 0.932 | 0.561 | 0.663 | 0.426 | 0.537 | 0.695 |
+| **Digis High, filter output, 0.3 V** | **0.968** | 0.932 | 0.567 | 0.648 | 0.405 | 0.519 | 0.695 |
+| Digis High, filter output, 0.5 V | 0.912 | 0.932 | 0.572 | 0.637 | 0.391 | 0.512 | 0.695 |
 
-`fuzz1` (random register writes, which no variant follows well) loses 0.015-0.02 everywhere; nothing else does.
+The whole-sum rows (measured before the timing fix): `tones` 0.987 -> 0.896 at Medium / 0.5 V, 0.947 -> 0.574 at
+High / 0.3 V.
+The random-register logs `fuzz1`-`fuzz3` (which no variant follows well) lose 0.01-0.02 with the node, `fuzz0`
+gains as much; `tones` and `digi` do not move.
 Two other centrings were tried and dropped: the whole sum around the direct voices' DC, and around three voices'
 DC (both worse on `filter` or `tones`).
 
@@ -304,10 +312,11 @@ libresidfp. reDIP as a 6581:
 
 | reDIP | filter | tones | fuzz0 | fuzz1 | fuzz2 | fuzz3 | digi |
 |---|---|---|---|---|---|---|---|
-| as released | 0.943 | 0.918 | 0.352 | 0.646 | 0.672 | 0.517 | 0.714 |
-| filter output, 0.2 V | 0.956 | 0.918 | 0.371 | 0.634 | 0.675 | 0.515 | 0.714 |
-| **filter output, 0.3 V** | **0.964** | 0.918 | 0.380 | 0.629 | 0.675 | 0.515 | 0.714 |
-| filter output, 0.5 V | 0.924 | 0.918 | 0.388 | 0.609 | 0.676 | 0.513 | 0.714 |
+| as released | 0.932 | 0.906 | 0.554 | 0.664 | 0.385 | 0.451 | 0.695 |
+| filter output, 0.2 V | 0.949 | 0.906 | 0.556 | 0.646 | 0.361 | 0.432 | 0.695 |
+| **filter output, 0.3 V** | **0.962** | 0.906 | 0.558 | 0.642 | 0.357 | 0.427 | 0.695 |
+| filter output, 0.4 V | 0.942 | 0.906 | 0.558 | 0.635 | 0.351 | 0.422 | 0.695 |
+| filter output, 0.5 V | 0.911 | 0.906 | 0.560 | 0.627 | 0.343 | 0.417 | 0.695 |
 
 0.3 V is what is built. **Benches:** `tb_new` (hardware build) has a check 7: every SID's sample is its volume
 times the 16 bit clamp of the direct path plus the table's value for the filter output (6581) or of reDIP's own
@@ -315,6 +324,8 @@ sum (8580), from the RTL's own stage-8 registers - 239 968 checks per seed, 0 er
 eight per-SID samples to their pass rather than to a 64-clock window: with the node the last of them leaves after
 clock 64 (the stream is not used in the build; `c64_trx_sid` takes the two sums). `tb_sym` takes the eight samples
 as a set when SID 7's arrives, for the same reason. `build_multi.sh` pins `OPAMP_6581 = 0` for the equivalence benches.
+**Vivado** (CI run 1912, `ca695210`, with T25.6's status mask): routed, WNS +0.018 ns; Slice LUTs 26 453 (release
+0.3.0: 26 371), slices 8 141 of 8 150 (8 123), block RAM 58 (57.5), DSP 24 (23).
 
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS
