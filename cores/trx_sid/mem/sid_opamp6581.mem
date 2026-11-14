@@ -1,4 +1,4 @@
-// U12 D1 (a): 6581 mixing node, drive 0.500 V, 1024 x 22 bit (gen_opamp.py)
+// U12 D1 (a): 6581 op-amp on the filter output, for trx_sid_engine.v, drive 0.500 V, 1024 x 22 bit (gen_opamp.py)
 2df800
 2df800
 2df800

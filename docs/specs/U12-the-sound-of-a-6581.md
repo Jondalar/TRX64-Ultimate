@@ -1,9 +1,9 @@
 # U12 — The sound of a 6581: the filter's non-linearity, its dirt, and the bits for Mahoney
 
 **Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a), Q8 the engine is reDIP). Built:
-D5 (`tb_wav`), the measuring instrument D1e (`filt_cmp`), shape (a) in the model (D1f) and in `trx_sid_engine`
-(D1g, only in a `TRX_SID=1` build). Open: D1 (a) and D4 in reDIP, the release engine. The reply to the reviewer
-waits for a joint listening test (Q4).
+D5 (`tb_wav`), the measuring instrument D1e (`filt_cmp`), shape (a) in the model (D1f), in `trx_sid_engine` (D1g,
+only in a `TRX_SID=1` build) and in reDIP, the release engine (D1i), all on the filter output (D1h); benches green,
+Vivado and the board open. Open: D4 in reDIP. The reply to the reviewer waits for a joint listening test (Q4).
 **Engine (Q8, Alex 2026-11-14: "B"):** the release bitstream runs reDIP with 8 SIDs (`build.tcl`: `TRX_SID`
 unset = `redip8`, menu "reSID8"); the T25.1 engine this spec was first written against, and the one the review
 read, is only in a `TRX_SID=1` build. U12 is therefore built into reDIP's `sid_filter.sv`, behind a parameter that
@@ -237,6 +237,9 @@ Measured with `filt_cmp` on `filter.log`, 200 000 cycles, `EXTFILT=1`, against l
 | Digis Level High + op-amp, drive 0.3 V | **0.9625** | **-11.11 dB** |
 
 **The op-amp node is worth building: it improves at every DC setting, and 4.7 dB at the best pair.**
+**Corrected 2026-11-14 (D1h): measured on `filter.log` only, where every voice goes through the filter. On
+`tones.log` (direct voices) the curve on the whole sum makes it much worse - 0.987 -> 0.896 at Medium / 0.5 V,
+0.947 -> 0.574 at High / 0.3 V. The node now takes the filter output alone.**
 Two other results are worth more than that one, though:
 
 - **The cubic DAC saturation measures nothing** (±0.005 correlation anywhere). Not built.
@@ -252,20 +255,66 @@ Two other results are worth more than that one, though:
   build, has to find it. The filter topology itself (D1c, option (b)) and the DC content of the
   combined waveforms are the candidates.
 
-**D1g — (a) built in `trx_sid_engine`, 2026-11-14** (before Q8 moved U12 to reDIP; it stays). The table:
-`cores/trx_sid/model/gen_opamp.py` turns the 33 measured points into 1024 knots x 22 bit
-(`mem/sid_opamp6581.mem`, drive 0.5 V): the mixer sum clamped to 24 bits (+-16 full scale), knots 16384 apart,
+**D1g — (a) built in `trx_sid_engine`, 2026-11-14** (before Q8 moved U12 to reDIP; it stays; on the filter output
+only since D1h). The table: `cores/trx_sid/model/gen_opamp.py` turns the 33 measured points into 1024 knots x
+22 bit (`mem/sid_opamp6581.mem`, drive 0.5 V): the input clamped to 24 bits (+-16 full scale), knots 16384 apart,
 linear between two knots with a floor shift. The model (`sidref.cpp` `opamp_lookup`) and the engine do exactly that
 in integers, so the benches stay bit exact; the double-precision waveshaper of D1f is gone. In the engine the node
-is F7..F9 after the mixer (a dual-port ROM read of two neighbouring knots, one DSP for the step), the volume moves
-to F10 and the saturation to F11. An 8580 bypasses it with the same latency, bit for bit what it was; the filter
-state and the bus value are still written back at F8, only the samples come three clocks later. A 6581 always
-takes it: in this engine the chip model now switches the filter path. **Measured:** `tb_sid` 2 642 583 cycles,
-8 SIDs (four 6581, four 8580), 0 mismatches at 64 clocks per cycle; `tb_sid_bus` 300 000 cycles, 0 mismatches;
-`filt_cmp` with the integer table 0.9429 / -9.33 dB (0.5 V, Digis Medium) and 0.9625 / -11.11 dB (0.3 V, Digis
-High), the figures of D1f's double version to the last digit. At 48 clocks per cycle `tb_sid` reports 146
+is F7..F9 on the filter output (a dual-port ROM read of two neighbouring knots, one DSP for the step), the direct
+voices join it at F10 with the volume, the saturation is F11. An 8580 bypasses the table with the same latency, bit
+for bit what it was; the filter state and the bus value are still written back at F8, only the samples come three
+clocks later. A 6581 always takes it: in this engine the chip model now switches the filter path. **Measured**
+(on the filter output, D1h): `tb_sid` 2 642 583 cycles, 8 SIDs (four 6581, four 8580), 0 mismatches at 64 clocks
+per cycle; `tb_sid_bus` 300 000 cycles, 0 mismatches; `filt_cmp` with the integer table, D1h's table below. The
+first version, on the whole sum, matched D1f's double figures to the last digit. At 48 clocks per cycle `tb_sid` reports 146
 mismatches, all in the state-port reads after the last pass; the engine before U12 gives the same 146 (not caused
 by this; the samples match there too). No Vivado run: the release does not build this engine.
+
+**D1h — The curve on the filter output, not on the whole sum, 2026-11-14.** Measuring all of `gen_logs.py`'s logs
+instead of `filter.log` alone showed the whole-sum node hurting the direct voices: they carry the digi DC, which
+moves the op-amp's working point into the flat part of its curve. Taking the curve on the filter output only (the
+direct voices are added after it, linear) keeps the gain and costs the direct path nothing. Correlation with
+libresidfp's 6581, `filt_cmp`, 200 000 cycles, `EXTFILT=1`, curve 2:
+
+| T25.1 model | filter | tones | fuzz0 | fuzz1 | fuzz2 | fuzz3 | digi |
+|---|---|---|---|---|---|---|---|
+| Digis Medium, linear | 0.887 | 0.987 | 0.437 | 0.706 | 0.669 | 0.616 | 0.714 |
+| Digis Medium, whole sum, 0.5 V | 0.943 | **0.896** | | | | 0.640 | |
+| Digis Medium, filter output, 0.5 V | **0.943** | 0.987 | 0.461 | 0.691 | 0.670 | 0.615 | 0.714 |
+| Digis High, linear | 0.940 | 0.947 | 0.402 | 0.687 | 0.659 | 0.629 | 0.714 |
+| Digis High, whole sum, 0.3 V | 0.963 | **0.574** | | 0.648 | | 0.647 | |
+| Digis High, filter output, 0.3 V | **0.963** | 0.947 | 0.430 | 0.669 | 0.661 | 0.630 | 0.714 |
+
+`fuzz1` (random register writes, which no variant follows well) loses 0.015-0.02 everywhere; nothing else does.
+Two other centrings were tried and dropped: the whole sum around the direct voices' DC, and around three voices'
+DC (both worse on `filter` or `tones`).
+
+**D1i — Built in reDIP (Q8), 2026-11-14.** `sid_filter.sv` parameter `OPAMP_6581` (0 = Dag Lem's mixer, bit for bit
+and cycle for cycle; `sid_multi.sv` and `trx_sid.v` build 1, the equivalence builds 0). reDIP's voices are in the
+same units as ours (wave - 0x380 times envelope, the same digi DC); its mixer works on the sum >> 7 in whole LSB, 17
+bits before its 16 bit clamp. The table (`gen_opamp.py --redip`, `sid_opamp_6581.mem`, 1024 x 16 bit, knots 128
+apart) takes the filter output rounded to whole LSB; the direct path is added after it, then the same 16 bit clamp.
+Four clocks of pipeline (stages 8-11: two knots out of a dual-port ROM, the step, the add); the master volume
+multiply moves from stage 8 to stage 12 for every SID, the one slot of the five where the shared multiplier gets no
+operands, and `sid_core.sv` takes SID k's audio on cycle 13 + 5k (pass 56 clocks for 8 SIDs instead of 53). An 8580
+gets reDIP's own sum, unchanged. Drive fitted for reDIP's default (Digis "Auto": a 6581 gets the full digi DC) with
+a new instrument: `designs/c64_basic/sim/redip/tb_cmp.cpp` plays a log through `sid_multi` (hardware build, the
+app's reSID8 defaults) and writes one sample per C64 cycle, which `filt_cmp` (`OURS=<file>`) compares with
+libresidfp. reDIP as a 6581:
+
+| reDIP | filter | tones | fuzz0 | fuzz1 | fuzz2 | fuzz3 | digi |
+|---|---|---|---|---|---|---|---|
+| as released | 0.943 | 0.918 | 0.352 | 0.646 | 0.672 | 0.517 | 0.714 |
+| filter output, 0.2 V | 0.956 | 0.918 | 0.371 | 0.634 | 0.675 | 0.515 | 0.714 |
+| **filter output, 0.3 V** | **0.964** | 0.918 | 0.380 | 0.629 | 0.675 | 0.515 | 0.714 |
+| filter output, 0.5 V | 0.924 | 0.918 | 0.388 | 0.609 | 0.676 | 0.513 | 0.714 |
+
+0.3 V is what is built. **Benches:** `tb_new` (hardware build) has a check 7: every SID's sample is its volume
+times the 16 bit clamp of the direct path plus the table's value for the filter output (6581) or of reDIP's own
+sum (8580), from the RTL's own stage-8 registers - 239 968 checks per seed, 0 errors. Its sum check now counts the
+eight per-SID samples to their pass rather than to a 64-clock window: with the node the last of them leaves after
+clock 64 (the stream is not used in the build; `c64_trx_sid` takes the two sums). `tb_sym` takes the eight samples
+as a set when SID 7's arrives, for the same reason. `build_multi.sh` pins `OPAMP_6581 = 0` for the equivalence benches.
 
 **D1d — What proves it.** A host bench against libresidfp's own `Filter6581` per sample (the model
 harness already links it, `cores/trx_sid/model/compare_resid.cpp`), reporting the worst and the RMS

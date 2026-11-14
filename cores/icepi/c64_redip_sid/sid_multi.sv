@@ -7,7 +7,8 @@
 // docs/specs/T25.4-redip-ultisid.md.
 //
 // One pass per executed C64 cycle on `clk` (2 x dot4x: 64 clocks), started by
-// `start`; the pass takes max(6 NS + 5, 5 NS + 12) clocks (NS = 8: 53). The
+// `start`; the pass takes max(6 NS + 5, 5 NS + 12) clocks (NS = 8: 53), with OPAMP_6581 max(6 NS + 5,
+// 5 NS + 16) (NS = 8: 56); the per-SID stream (smp_*) then ends after clock 64, in the next pass. The
 // read-back registers are final earlier: OSC3 / ENV3 of SID s at clock 8 + 3 s
 // (29 for SID 7), the bus values at clock 8.
 // SID s = 4 u + p: u = UltiSID (settings WAVES, RES, DIGI, filter), p = part.
@@ -32,6 +33,9 @@ module sid_multi #(
     // (measured -32.6 dBFS worst error, SNR -23.8 dB, 45 % of the steps). 6 reaches the floor of
     // the 16 bit output grid; the equivalence builds against the original reDIP pass 0.
     parameter FILTER_FRAC = 6,
+    // The 6581's mixing node as an op-amp, the curve libresidfp measured, instead of reDIP's hard clamp (U12,
+    // ADR-0071, docs/specs/U12-the-sound-of-a-6581.md). An 8580 is unchanged; the equivalence builds pass 0.
+    parameter OPAMP_6581 = 1,
     parameter MEMDIR = "."
 ) (
     input  wire        clk,
@@ -125,7 +129,7 @@ wire [NS*8-1:0] osc3, env3, dbus;
 wire        tick_ms;
 
 sid_core #(.NS(NS), .LEGACY_FC(LEGACY_FC), .VARIANT_B(VARIANT_B), .PULSE_FIX(PULSE_FIX),
-          .FILTER_FRAC(FILTER_FRAC)) core (
+          .FILTER_FRAC(FILTER_FRAC), .OPAMP_6581(OPAMP_6581)) core (
     .clk(clk), .start(start_i), .res(res_q),
     .op_valid(op_valid_i), .op_we(op_we_i), .op_all(op_all_i), .op_sid(op_sid_i), .op_reg(op_reg_i),
     .op_data(op_wdata_i), .op_rdata(op_rdata_i),

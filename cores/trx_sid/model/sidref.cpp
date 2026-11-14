@@ -431,8 +431,8 @@ static int64_t sat(int64_t v, int bits)
 
 // Linear analog part (T25.1 §3.4/§3.5): DCA, voice DC (digis), Chamberlin SVF
 // with the app's cutoff curve, mixer and master volume.
-// U12 D1 (a): the 6581's mixing node is an op-amp, not an adder. The curve and
-// its scaling are in gen_opamp.py; here only the lookup, exactly as
+// U12 D1 (a): the 6581's op-amp curve on the filter output (see analog()). The
+// curve and its scaling are in gen_opamp.py; here only the lookup, exactly as
 // trx_sid_engine.v does it: x clamped to 24 bits, 1024 knots 16384 apart,
 // linear between two knots with a floor shift.
 static int32_t opamp_lookup(const int32_t* t, int64_t mix)
@@ -448,7 +448,7 @@ bool load_opamp(const char* path, int32_t* t)
 {
     FILE* fp = fopen(path, "r");
     if (!fp) return false;
-    char line[128];
+    char line[512];                     // longer than the header comment
     unsigned n = 0;
     while (n < 1024 && fgets(line, sizeof line, fp)) {
         if (line[0] == '/' || line[0] == '\n') continue;
@@ -496,11 +496,14 @@ void Sid::analog()
     vlp = int32_t(sat(vlp - dvlp, 25));
     vhp = int32_t(sat(((int64_t(vbp) * divq) >> 10) - vlp - vi, 25));
     int64_t vf = ((mode & 0x10) ? vlp : 0) + ((mode & 0x20) ? int64_t(vbp) : 0) + ((mode & 0x40) ? int64_t(vhp) : 0);
-    int64_t mix = vnf + vf;
-    // U12 D1 (a): the 8580's mixing node is nearly linear and stays as it was;
-    // the 6581's is where its dirt comes from.
+    // U12 D1 (a): a 6581's filter output reaches the mixer through the op-amp
+    // curve; the voices that bypass the filter go in as they are. Measured with
+    // filt_cmp (U12 D1h): the curve on the whole sum pushed direct voices, which
+    // carry the digi DC, into its flat part (tones.log 0.987 -> 0.896), on the
+    // filter output alone it costs the direct path nothing. The 8580 is linear.
     if (cfg.opamp && !cfg.is8580)
-        mix = opamp_lookup(cfg.opamp, mix);
+        vf = opamp_lookup(cfg.opamp, vf);
+    int64_t mix = vnf + vf;
     out = int32_t(sat((mix * int64_t(mode & 15)) >> 7, 20));
 }
 

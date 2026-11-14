@@ -17,9 +17,10 @@
 // Modified by TRX64 Ultimate (CERN-OHL-S v2 section 3.3 b), 2026-10-06: new file, split out of
 // sid_api.sv: pipelines for a parameter number of SIDs (NS), the envelope level RAM starts at 0;
 // 2026-10-07: both cutoff sources with LEGACY_FC = 2 (fc_sel per SID), filter bypass per SID, the
-// loadable curve table removed (T25.5); 2026-11-07: FILTER_FRAC passed to sid_filter (U7).
+// loadable curve table removed (T25.5); 2026-11-07: FILTER_FRAC passed to sid_filter (U7);
+// 2026-11-14: OPAMP_6581 passed to sid_filter, the audio taken four cycles later with it (U12).
 // Details: docs/specs/T25.4-redip-ultisid.md, docs/specs/U7-sid-filter-precision.md,
-// cores/icepi/ORIGIN.md and the git history of this file.
+// docs/specs/U12-the-sound-of-a-6581.md, cores/icepi/ORIGIN.md and the git history of this file.
 // ----------------------------------------------------------------------------
 
 // The SID pipelines for NS chips: the part of sid_api that does not depend on
@@ -28,8 +29,8 @@
 // (op_*), and ends with the 20 bit output of every SID and OSC3 / ENV3 / bus
 // value read-back registers.
 //
-// Pass length in clock cycles after start: max(6*NS + 5, 5*NS + 12);
-// NS = 2: 22, NS = 8: 53.
+// Pass length in clock cycles after start: max(6*NS + 5, 5*NS + 12), with OPAMP_6581 max(6*NS + 5, 5*NS + 16);
+// NS = 2: 22 (26), NS = 8: 53 (56).
 module sid_core #(
     parameter NS = 2,
     // See sid_filter and sid_waveform.
@@ -38,8 +39,12 @@ module sid_core #(
     parameter PULSE_FIX = 0,
     // Fractional bits in the filter state; see sid_filter (U7). 0 = reDIP's own arithmetic.
     parameter FILTER_FRAC = 0,
+    // The 6581's mixing node as an op-amp (U12, ADR-0071); see sid_filter. It delays every SID's audio by four
+    // cycles. 0 = reDIP's own mixer.
+    parameter OPAMP_6581 = 0,
     localparam N = 3*NS,
-    localparam FLAST = 5*NS + 5,
+    localparam OD = (OPAMP_6581 != 0) ? 4 : 0,
+    localparam FLAST = 5*NS + 5 + OD,
     localparam VLAST = (6*NS + 5 > FLAST + 7) ? 6*NS + 5 : FLAST + 7
 )(
     input  logic               clk,
@@ -250,7 +255,8 @@ module sid_core #(
     sid_filter #(
         .NS          (NS),
         .LEGACY_FC   (LEGACY_FC),
-        .FILTER_FRAC (FILTER_FRAC)
+        .FILTER_FRAC (FILTER_FRAC),
+        .OPAMP_6581  (OPAMP_6581)
     ) filter (
         .clk        (clk),
         .cycle      (filter_cycle),
@@ -268,10 +274,10 @@ module sid_core #(
         .audio_o    (filter_o)
     );
 
-    // The filter output of SID k is ready on filter pipeline cycle 9 + 5k.
+    // The filter output of SID k is ready on filter pipeline cycle 9 + 5k (13 + 5k with OPAMP_6581).
     always_ff @(posedge clk) begin
         for (int k = 0; k < NS; k++) begin
-            if (filter_cycle == 6'(9 + 5*k)) begin
+            if (filter_cycle == 6'(9 + OD + 5*k)) begin
                 audio_o[k*20 +: 20] <= filter_o;
             end
         end

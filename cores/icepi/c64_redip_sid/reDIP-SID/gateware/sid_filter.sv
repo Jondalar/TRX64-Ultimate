@@ -18,9 +18,10 @@
 // number of SIDs (NS); stage() takes its inputs as arguments; 2026-10-07: both cutoff sources with
 // LEGACY_FC = 2 (fc_sel per SID), filter bypass per SID, the loadable curve table removed (T25.5);
 // 2026-11-07: FILTER_FRAC fractional bits in the filter state and rounded shifts (U7), 0 = this
-// file's own arithmetic unchanged.
+// file's own arithmetic unchanged; 2026-11-14: OPAMP_6581, a 6581's filter output into the mixer
+// through the measured op-amp curve, the master volume four cycles later (U12), 0 = unchanged.
 // Details: docs/specs/T25.4-redip-ultisid.md, docs/specs/U7-sid-filter-precision.md,
-// cores/icepi/ORIGIN.md and the git history of this file.
+// docs/specs/U12-the-sound-of-a-6581.md, cores/icepi/ORIGIN.md and the git history of this file.
 // ----------------------------------------------------------------------------
 
 // Clamp to 16 bits. The audio mixer input uses this; the filter state has its own grid and uses
@@ -70,6 +71,13 @@ module sid_filter #(
     // alone would make it worse, because a floored step is a systematic bias that then fires more
     // often instead of being lost.
     parameter FILTER_FRAC = 0,
+    // U12 D1 (a), ADR-0071 (docs/specs/U12-the-sound-of-a-6581.md): 1 = a 6581's filter output reaches the mixer
+    // through an op-amp, the curve libresidfp measured (sid_opamp_6581.mem from cores/trx_sid/model/gen_opamp.py
+    // --redip); the voices that bypass the filter go in as they are. It takes three clocks, so the master volume
+    // multiply moves from stage 8 to stage 12 (the slot of stage 7, which the multiplier does not use) for every SID,
+    // and the audio of SID k is ready on cycle 13 + 5k (sid_core.sv). An 8580 is unchanged. 0 is this file's own
+    // mixer, bit for bit and cycle for cycle.
+    parameter OPAMP_6581 = 0,
     localparam N = 3*NS,
     localparam FF = FILTER_FRAC,
     localparam VW = 16 + FF,   // filter state
@@ -135,8 +143,13 @@ module sid_filter #(
     endfunction
 
     logic stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8;
+    logic stage9, stage10, stage11, stage12;
 
     always_comb begin
+        stage9   = stage(9, cycle, fph);
+        stage10  = stage(10, cycle, fph);
+        stage11  = stage(11, cycle, fph);
+        stage12  = stage(12, cycle, fph);
         stage1 = stage(1, cycle, fph);
         stage2 = stage(2, cycle, fph);
         stage3 = stage(3, cycle, fph);
@@ -332,6 +345,11 @@ module sid_filter #(
     localparam signed [OW-1:0] RND10 = (FF > 0) ? (OW'(1) <<< 9)  : OW'(0);
     localparam signed [DW-1:0] RNDF  = (FF > 0) ? (DW'(1) <<< (FF > 0 ? FF - 1 : 0)) : DW'(0);
 
+    // U12: the direct path plus the op-amp's output can need 18 bits before the same 16 bit clamp.
+    function automatic sid::s16_t clamp18(logic signed [17:0] x);
+        clamp18 = (x > 18'sd32767) ? 16'sd32767 : (x < -18'sd32768) ? -16'sd32768 : x[15:0];
+    endfunction
+
     // Clamp the state to the audio range on its own grid. At FILTER_FRAC = 0 this is the file's
     // own `clamp` above, bit for bit.
     function automatic logic signed [VW-1:0] clamp_v(logic signed [DW-1:0] x);
@@ -431,7 +449,69 @@ module sid_filter #(
         end
     end
 
+    // The mixer / master volume input in whole LSB before the clamp (stage 8). The direct path is in whole LSB
+    // and the filter outputs carry FF fractional bits, so vd is scaled up, and the sum is rounded back to whole LSB.
+    // That is the direct path plus the filter output rounded to whole LSB (vdw + fr, modulo 2^17).
+    logic signed [16:0] msum, vdw, fr;
+
+    // U12 D1 (a): a 6581's filter output through the op-amp, stages 8 .. 11. u = fr + 2^16: knot u[16:7], fraction
+    // u[6:0]; the table is read at two neighbouring knots at once (a dual-port ROM) and interpolated with a floor
+    // shift, exactly as gen_opamp.py describes it. Only the filter output: on the whole sum the curve pushed direct
+    // voices, which carry the digi DC, into its flat part (U12 D1h).
+    logic signed [15:0] oa [1024];
+    logic        [9:0]  oi, oin;
+    logic signed [15:0] oy0_9, oy1_9, oy0_10, ob12;
+    logic        [6:0]  of9;
+    logic signed [16:0] osum9, osum10, osum11, ovd9, ovd10, ovd11;
+    logic signed [23:0] om10;
+    logic signed [16:0] oy11;
+    logic               osh9, osh10, osh11;
+    sid::reg4_t         ovol9, ovol10, ovol11, ovol12;
+    initial if (OPAMP_6581 != 0) $readmemh("sid_opamp_6581.mem", oa);
+
     always_comb begin
+        oi  = { ~fr[16], fr[15:7] };
+        oin = (oi == 10'h3ff) ? oi : oi + 10'd1;
+    end
+
+    always_ff @(posedge clk) begin
+        if (OPAMP_6581 != 0) begin
+            if (stage8) begin
+                oy0_9 <= oa[oi];
+                oy1_9 <= oa[oin];
+                of9   <= fr[6:0];
+                osum9 <= msum;
+                ovd9  <= vdw;
+                osh9  <= model_r == sid::MOS6581;
+                ovol9 <= vol;
+            end
+            if (stage9) begin
+                om10   <= 24'(17'(oy1_9) - 17'(oy0_9)) * $signed({ 1'b0, of9 });
+                oy0_10 <= oy0_9;
+                osum10 <= osum9;
+                ovd10  <= ovd9;
+                osh10  <= osh9;
+                ovol10 <= ovol9;
+            end
+            if (stage10) begin
+                oy11   <= 17'(oy0_10) + 17'(om10 >>> 7);
+                osum11 <= osum10;
+                ovd11  <= ovd10;
+                osh11  <= osh10;
+                ovol11 <= ovol10;
+            end
+            if (stage11) begin
+                ob12   <= osh11 ? clamp18(18'(ovd11) + 18'(oy11)) : clamp(osum11);
+                ovol12 <= ovol11;
+            end
+        end
+    end
+
+    always_comb begin
+        msum = 17'((DW'(DW'(vd1 >>> 7) <<< FF) + vf + RNDF) >>> FF);
+        vdw  = 17'(vd1 >>> 7);
+        fr   = 17'((vf + RNDF) >>> FF);
+
         // Intermediate results for filter.
         // Shifts -w0*vbp and -w0*vlp right by 17.
         dv = DW'((o + RND17) >>> 17);
@@ -439,7 +519,7 @@ module sid_filter #(
         // Next hp or lp/bp.
         v_next = clamp_v(stage7 ? DW'((o + RND10) >>> 10) : DW'(v[N-1]) + dv);
 
-        // Final result for audio output, at cycle 9 + 5k.
+        // Final result for audio output, at cycle 9 + 5k (13 + 5k with OPAMP_6581).
         // The effective width is 20 bits (4 bit volume * 16 bit audio).
         audio_o = o[19:0];
     end
@@ -494,7 +574,7 @@ module sid_filter #(
             s <= 1'b0;
             a <= 16'(_1_Q_lsl10);  // 1/Q << 10
             b <= v_next;           // vbp
-        end else if (stage8) begin
+        end else if (stage8 && OPAMP_6581 == 0) begin
             // 7: Result for vhp ready
 
             // Audio output: aout = vol*amix
@@ -503,10 +583,16 @@ module sid_filter #(
             c <= 0;
             // s <= 1'b0;
             a <= { 12'b0, vol };         // Master volume
-            // Audio mixer / master volume input. The direct path is in whole LSB and the filter
-            // outputs carry FF fractional bits, so vd is scaled up, and the sum is rounded back
-            // to whole LSB before the clamp - which is then the same 17 -> 16 clamp as reDIP's.
-            b <= VW'(clamp(17'((DW'(DW'(vd1 >>> 7) <<< FF) + vf + RNDF) >>> FF)));
+            // Audio mixer / master volume input (msum above), clamped - the same 17 -> 16 clamp as reDIP's.
+            b <= VW'(clamp(msum));
+        end else if (stage12 && OPAMP_6581 != 0) begin
+            // U12: the master volume four cycles later, on the op-amp's output (a 6581) or the clamped sum
+            // (an 8580). The slot is stage 7's, where the multiplier gets no new operands; its result is
+            // ready on cycle 13 + 5k, when nothing else reads it.
+            c <= 0;
+            s <= 1'b0;
+            a <= { 12'b0, ovol12 };
+            b <= VW'(ob12);
         end
     end
 endmodule

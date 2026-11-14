@@ -43,6 +43,11 @@ Own edits since (U7, 2026-11-07; docs/specs/U7-sid-filter-precision.md): `sid_fi
 for bit, the default of his files; our `sid_multi.sv` and `cores/trx_sid/rtl/trx_sid.v` build 6),
 `sid_core.sv` passes the parameter through, and `c64_redip_sid/muladd.sv` (ours, GPL-3) took width
 parameters with the old 16x16->32 as defaults.
+Own edits since (U12, 2026-11-14; docs/specs/U12-the-sound-of-a-6581.md, ADR-0071): `sid_filter.sv` has
+`OPAMP_6581`: a 6581's filter output reaches the mixer through the op-amp curve libresidfp measured (new table
+`sid_opamp_6581.mem`, written by `cores/trx_sid/model/gen_opamp.py --redip`), and the master volume multiply moves
+to stage 12; `sid_core.sv` passes it through and takes the audio four cycles later. 0 = Dag Lem's mixer bit for bit
+and cycle for cycle, the default of his files; our `sid_multi.sv` and `trx_sid.v` build 1.
 
 Every modified reDIP file (SID and CIA) carries a dated "Modified by TRX64 Ultimate" notice under
 Dag Lem's header (CERN-OHL-S v2 section 3.3 b, added 2026-10-21).

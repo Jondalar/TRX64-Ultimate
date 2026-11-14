@@ -937,21 +937,24 @@ reg  [10:0] fq1, fq2, fq3;
 reg  [27:0] fbs1, fbs2, fbs3, fbs4, fbs5, fbs6, fbs7, fbs8;
 reg  signed [42:0] m1, m2, m3;
 reg  signed [24:0] nhp5, nbp3, nlp3, nbp4, nlp4, nbp5, nlp5, nbp6, nlp6, nhp6, nbp7, nlp7, nhp7, nbp8, nlp8, nhp8;
-reg  signed [27:0] mix6;
+reg  signed [26:0] vf6;
+reg  signed [22:0] vnf6;
 wire signed [33:0] u_vhp = (m3 >>> 10) - nlp4 - fvi4;
 wire signed [26:0] h_vf  = (fmv5[4] ? nlp5 : 25'sd0) + (fmv5[5] ? nbp5 : 25'sd0) + (fmv5[6] ? nhp5 : 25'sd0);
-// U12 D1 (a): the mixing node, F7..F9, then the volume (F10) and the saturation (F11). A 6581 goes through the
-// op-amp table, an 8580 bypasses it with the same latency, bit for bit what it was (ADR-0068). The filter state and
-// the bus value are written back at F8 as before; only the samples come three clocks later.
+// U12 D1 (a): a 6581's filter output reaches the mixer through the op-amp curve, F7..F9; the voices that bypass the
+// filter are added to it with the volume (F10), then the saturation (F11). An 8580 bypasses the table with the same
+// latency, bit for bit what it was. The filter state and the bus value are written back at F8 as before; only the
+// samples come three clocks later. Why the filter output alone: U12 D1h (sidref.cpp analog()).
 // x clamped to 24 bits, u = x + 2^23: knot u[23:14], fraction u[13:0] (sidref.cpp opamp_lookup)
-wire signed [23:0] ox6  = mix6 > 28'sh07fffff ? 24'sh7fffff : mix6 < -28'sh0800000 ? -24'sh800000 : mix6[23:0];
+wire signed [23:0] ox6  = vf6 > 27'sh07fffff ? 24'sh7fffff : vf6 < -27'sh0800000 ? -24'sh800000 : vf6[23:0];
 wire        [9:0]  oi6  = {~ox6[23], ox6[22:14]};
 wire        [9:0]  oi6n = oi6 == 10'h3ff ? 10'h3ff : oi6 + 10'd1;
 reg  signed [21:0] oy0_7, oy1_7, oy0_8;
 reg         [13:0] of7;
 reg  signed [37:0] om8;
 reg  signed [23:0] oy9;
-reg  signed [27:0] omx7, omx8, omx9;
+reg  signed [26:0] ovf7, ovf8, ovf9;
+reg  signed [22:0] ovn7, ovn8, ovn9;
 reg                osh7, osh8, osh9;
 reg         [3:0]  ovl7, ovl8, ovl9;
 reg         [2:0]  fso7, fso8, fso9, fso10, fso11;
@@ -985,24 +988,26 @@ always @(posedge clk) begin
     nhp5 <= sat25(u_vhp);
     nbp5 <= nbp4; nlp5 <= nlp4;
     fs5 <= fs4; fvnf5 <= fvnf4; fmv5 <= fmv4; fbs5 <= fbs4;
-    // F6: mix
-    mix6 <= fvnf5 + h_vf;
+    // F6: the filter output and the direct voices, apart (U12)
+    vf6 <= h_vf;
+    vnf6 <= fvnf5;
     nbp6 <= nbp5; nlp6 <= nlp5; nhp6 <= nhp5;
     fs6 <= fs5; fmv6 <= fmv5; fbs6 <= fbs5;
-    // F7: the two knots out of the table (above); fraction, chip model, the plain sum for an 8580
-    of7 <= ox6[13:0]; osh7 <= !cfg_8580[fs6[2]]; omx7 <= mix6; ovl7 <= fmv6[3:0]; fso7 <= fs6;
+    // F7: the two knots out of the table (above); fraction, chip model, the plain filter output for an 8580
+    of7 <= ox6[13:0]; osh7 <= !cfg_8580[fs6[2]]; ovf7 <= vf6; ovn7 <= vnf6; ovl7 <= fmv6[3:0]; fso7 <= fs6;
     nbp7 <= nbp6; nlp7 <= nlp6; nhp7 <= nhp6;
     fs7 <= fs6; fbs7 <= fbs6;
     // F8: (y1 - y0) x fraction; state written back from here
     om8 <= (oy1_7 - oy0_7) * $signed({1'b0, of7});
-    oy0_8 <= oy0_7; osh8 <= osh7; omx8 <= omx7; ovl8 <= ovl7; fso8 <= fso7;
+    oy0_8 <= oy0_7; osh8 <= osh7; ovf8 <= ovf7; ovn8 <= ovn7; ovl8 <= ovl7; fso8 <= fso7;
     nbp8 <= nbp7; nlp8 <= nlp7; nhp8 <= nhp7;
     fs8 <= fs7; fbs8 <= fbs7;
     // F9: y = y0 + the interpolated step
     oy9 <= oy0_8 + (om8 >>> 14);
-    osh9 <= osh8; omx9 <= omx8; ovl9 <= ovl8; fso9 <= fso8;
-    // F10: volume
-    mv10 <= (osh9 ? $signed({{4{oy9[23]}}, oy9}) : omx9) * $signed({1'b0, ovl9});
+    osh9 <= osh8; ovf9 <= ovf8; ovn9 <= ovn8; ovl9 <= ovl8; fso9 <= fso8;
+    // F10: the mixer (direct voices + filter output) times the volume
+    mv10 <= ($signed({{5{ovn9[22]}}, ovn9}) + (osh9 ? $signed({{4{oy9[23]}}, oy9}) : $signed({ovf9[26], ovf9})))
+            * $signed({1'b0, ovl9});
     fso10 <= fso9;
     // F11: saturate
     out11 <= out10 > 25'sh7ffff ? 20'sh7ffff : out10 < -25'sh80000 ? -20'sh80000 : out10[19:0];

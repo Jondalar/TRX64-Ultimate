@@ -36,7 +36,10 @@ int main(int argc, char** argv)
     d->rst = 0;
     for (int i = 0; i < 1024; i++) (void)rnd();   // the stimulus of the T25.4 bench (it drew its curve table here)
     long ndiff = 0, nread = 0, ncross = 0;
-    long smp[8];
+    // The eight samples of a pass, taken as a set when SID 7's arrives: with OPAMP_6581 the per-SID stream ends
+    // after clock 64 (sid_multi), so SID 7's sample comes in the next pass; the set compared at the end of a pass is
+    // then the one of the pass before (the read-back fields are this pass's).
+    long smp[8] = {0}, cur[8] = {0};
     auto field = [&](int s, int off) {
         int bit = 24 * s + off;
         unsigned x = 0;
@@ -60,7 +63,10 @@ int main(int argc, char** argv)
         for (int k = 0; k < 64; k++) {
             tick();
             d->start = 0;
-            if (d->smp_valid) smp[d->smp_sid] = (int32_t)(d->smp_data << 12) >> 12;
+            if (d->smp_valid) {
+                cur[d->smp_sid] = (int32_t)(d->smp_data << 12) >> 12;
+                if (d->smp_sid == 7) for (int s = 0; s < 8; s++) smp[s] = cur[s];
+            }
         }
         auto same = [&](int a, int b) {
             return smp[a] == smp[b] && field(a, 0) == field(b, 0) && field(a, 8) == field(b, 8) && field(a, 16) == field(b, 16);

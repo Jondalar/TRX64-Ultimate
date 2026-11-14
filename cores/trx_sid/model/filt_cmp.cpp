@@ -15,6 +15,8 @@
 //
 //   filt_cmp <memdir> <curve.mem|-> <log> [cycles] [6581|8580]
 //   env: DIGI=0..3 (default 2), RES=0|1 (default 0)
+//        OURS=<file>: our side from that file, one sample per C64 cycle (reDIP's output from
+//        designs/c64_basic/sim/redip/tb_cmp, U12), instead of the model; memdir and curve are then unused
 #include "sidref.h"
 #include "SID.h"
 #include <cmath>
@@ -82,9 +84,17 @@ int main(int argc, char** argv)
     char line[256];
     bool eof = false;
 
+    FILE* ours = getenv("OURS") ? fopen(getenv("OURS"), "r") : nullptr;
+    if (getenv("OURS") && !ours) { fprintf(stderr, "cannot open %s\n", getenv("OURS")); return 2; }
     auto step = [&]() {
-        m.clock();
-        a.push_back((double)m.out);
+        if (ours) {
+            long v = 0;
+            if (fscanf(ours, "%ld", &v) != 1) v = 0;
+            a.push_back((double)v);
+        } else {
+            m.clock();
+            a.push_back((double)m.out);
+        }
         int n = rs.clock(1, buf);
         for (int i = 0; i < n; i++) b.push_back((double)buf[i]);
         cyc++;
@@ -99,10 +109,10 @@ int main(int argc, char** argv)
             for (long i = 0; i < idle && cyc < ncyc; i++) step();
             if (cyc >= ncyc) break;
             if (rw == 'W' || rw == 'w') {
-                m.write(reg & 0x1f, (uint8_t)val);
+                if (!ours) m.write(reg & 0x1f, (uint8_t)val);
                 rs.write(reg & 0x1f, (uint8_t)val);
             } else {
-                m.read(reg & 0x1f);
+                if (!ours) m.read(reg & 0x1f);
                 rs.read(reg & 0x1f);
             }
             ops++;

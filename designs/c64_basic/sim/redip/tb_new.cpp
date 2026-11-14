@@ -12,6 +12,10 @@
 // 5. envelope levels (+0x80..): after gating voice v of SID s alone, level {s, v} rises to the
 //    sustain level and no other level moves
 // 6. ENV3 of every SID equals level {s, 2} at the end of a pass
+// 7. U12 (OPAMP_6581): every SID's sample is its master volume times the mixer input (taken at stage 8): for a
+//    6581 the direct voices plus the filter output (rounded to whole LSB) through the op-amp table
+//    (sid_opamp_6581.mem, interpolated as gen_opamp.py --redip describes it), for an 8580 reDIP's own sum, each
+//    through the 16 bit clamp
 #include "Vsid_multi.h"
 #include "Vsid_multi___024root.h"
 #include "verilated.h"
@@ -22,6 +26,8 @@
 #include <tuple>
 
 #define R(x) d->rootp->sid_multi__DOT__##x
+
+static long clamp16(long x) { return x > 32767 ? 32767 : x < -32768 ? -32768 : x; }
 
 static const int Q6[16] = {1448, 1324, 1219, 1129, 1052, 984, 925, 872, 826, 783, 745, 711, 679, 651, 624, 600};
 static const int Q8[16] = {1448, 1328, 1218, 1117, 1024, 939, 861, 790, 724, 664, 609, 558, 512, 470, 431, 395};
@@ -34,6 +40,25 @@ int main(int argc, char** argv)
     std::mt19937 rnd(seed);
     Vsid_multi* d = new Vsid_multi;
     long nerr = 0, nchk[8] = {0};
+    // 7: the op-amp table, as the build reads it (the .mem files are copied into the run directory)
+    static long opamp[1024];
+    {
+        FILE* f = fopen("sid_opamp_6581.mem", "r");
+        if (!f) { printf("FAIL: no sid_opamp_6581.mem\n"); return 1; }
+        char line[512]; int n = 0;            // the header comment is longer than a value line
+        while (n < 1024 && fgets(line, sizeof line, f)) {
+            if (line[0] == '/' || line[0] == '\n') continue;
+            long v = strtol(line, nullptr, 16) & 0xffff;
+            opamp[n++] = v & 0x8000 ? v - 0x10000 : v;
+        }
+        fclose(f);
+        if (n != 1024) { printf("FAIL: sid_opamp_6581.mem has %d values\n", n); return 1; }
+    }
+    auto opamp_of = [&](long x) {          // x: the 17 bit mixer sum
+        const long u = x + 65536, i = u >> 7, i1 = i == 1023 ? 1023 : i + 1, fr = u & 0x7f;
+        return clamp16(opamp[i] + (((opamp[i1] - opamp[i]) * fr) >> 7));
+    };
+    long ms[8] = {0}, mv[8] = {0}, m6[8] = {0}, mvd[8] = {0}, mfr[8] = {0};
     const int maxerr = 12;
     auto bad = [&](const char* what, long cyc, int k, long a, long b) {
         if (nerr++ < maxerr) printf("cycle %ld %s %d: rtl %lx expected %lx\n", cyc, what, k, a, b);
@@ -63,6 +88,10 @@ int main(int argc, char** argv)
     for (int i = 0; i < 4; i++) tick();
 
     unsigned reg[8][32] = {{0}};
+    // 4: the sums come first, then the pass's eight samples, one per clock. With the 6581's mixing node (U12) the
+    // last of them is out after the 64 clocks of its pass, so they are counted to their sums, not to the window.
+    long psmp[8] = {0}, psum[2] = {0, 0};
+    int pn = -1;
     auto pass = [&](bool have, int s, bool w, unsigned r, unsigned v, long cyc, bool check) {
         d->op_valid_i = have;
         d->op_we_i = w;
@@ -72,14 +101,49 @@ int main(int argc, char** argv)
         d->op_rdata_i = 0;
         d->start = 1;
         if (have && w) reg[s][r] = v;
-        long sums[2] = {0, 0};
-        long smp[8] = {0};
-        int nsmp = 0;
-        long sumv[2] = {0, 0};
-        bool gotsum = false;
         for (int k = 0; k < 64; k++) {
             tick();
             d->start = 0;
+            if (d->sum_valid) {
+                if (pn >= 0 && check) bad("sum", cyc, -1, pn, 8);   // a pass whose samples did not all come
+                psum[0] = (int32_t)(d->sum_u0 << 12) >> 12; psum[1] = (int32_t)(d->sum_u1 << 12) >> 12;
+                pn = 0;
+            } else if (d->smp_valid && pn >= 0) {
+                psmp[d->smp_sid] = (int32_t)(d->smp_data << 12) >> 12;
+                if (++pn == 8) {
+                    if (check) {
+                        for (int q = 0; q < 8; q++) {
+                            const long want = mv[q] * (m6[q] ? clamp16(mvd[q] + opamp_of(mfr[q])) : clamp16(ms[q]));
+                            nchk[7]++;
+                            if (psmp[q] != want) bad("mixer", cyc, q, psmp[q], want);
+                        }
+                        long sums[2] = {0, 0};
+                        for (int s2 = 0; s2 < 8; s2++) sums[s2 >> 2] += psmp[s2];
+                        for (int u = 0; u < 2; u++) {
+                            long x = sums[u] > 0x7ffff ? 0x7ffff : sums[u] < -0x80000 ? -0x80000 : sums[u];
+                            nchk[3]++;
+                            if (x != psum[u]) bad("sum", cyc, u, psum[u], x);
+                        }
+                    }
+                    pn = -1;
+                }
+            }
+            {
+                // 7: the mixer sum, volume and model of SID q at its stage 8
+                const int fc8 = R(core__DOT__filter_cycle);
+                for (int q = 0; q < 8; q++)
+                    if (fc8 == 8 + 5 * q) {
+                        ms[q] = (long)((int32_t)(R(core__DOT__filter__DOT__msum) << 15) >> 15);
+                        mv[q] = R(core__DOT__filter__DOT__vol);
+                        m6[q] = R(core__DOT__filter__DOT__model_r) == 0;
+                        // the hardware build: FILTER_FRAC = 6, vf 23 bit with 6 fractional bits, vd1 24 bit
+                        const long vf = (long)((int32_t)(R(core__DOT__filter__DOT__vf) << 9) >> 9);
+                        const long vd1 = (long)((int32_t)(R(core__DOT__filter__DOT__vd1) << 8) >> 8);
+                        const long x17 = ((vf + 32) >> 6) & 0x1ffff, d17 = (vd1 >> 7) & 0x1ffff;
+                        mfr[q] = x17 & 0x10000 ? x17 - 0x20000 : x17;
+                        mvd[q] = d17 & 0x10000 ? d17 - 0x20000 : d17;
+                    }
+            }
             if (!check) continue;
             int fc = R(core__DOT__filter_cycle), vc = R(core__DOT__voice_cycle);
             for (int q = 0; q < 8; q++) {
@@ -120,16 +184,8 @@ int main(int argc, char** argv)
                     nchk[2]++;
                     if ((long)(int32_t)R(core__DOT__voice__DOT__dca_DC) != want) bad("dc", cyc, j, R(core__DOT__voice__DOT__dca_DC), want);
                 }
-            if (d->smp_valid) { smp[d->smp_sid] = (int32_t)(d->smp_data << 12) >> 12; nsmp++; }
-            if (d->sum_valid) { gotsum = true; sumv[0] = (int32_t)(d->sum_u0 << 12) >> 12; sumv[1] = (int32_t)(d->sum_u1 << 12) >> 12; }
         }
         if (check) {
-            for (int s2 = 0; s2 < 8; s2++) sums[s2 >> 2] += smp[s2];
-            for (int u = 0; u < 2; u++) {
-                long x = sums[u] > 0x7ffff ? 0x7ffff : sums[u] < -0x80000 ? -0x80000 : sums[u];
-                nchk[3]++;
-                if (!gotsum || nsmp != 8 || x != sumv[u]) bad("sum", cyc, u, sumv[u], x);
-            }
             for (int s2 = 0; s2 < 8; s2++) {
                 d->lv_addr = s2 * 4 + 2;
                 d->eval();
@@ -201,8 +257,8 @@ int main(int argc, char** argv)
         nchk[6] = 8 + 8 + 24;
         if (nz) bad("reset left nonzero", ncyc, 0, nz, 0);
     }
-    printf("%s: seed %d waves %d reshi %d digi %d/%d, %ld cycles; checks w0 %ld 1/Q %ld dc %ld sum %ld env3 %ld level %ld reset %ld, %ld errors\n",
-           nerr ? "FAIL" : "PASS", seed, waves, reshi, digi[0], digi[1], ncyc, nchk[0], nchk[1], nchk[2], nchk[3], nchk[4], nchk[5], nchk[6], nerr);
+    printf("%s: seed %d waves %d reshi %d digi %d/%d, %ld cycles; checks w0 %ld 1/Q %ld dc %ld sum %ld env3 %ld level %ld reset %ld mixer %ld, %ld errors\n",
+           nerr ? "FAIL" : "PASS", seed, waves, reshi, digi[0], digi[1], ncyc, nchk[0], nchk[1], nchk[2], nchk[3], nchk[4], nchk[5], nchk[6], nchk[7], nerr);
     delete d;
     return nerr ? 1 : 0;
 }
