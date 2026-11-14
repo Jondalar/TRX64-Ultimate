@@ -138,7 +138,9 @@ module tb;
         .v_wdf_data(v_wdf_data), .v_wdf_mask(v_wdf_mask), .v_wdf_wren(v_wdf_wren),
         .v_rd_data(k_data), .v_rd_data_valid(v_valid), .v_urgent(v_urgent),
         .vclk(vclk), .pix(pix), .px(px), .py(py), .v60(1'b0),
-        .clk(pix_clk), .rgb_in(bg(h, vv)), .de_in(h >= 768 && vv >= 45), .hs_in(1'b0), .vs_in(1'b0),
+        // U16: the counters keep the 1080p50 layout of before (active 1920 x 1080 from cx 768, cy 45, one pixel per clock)
+        .clk(pix_clk), .ce(1'b1), .hact(12'd1920), .vact(11'd1080), .xact0(12'd768), .yact0(11'd45),
+        .rgb_in(bg(h, vv)), .de_in(h >= 768 && vv >= 45), .hs_in(1'b0), .vs_in(1'b0),
         .cx_in(h), .cy_in(vv),
         .rgb(o_rgb), .de(o_de), .hs(o_hs), .vs(o_vs), .cx(o_cx), .cy(o_cy));
 

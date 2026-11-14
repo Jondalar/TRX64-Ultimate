@@ -134,25 +134,25 @@ function [81:0] hm_geom(input [3:0] m, input [1:0] sc);
     case ({sc, m})
     {2'd0, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd5, 6'd9, 6'd5, 6'd9, 12'd0, 11'd45, 12'd72, 11'd108};  // 576p/480p 50 Hz Integer: window 720x486, text 576x360, margins 3.0 / 33.2 lines
     {2'd0, 4'd1}: hm_geom = {6'd1, 6'd2, 6'd1, 6'd2, 6'd1, 6'd2, 12'd240, 11'd90, 12'd320, 11'd160};  // 1280x720 50 Hz Integer: window 800x540, text 640x400, margins 3.5 / 14.3 lines
-    {2'd0, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Integer: window 1600x1080, text 1280x800, margins 3.2 / 29.9 lines
+    {2'd0, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Integer: window 1600x1080, text 1280x800, margins 3.2 / 21.9 lines
     {2'd0, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd5, 6'd9, 6'd5, 6'd8, 12'd0, 11'd24, 12'd64, 11'd80};  // 576p/480p 60 Hz Integer: window 640x432, text 512x320, margins 3.9 / 35.7 lines
-    {2'd0, 4'd7}: hm_geom = {6'd1, 6'd3, 6'd1, 6'd3, 6'd1, 6'd3, 12'd40, 11'd0, 12'd160, 11'd60};  // 1280x720 60 Hz Integer: window 1200x720, text 960x600, margins 3.3 / 47.0 lines
+    {2'd0, 4'd7}: hm_geom = {6'd1, 6'd3, 6'd1, 6'd3, 6'd1, 6'd3, 12'd40, 11'd0, 12'd160, 11'd60};  // 1280x720 60 Hz Integer: window 1200x720, text 960x600, margins 3.3 / 49.2 lines
     {2'd0, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd60, 12'd320, 11'd140};  // 1920x1080 60 Hz Integer: window 1600x960, text 1280x800, margins 3.8 / 43.4 lines
     {2'd0, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd1, 6'd2, 6'd1, 6'd2, 12'd0, 11'd60, 12'd80, 11'd100};  // 800x600 60 Hz Integer: window 800x480, text 640x400, margins 3.0 / 14.5 lines
     {2'd1, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd5, 6'd9, 6'd5, 6'd9, 12'd0, 11'd45, 12'd72, 11'd108};  // 576p/480p 50 Hz Fit: window 720x486, text 576x360, margins 3.0 / 33.2 lines
-    {2'd1, 4'd1}: hm_geom = {6'd3, 6'd8, 6'd3, 6'd8, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 50 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 29.9 lines
-    {2'd1, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 29.9 lines
+    {2'd1, 4'd1}: hm_geom = {6'd3, 6'd8, 6'd3, 6'd8, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 50 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 21.9 lines
+    {2'd1, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 21.9 lines
     {2'd1, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd5, 6'd9, 6'd5, 6'd8, 12'd0, 11'd24, 12'd64, 11'd80};  // 576p/480p 60 Hz Fit: window 640x432, text 512x320, margins 3.9 / 35.7 lines
-    {2'd1, 4'd7}: hm_geom = {6'd3, 6'd8, 6'd1, 6'd3, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 60 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 47.0 lines
-    {2'd1, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd2, 6'd9, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 60 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 46.9 lines
+    {2'd1, 4'd7}: hm_geom = {6'd3, 6'd8, 6'd1, 6'd3, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 60 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 49.2 lines
+    {2'd1, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd2, 6'd9, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 60 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 48.9 lines
     {2'd1, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd4, 6'd9, 6'd1, 6'd2, 12'd0, 11'd30, 12'd80, 11'd100};  // 800x600 60 Hz Fit: window 800x540, text 640x400, margins 3.2 / 38.2 lines
-    {2'd2, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd15, 6'd32, 6'd15, 6'd32, 12'd0, 11'd0, 12'd72, 11'd74};  // 576p/480p 50 Hz Fill: window 720x576, text 576x427, margins 3.4 / 42.1 lines
-    {2'd2, 4'd1}: hm_geom = {6'd5, 6'd16, 6'd3, 6'd8, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 50 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 29.9 lines
-    {2'd2, 4'd2}: hm_geom = {6'd5, 6'd24, 6'd1, 6'd4, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 50 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 29.9 lines
+    {2'd2, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd15, 6'd32, 6'd15, 6'd32, 12'd0, 11'd0, 12'd72, 11'd74};  // 576p/480p 50 Hz Fill: window 720x576, text 576x427, margins 3.4 / 34.1 lines
+    {2'd2, 4'd1}: hm_geom = {6'd5, 6'd16, 6'd3, 6'd8, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 50 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 21.9 lines
+    {2'd2, 4'd2}: hm_geom = {6'd5, 6'd24, 6'd1, 6'd4, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 50 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 21.9 lines
     {2'd2, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd1, 6'd2, 6'd9, 6'd16, 12'd0, 11'd0, 12'd64, 11'd62};  // 576p/480p 60 Hz Fill: window 640x480, text 512x356, margins 3.4 / 59.7 lines
-    {2'd2, 4'd7}: hm_geom = {6'd5, 6'd16, 6'd1, 6'd3, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 60 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 47.1 lines
-    {2'd2, 4'd8}: hm_geom = {6'd5, 6'd24, 6'd2, 6'd9, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 60 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 46.9 lines
-    {2'd2, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd2, 6'd5, 6'd9, 6'd20, 12'd0, 11'd0, 12'd80, 11'd77};  // 800x600 60 Hz Fill: window 800x600, text 640x445, margins 3.4 / 56.6 lines
+    {2'd2, 4'd7}: hm_geom = {6'd5, 6'd16, 6'd1, 6'd3, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 60 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 49.2 lines
+    {2'd2, 4'd8}: hm_geom = {6'd5, 6'd24, 6'd2, 6'd9, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 60 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 49.0 lines
+    {2'd2, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd2, 6'd5, 6'd9, 6'd20, 12'd0, 11'd0, 12'd80, 11'd77};  // 800x600 60 Hz Fill: window 800x600, text 640x445, margins 3.4 / 57.1 lines
     default: hm_geom = 0;
     endcase
 endfunction

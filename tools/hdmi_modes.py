@@ -154,7 +154,10 @@ def steps(fam, ha, va, sc):
 def geom(fam, ha, va, htot, vtot, sc, align):
     """The window (first pixel / line relative to the active origin, size), the text area (centred), and the margins in VIC lines at
     the frame align `align` (the VIC line at which the active origin starts): how long after the VIC wrote it every window pixel is read
-    first (m_read), and how long before the VIC writes its ring slot again it is read last (m_ring)."""
+    first (m_read), and how long before the VIC writes its ring slot again it is read last (m_ring). vic_scaler.v's ring slot is the
+    window row k (the raster line - Y0, modulo the frame) mod RING: row k is written over by row k + RING of the same frame, or, where
+    that is past the frame's last row, by row k mod RING of the next frame, VIC_LINES - k + k mod RING lines later (50 Hz rows 256-269:
+    56 lines)."""
     h, v, tv = steps(fam, ha, va, sc)
     for f in (h, v, tv):
         if f.denominator > 63 or f.numerator > 63 or f > 1: raise SystemExit("row %dx%d scale %s: step %s does not fit 6 bits / is > 1" % (ha, va, SCALES[sc], f))
@@ -168,13 +171,14 @@ def geom(fam, ha, va, htot, vtot, sc, align):
     mf = mo = None
     for k in range(wln):
         L = Y0[fam] + k
+        d = RING if k + RING < VIC_LINES[fam] else VIC_LINES[fam] - k + k % RING
         y1, y2 = yw0 + math.ceil(k / v), yw0 + math.ceil((k + 1) / v) - 1
         for c in (0, wpx - 1):
             x1, x2 = xw0 + math.ceil(c / h), xw0 + math.ceil((c + 1) / h) - 1
             rf = align * Lc + y1 * Lo + x1 * Lo / htot           # first read of (k, c)
             rl = align * Lc + y2 * Lo + (x2 + 1) * Lo / htot     # end of its last read
             a_ = (rf - (L * Lc + (X0 + c + 1) * 4)) / Lc          # after the VIC wrote it
-            b_ = (((L + RING) * Lc + (X0 + c) * 4) - rl) / Lc     # before the VIC writes that ring slot again
+            b_ = (((L + d) * Lc + (X0 + c) * 4) - rl) / Lc        # before the VIC writes that ring slot again
             mf = a_ if mf is None else min(mf, a_)
             mo = b_ if mo is None else min(mo, b_)
     return dict(hn=h.numerator, hd=h.denominator, vn=v.numerator, vd=v.denominator, tvn=tv.numerator, tvd=tv.denominator,

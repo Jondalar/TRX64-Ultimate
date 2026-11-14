@@ -4,7 +4,7 @@ set_property IOSTANDARD LVCMOS18 [get_ports RMII_REFCLK]
 create_clock -name rmii_clock -period 20 [get_ports RMII_REFCLK]
 
 set_property PACKAGE_PIN F6 [get_ports HDMI_REFCLK_P]
-# The modes run 148.06-149.14 MHz (PAL 148.87, NTSC-50 149.14 = 6875/1456 of dot4x, 60 Hz 148.06-148.24);
+# The HDMI rows of U16 run 122.7-149.14 MHz (tools/hdmi_modes.py; the fastest is 1080p50 at NTSC-50, 149.14 MHz);
 # the 6.585 ns period (151.85 MHz, the old 50 Hz clock) is tighter than any of them and stays
 create_clock -name hdmi_refclk -period 6.585 [get_ports HDMI_REFCLK_P]
 

@@ -16,7 +16,7 @@
 //   4 reprogram mmcm_sys over its DRP (MMCM reset, read-modify-write of the
 //     registers below, release, wait for its lock and mmcm_ref's), start the
 //     clocks again;
-//   5 the lock loss has restarted cdce_i2c, which now writes the synthesizer
+//   5 the lock loss has restarted cdce_mode (U16: and mode_req.v has moved its row to the new family), which now writes the synthesizer
 //     setting of the new family (cdce_v60) and holds the GTPs in reset until
 //     then; wait for it (i2c_done);
 //   6 release the I2C buses, hand the new mode out (vmode) and the halt back.
@@ -47,7 +47,7 @@ module mode_ctl (
     input  wire        i2c_parked,      // app_i2c (any clock)
     output reg         kb_pause = 1'b0,
     input  wire        kb_parked,       // any clock
-    input  wire        i2c_done,        // cdce_i2c (clk)
+    input  wire        i2c_done,        // cdce_mode (clk)
     output reg         cdce_v60 = 1'b0, // the synthesizer setting to write: 60 Hz family
     output reg         sys_en = 1'b1,   // sys and sid2x run
     output reg         reconf = 1'b0,   // mmcm_sys is being reconfigured

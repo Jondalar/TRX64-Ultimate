@@ -1,7 +1,7 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
-**Status:** IN PROGRESS (2026-11-14). The mode table, its tool, `hdmi_timing.v` and the encoder fork are in; the gateware wiring is
-being built (§5).
+**Status:** IN PROGRESS (2026-11-15). Gateware built: every bench passes, yosys lint clean; not yet run: Vivado (CI) and the board.
+Next: the application part for `trx64g` (D5, D6's freeze still), handed to the next agent (§5).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -69,7 +69,8 @@ U16, "Ja ich will U17 gleich dazu"). The VIC window is 400 x 270 (60 Hz 400 x 24
 The scale is written at 0x4F01 (D4) and taken at a frame start, without the restart sequence (no CDCE, transmitter or MMCM restart).
 Each row and scale has its own align line (`hm_align(m, sc)`, the smallest at which every window pixel is read at least 3 lines after
 the VIC wrote it; Claude, 2026-11-14), so a scale change re-aligns the output frame once: one disturbed frame, the picture keeps its
-place. 1080p at Fit keeps today's lines (20 and 35); 1080p60 Integer aligns at 37 (the same picture place, 2 lines more delay).
+place. Where the new scale's align line is the old one the lock holds and nothing is disturbed (vic_scaler.v). 1080p at Fit keeps
+today's lines (20 and 35); 1080p60 Integer aligns at 37 (the same picture place, 2 lines more delay).
 
 **D4 — The request register is MultiCore's** (Claude). `mode_req.v` as in MultiCore's host: write 0x4F00 of the
 application's overlay window = the index; read 0x4F04-0x4F09 = magic 0x48, version 1, flags, the mode running, the
@@ -78,7 +79,10 @@ changes), read 0x4F0A = the scale in use (power-up 1, Fit; the version at 0x4F05
 and reads 0 there; MultiCore's mode_req.v writes only 0x4F00 and reads 0x4F04-0x4F09, its hdmi_out.v read mux takes only those, its
 applications define only 0x4F00 and 0x4F04-0x4F09 in `app/video/videomode.h`). This design is a C64-type core (`c64_type = 1`): the family part of a request is replaced by the
 System Mode's, and only a locked row is taken; anything else is refused and nothing changes. An accepted request
-restarts the CDCE sequence, the transmitters and the pixel MMCM, as MultiCore's does.
+restarts the CDCE sequence, the transmitters and the pixel MMCM, as MultiCore's does. A System Mode switch moves the row to
+the other family; where the request's row does not exist there (800 x 600 has no 50 Hz row) the family's 576p row is taken, as the
+application maps it (D5; Claude, 2026-11-15: MultiCore's module has only the two 1080p rows locked and needs no such rule, here row 3
+would have reached the synthesizer and the timing).
 
 **D5 — Power-up is 1080p, the application sets the mode** (Claude). The gateware starts as today (index 2 or 8).
 - `trx64u` runs MultiCore's generic coreapp, which already writes 0x4F00 from its "Picture" setting, with the
@@ -86,7 +90,11 @@ restarts the CDCE sequence, the transmitters and the pixel MMCM, as MultiCore's 
   has to let its coreapp offer the modes for `trx64u` (its descriptor) and write 0x4F01 for the scale (MultiCore's side; nothing of
   it is built here).
 - `trx64g` runs our application: it writes 0x4F00 from `CFG_HDMI_RESOLUTION` at start and on every change; its default becomes
-  FullHD (1080p) in our fork (Alex, 2026-11-14, "a"; Gideon's is SD), so a machine that never set it keeps 1080p. 1024 x
+  FullHD (1080p) in our fork (Alex, 2026-11-14, "a"; Gideon's is SD), so a machine that never set it keeps 1080p. A machine whose
+  settings file already holds SD comes up at 576p after the update until the user picks FullHD (accepted, Alex, 2026-11-14, "a"; no
+  migration): the `.cfg` beside the `.cor` stores every item with its value, changed or not (`components/config.cc`
+  `ConfigItem::pack`, `save_core_cfg`), so a new default reaches only a file written as defaults only, or none. A user-visible
+  change: the app commit says so. 1024 x
   768 and 1280 x 1024 are taken as 800 x 600 in the 60 Hz family; in the 50 Hz family every PC mode is taken as
   576p (no 50 Hz PC row exists). A new config item "HDMI Picture Scale" (Integer / Fit / Fill, default Fit) beside "HDMI Scan
   Resolution" is written to 0x4F01 at start and on every change. Gideon's timing and scaler registers stay unread.
@@ -171,3 +179,28 @@ Scenario: Nothing that worked stops working
   shipped, 1080p60 Integer 37); a scale change re-aligns the frame once (D3). The freeze still is in scope (D6), the encoder's two
   behaviour changes are accepted (D8). `tools/hdmi_modes.py check` passes, `selftest` 17 of 17; `hdmi_modes.vh` regenerated. trx64g's
   default for "HDMI Scan Resolution" becomes FullHD (Alex, "a"; D5).
+- **2026-11-14, trx64g's default (Alex, via the coordinator).** "HDMI Scan Resolution" defaults to FullHD in our fork; machines
+  whose `.cfg` holds SD get 576p after the update until the user changes it, accepted, no migration (D5, with the reason).
+- **2026-11-15, the gateware (agent).** In: `cdce_mode.v` (replaces `cdce_i2c.v`, gone: the row's lock bytes from `hm_cdce_lock`;
+  restarted by the lock loss of a System Mode switch and by `mode_req`'s `vm_rst`), `mode_req.v` (MultiCore's with `c64_type` = 1
+  fixed; 0x4F01 / 0x4F0A, the scale taken at a frame start, power-up Fit), `tmds_rep.v` (MultiCore's), `vic_scaler.v` (rewritten:
+  on `hdmi_timing`'s counters with `ce`, one accumulator per axis from `hm_geom`, the align line per row and scale handed over with
+  the VIC side's toggle, `align` held until a `ce`, the lock dropped only where the align line changes), `overlay.v` (MultiCore's:
+  the box centred on the active area), `c64_text.v` (`ce`, fractional steps, the area from `hm_geom`), `pix_layer.v` (`ce`,
+  positions from the active origin), `top.v` (the wiring; encoder rate `hm_rate` / `hm_rate_alt` by System Mode, `hm_aspect`,
+  `tmds_rep` to the GTPs, the T40 measure from the timing's vsync), `build.tcl` (`hdmi_enc/` and the three vendor files, the new
+  modules); stale 1080p comments fixed in `hdmi_gtp.v`, `build.tcl`, `pins.xdc`, `top.v`, `pix_layer.v`, `c64_text.v`.
+  **Found and fixed:** the ring slot was the raster line, so at 60 Hz the window's rows 225-231 (lines 256-262) shared their slots
+  with the next frame's lines 0-6, written 7 lines later, before the scaler read them: 1080p60 as shipped showed lines 0-6 of the
+  next frame in the bottom border rows (invisible on a plain border; the new bench caught it). The slot is now the window row
+  (`line - Y0` modulo the frame), the tool's ring model follows (50 Hz rows 256-269 keep their slot 56 lines, every other row 64;
+  `check` still passes, smallest ring margin 14.3 lines). Also found: with 800 x 600 requested, a switch to a 50 Hz System Mode
+  moved the row to 3, which does not exist; `mode_req` now takes 576p there (D4).
+  Benches (iverilog): `sim/scaler/run.sh` (7 rows x 3 scales, two frames each: clocks and time per frame = the VIC frame, the window
+  in place, every pixel, every ring read; 4 scale changes, palette and scan lines; 3 controls caught), `tb_hdmi_timing.v` (7 rows,
+  9 refused values, align on every row), `tb_mode_req.v` (path in both families, CDCE bytes of every row, the scale register),
+  `tb_tmds_rep.v`, `sim/text/run.sh` (the freeze text's geometry, 7 x 3, control caught), `sim/ntsc/run.sh` (mode_ctl with
+  `mode_req` + `cdce_mode`), `overlay_sim.py` (its model brought to the RTL, SX / SY and the dimmed box: 0 pixels off in the three
+  menu frames), `pixlayer/run.sh` and `run_still.sh`: all PASS. The Verilator tops (`statebus`, `ring_core`, tier 2) need GHDL in the
+  CI container and were not run here; their `c64_text` instances with the new ports elaborate (iverilog, a wrong port name as
+  control). Not run: Vivado, the board.

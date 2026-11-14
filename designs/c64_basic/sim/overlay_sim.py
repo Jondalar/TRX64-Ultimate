@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Overlay in simulation: tb_overlay.v (vic_scaler + overlay) with the register
+"""Overlay in simulation: tb_overlay.v (hdmi_timing + vic_scaler + overlay, 1080p50) with the register
 writes the Ultimate app makes, four 1080p frames dumped and checked against a
-model of Gideon's char_generator_slave12, the frames saved as PNG.
+model of Gideon's char_generator_slave12 and of overlay.v's box (U16 D6, MultiCore T164 WP6: SY the largest
+of 1..4 that keeps the box inside the active height, SX the largest inside the width and at most 2 x SY,
+centred on the active area), the frames saved as PNG.
 
   frame 0  overlay as after reset (off): the reference picture
-  frame 1  menu with the app's SD settings (40 x 25 of 8 x 9): scale 3
-  frame 2  the app's 1080p settings (12 x 24 font_pkg, big_font): scale 1
-  frame 3  the app's 720p settings (8 x 16, stretch_y): scale 2
+  frame 1  menu with the app's SD settings (40 x 25 of 8 x 9): 4 x 4
+  frame 2  the app's 1080p settings (12 x 24 font_pkg, big_font): 2 x 1
+  frame 3  the app's 720p settings (8 x 16, stretch_y): 4 x 2
 
 Usage: overlay_sim.py [png directory]   (default: sim/build)
 """
@@ -106,8 +108,9 @@ with open(os.path.join(work, "ovl_ops.txt"), "w") as f:
 
 # --- run ---------------------------------------------------------------------------
 vvp = os.path.join(work, "tb_overlay.vvp")
-subprocess.run(["iverilog", "-g2005", "-o", vvp, os.path.join(here, "tb_overlay.v"),
-                os.path.join(design, "vic_scaler.v"), os.path.join(design, "overlay.v")], check=True)
+subprocess.run(["iverilog", "-g2012", "-I", design, "-o", vvp, os.path.join(here, "tb_overlay.v"),
+                os.path.join(design, "hdmi_timing.v"), os.path.join(design, "vic_scaler.v"),
+                os.path.join(design, "pal_ram.v"), os.path.join(design, "overlay.v")], check=True)
 os.makedirs(os.path.join(work, "mem"), exist_ok=True)
 for m in ("ovl_font8.mem", "ovl_font12.mem"):
     src = os.path.join(design, "mem", m)
@@ -146,8 +149,10 @@ def expected(ref, cpl, nl, cw, chreg):
     ch, big, stretch = chreg & 0x1F, bool(chreg & 0x40), bool(chreg & 0x80)
     seq = char_lines(ch, big)
     w, h = cpl * cw, nl * len(seq)
-    s = 3 if 3 * w <= 1920 and 3 * h <= 1080 else 2 if 2 * w <= 1920 and 2 * h <= 1080 else 1
-    x0, y0 = (1920 - s * w) // 2, (1080 - s * h) // 2
+    big4 = lambda n, a: 4 if 4 * n <= a else 3 if 3 * n <= a else 2 if 2 * n <= a else 1
+    sy = big4(h, 1080)
+    sx = min(big4(w, 1920), 2 * sy)
+    x0, y0 = max(0, (1920 - sx * w) // 2), max(0, (1080 - sy * h) // 2)
     img = list(ref)
     for r in range(nl):
         for li, y in enumerate(seq):
@@ -158,13 +163,18 @@ def expected(ref, cpl, nl, cw, chreg):
                 for b in range(cw):
                     fg = ((g >> (cw - 1 - b)) & 1) ^ (code >> 7)
                     idx = col & 15 if fg else col >> 4
-                    if idx == 0:            # transparency 0
-                        continue
-                    for dy in range(s):
-                        oy = y0 + (r * len(seq) + li) * s + dy
-                        ox = x0 + (c * cw + b) * s
-                        img[oy * 1920 + ox: oy * 1920 + ox + s] = [PAL[idx]] * s
-    return img, (s, x0, y0, s * w, s * h)
+                    for dy in range(sy):
+                        oy = y0 + (r * len(seq) + li) * sy + dy
+                        ox = x0 + (c * cw + b) * sx
+                        for px in range(ox, min(1920, ox + sx)):
+                            if oy >= 1080:
+                                continue
+                            if idx == 0:    # transparency 0: inside the box the picture at half brightness (overlay.v p_dim)
+                                p = ref[oy * 1920 + px]
+                                img[oy * 1920 + px] = ((p >> 1) & 0x7F7F7F)
+                            else:
+                                img[oy * 1920 + px] = PAL[idx]
+    return img, ("%d x %d" % (sx, sy), x0, y0, sx * w, sy * h)
 
 
 def load(n):

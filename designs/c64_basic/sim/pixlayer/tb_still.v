@@ -103,7 +103,8 @@ module tb;
         .v_wdf_data(v_wdf_data), .v_wdf_mask(v_wdf_mask), .v_wdf_wren(v_wdf_wren),
         .v_rd_data(k_data), .v_rd_data_valid(v_valid), .v_urgent(v_urgent),
         .vclk(vclk), .pix(pix), .px(px), .py(py), .v60(v60),
-        .clk(cpu_clk), .rgb_in(24'd0), .de_in(1'b0), .hs_in(1'b0), .vs_in(1'b0),
+        .clk(cpu_clk), .ce(1'b1), .hact(12'd1920), .vact(11'd1080), .xact0(12'd768), .yact0(11'd45),
+        .rgb_in(24'd0), .de_in(1'b0), .hs_in(1'b0), .vs_in(1'b0),
         .cx_in(12'd0), .cy_in(11'd0),
         .rgb(o_rgb), .de(o_de), .hs(o_hs), .vs(o_vs), .cx(o_cx), .cy(o_cy));
 

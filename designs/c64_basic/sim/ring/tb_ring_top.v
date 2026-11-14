@@ -208,7 +208,11 @@ module tb_ring_top (
         .port_req(tx_req), .port_addr(tx_paddr), .port_rom(tx_rom), .port_grant(tx_go),
         .port_rdata(ram_rdata), .cram_addr(tx_cram_addr), .cram_grant(!win_cram_use),
         .cram_rdata(cram_rdata),
-        .clk(pclk), .rgb_in(24'h123456), .de_in(vde), .hs_in(1'b0), .vs_in(1'b0),
+        // U16: the counters above keep the 1080p50 layout of before (active from cx 768, cy 45, one pixel per clock); the text
+        // area is hm_geom's 1080p Fit one, 4 x 4 from 320 / 140 of the active area: 1280 x 800 from cx 1088, cy 185
+        .clk(pclk), .ce(1'b1), .xact0(12'd768), .yact0(11'd45), .xt0(12'd320), .yt0(11'd140),
+        .hn(6'd1), .hd(6'd4), .tvn(6'd1), .tvd(6'd4),
+        .rgb_in(24'h123456), .de_in(vde), .hs_in(1'b0), .vs_in(1'b0),
         .cx_in(vcx), .cy_in(vcy),
         .rgb(o_rgb), .de(o_de), .hs(), .vs(), .cx(o_cx), .cy(o_cy)
     );

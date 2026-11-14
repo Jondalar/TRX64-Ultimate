@@ -52,7 +52,14 @@ case_leds: ci/sim_iv.sh designs/c64_basic/sim/tb_case_leds.v designs/c64_basic/c
 mig_arb: ci/sim_iv.sh designs/c64_basic/sim/tb_mig_arb.v @mig
 reu_map: ci/sim_iv.sh designs/c64_basic/sim/tb_reu_map.v designs/c64_basic/reu_ddr_map.v @mig
 udp_audio: ci/sim_iv.sh designs/c64_basic/sim/tb_udp_audio.v designs/c64_basic/udp_stream.v designs/c64_basic/udp_audio.v designs/c64_basic/stream_mux.v
-scaler: ci/sim_iv.sh designs/c64_basic/sim/tb_scaler.v designs/c64_basic/vic_scaler.v designs/c64_basic/pal_ram.v
+scaler: designs/c64_basic/sim/scaler/run.sh designs/c64_basic/sim/tb_scaler.v designs/c64_basic/vic_scaler.v designs/c64_basic/pal_ram.v
+  designs/c64_basic/hdmi_timing.v designs/c64_basic/hdmi_modes.vh
+hdmi_timing: ci/sim_iv.sh designs/c64_basic/sim/tb_hdmi_timing.v designs/c64_basic/hdmi_timing.v designs/c64_basic/hdmi_modes.vh
+mode_req: ci/sim_iv.sh designs/c64_basic/sim/tb_mode_req.v designs/c64_basic/mode_req.v designs/c64_basic/cdce_mode.v
+  designs/c64_basic/hdmi_timing.v designs/c64_basic/hdmi_modes.vh
+tmds_rep: ci/sim_iv.sh designs/c64_basic/sim/tb_tmds_rep.v designs/c64_basic/tmds_rep.v
+text_geom: designs/c64_basic/sim/text/run.sh designs/c64_basic/sim/tb_text_geom.v designs/c64_basic/c64_text.v designs/c64_basic/pal_ram.v
+  designs/c64_basic/hdmi_timing.v designs/c64_basic/hdmi_modes.vh
 sock_audio: ci/sim_iv.sh designs/c64_basic/sim/tb_sock_audio.v designs/c64_basic/i2s_out.v designs/c64_basic/sock_audio.v
 
 pixlayer: designs/c64_basic/sim/pixlayer/run.sh designs/c64_basic/sim/pixlayer/tb_pixlayer.v designs/c64_basic/sim/pixlayer/tgl_client.v designs/c64_basic/pix_layer.v designs/c64_basic/trx_io.v @mig

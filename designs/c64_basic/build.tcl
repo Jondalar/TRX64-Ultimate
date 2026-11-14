@@ -99,7 +99,8 @@ create_project -in_memory -part $part
 set_property target_language Verilog [current_project]
 
 # GTP transmitters: 1.5 Gb/s from 150 MHz picks the same PLL dividers
-# (N = 20, M = 1, D = 4) as the real 1.481-1.491 Gb/s from 148.06-149.14 MHz.
+# (N = 20, M = 1, D = 4) as the real 1.227-1.491 Gb/s from the TMDS clocks of
+# the HDMI rows, 122.7-149.1 MHz (U16, tools/hdmi_modes.py: PLL VCO 2.45-2.98 GHz).
 trx_ip gt_hdmi xilinx.com:ip:gtwizard [list \
   CONFIG.identical_val_tx_line_rate {1.5} \
   CONFIG.identical_val_tx_reference_clock {150.000} \
@@ -119,8 +120,11 @@ trx_ip gt_hdmi xilinx.com:ip:gtwizard [list \
 # c64 is a black box until read_checkpoint -cell fills it in after synthesis.
 set_msg_config -id {Project 1-486} -new_severity INFO
 read_verilog -sv hdmi_gtp.v
-read_verilog -sv [list {*}[glob $core/hdmi/*.sv] $core/hdmi/hdmi.v]
-read_verilog $core_stub top.v vic_scaler.v pal_ram.v cdce_i2c.v mode_ctl.v c64u_keyboard.v bling_keyboard.v jtag_dbg.v ddr2_port.v ddr2_ctrl.v ddr2_lean.v cal_seq.v i2s_out.v sock_audio.v \
+# U16: the encoder is hdmi_enc/ (TRX64U-MultiCore's fork: ce, the frame at run time, PR = 0; six forked files); the three
+# unforked ones come from the vendor tree. The core's own copy ($core/hdmi, core_read above) is a different synthesis run.
+read_verilog -sv [list {*}[glob hdmi_enc/*.sv] hdmi_enc/hdmi.v $core/hdmi/audio_sample_packet.sv $core/hdmi/audio_info_frame.sv \
+  $core/hdmi/source_product_description_info_frame.sv]
+read_verilog $core_stub top.v vic_scaler.v pal_ram.v hdmi_timing.v mode_req.v cdce_mode.v tmds_rep.v mode_ctl.v c64u_keyboard.v bling_keyboard.v jtag_dbg.v ddr2_port.v ddr2_ctrl.v ddr2_lean.v cal_seq.v i2s_out.v sock_audio.v \
   con_ring.v udp_stream.v udp_audio.v stream_mux.v app_i2c.v overlay.v usb_phy.v iec_bus.v \
   cart_fill.v trx_io.v trx_sys.v dma_win.v pix_layer.v c64_text.v trx_engine.v drv_dbg.v app_input.v rv_dbg.v
 read_verilog bling_io.v case_leds.v reu_ddr_map.v

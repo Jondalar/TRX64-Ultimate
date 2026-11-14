@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// mode_ctl (T40) with cdce_i2c against a model of the MMCM's DRP and lock, the
+// mode_ctl (T40) with the synthesizer path of top.v since U16 (mode_req.v: the family from cdce_v60 replaces
+// the request's, the row 2 / 8 to cdce_mode.v, which restarts on the lock loss and on vm_rst) against a model of the MMCM's DRP and lock, the
 // machine halt and the I2C parking:
 //   - every switch: the DRP writes only while the MMCM is held in reset, every
 //     table register ends with its value and the kept bits as they were, the
 //     other registers untouched; sys stopped (sys_en) and the lock loss kept
 //     from sys_rst (reconf) for the whole time the MMCM is unlocked; the halt
 //     and both parkings around it; vmode at the end only;
-//   - the synthesizer bytes cdce_i2c sends after each switch (decoded from the
+//   - the synthesizer bytes cdce_mode sends after each switch (decoded from the
 //     bus): 50 Hz 03 70 33 ED, 60 Hz 3D E0 F3 CD in registers 0x18-0x1B;
 //   - the read-back check (mism) stays clear when the model starts with PAL's
 //     table values.
-//   iverilog -g2012 -o m tb_mode_ctl.v ../../mode_ctl.v ../../cdce_i2c.v && vvp m
+//   iverilog -g2012 -I../.. -o m tb_mode_ctl.v ../../mode_ctl.v ../../mode_req.v ../../cdce_mode.v && vvp m
 `timescale 1ns/1ps
 module tb;
     reg clk = 0;
@@ -54,8 +55,13 @@ module tb;
     reg halted = 0, kb_parked = 0;
     always @(posedge clk) begin halted <= halt_req; kb_parked <= kb_pause; end
     wire scl_low, sda_low, i2c_done;
-    cdce_i2c cdce (.clk(clk), .rst(por | ~clocks_ok), .scl_low(scl_low), .sda_low(sda_low),
-                   .done(i2c_done), .v60(cdce_v60));
+    wire [3:0] vm_mode; wire vm_rst;
+    mode_req mreq (.clk_sys(clk), .we(1'b0), .addr(15'd0), .wdata(8'd0), .rdata(), .rhit(),
+                   .clk50(clk), .fam_v60(cdce_v60), .vm_mode(vm_mode), .vm_rst(vm_rst),
+                   .clk_pix(clk), .mode_pix(), .fstart(1'b0), .scale_pix(),
+                   .gt_ready(1'b0), .pix_locked(1'b0), .running(1'b0), .mode_q(4'd0));
+    cdce_mode cdce (.clk(clk), .rst(por | ~clocks_ok | vm_rst), .scl_low(scl_low), .sda_low(sda_low),
+                    .done(i2c_done), .mode(vm_mode));
     mode_ctl dut (
         .clk(clk), .rst(por), .fmt(fmt), .halt_req(halt_req), .halted(halted), .in_reset(1'b0),
         .i2c_hold(i2c_hold), .i2c_parked(1'b1), .kb_pause(kb_pause), .kb_parked(kb_parked),

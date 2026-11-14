@@ -1,28 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Programs a CDCE(L)913/CDCEL824-type clock synthesizer at I2C address 0x64
-// the way the U64-II bootloader does (block write of 8 bytes from register
-// 0x14), with PLL1 at 55/14 of its input: 148.87 MHz (PAL; NTSC-50 149.14 MHz)
-// out of the 37.89 MHz we feed it (125/104 of dot4x), so that the 2640 x 1125
-// HDMI frame (CEA 1080p50 blanking) is exactly one VIC frame of 63 x 312
-// cycles (pixel clock = 6875/1456 of dot4x). N 55, M 14, P 1 (register 3),
-// TI: N' = N x 2^(4-P) = 440 = 14 x 31 + 6, so Q 31, R 6 (P 2 would give
-// Q 15 < 16), VCO 148.9-149.1 MHz in the range 125-150 MHz.
-// Pdiv2/Pdiv3 = 1 as in the bootloader.
-// Drives both buses the bootloader uses; ACKs are not checked. done goes high
-// when the sequence has been sent twice.
-// v60 (T40, the 60 Hz modes NTSC and PAL-60; static while rst is low): N/M =
-// 990/263 instead, so that the 2200 x 1125 HDMI frame is exactly one VIC frame
-// of 65 x 263 cycles (pixel clock = 61875/13676 of dot4x, 148.06 MHz at NTSC):
-// N 990, P 3, Q 30, R 30 (TI: N' = N x 2^P = 7920 = 263 x 30 + 30), VCO range
-// 125-150 MHz.
-module cdce_i2c (
-    input  wire clk,            // 50 MHz
-    input  wire rst,
-    output reg  scl_low,        // 1 = pull SCL low
-    output reg  sda_low,        // 1 = pull SDA low
-    output reg  done,
-    input  wire v60
+// U16: programs the CDCE(L)913/CDCEL824-type clock synthesizer at I2C address 0x64 for the HDMI mode `mode` (hdmi_modes.vh,
+// family * 6 + hdmi). Ported from TRX64U-MultiCore's host/cdce_mode.v (T164 WP7 there), which grew out of this design's cdce_i2c.v:
+// the same sequence as the U64-II bootloader (block write of 8 bytes from register 0x14, Pdiv2/Pdiv3 = 1, sent twice), with PLL1's
+// registers 0x18..0x1B from hm_cdce_lock(mode) instead of the two System Mode blobs. Every row of this design is locked: its N/M makes
+// the HDMI frame exactly one VIC frame out of the 37.89 MHz we feed the chip (125/104 of dot4x; tools/hdmi_modes.py proves the bytes
+// against the chip's rules for both System Modes of the family). Rows 2 and 8 (1080p50 / 1080p60) are byte for byte cdce_i2c.v's
+// 55/14 and 990/263 blobs. This design has no frame-buffer rows, so MultiCore's `lock` port (a choice of table) is not here.
+// `mode` has to be steady from rst on; rst starts the sequence again: power-up and lock loss (por_rst | ~clocks_ok, which also covers
+// a System Mode switch, mode_ctl.v step 5) and every accepted mode request (mode_req.v vm_rst).
+// Drives both buses the bootloader uses; ACKs are not checked. done goes high when the sequence has been sent twice.
+module cdce_mode (
+    input  wire       clk,          // 50 MHz
+    input  wire       rst,
+    output reg        scl_low,      // 1 = pull SCL low
+    output reg        sda_low,      // 1 = pull SDA low
+    output reg        done,
+    input  wire [3:0] mode
 );
+`include "hdmi_modes.vh"
+    wire [31:0] pll = hm_cdce_lock(mode);
     localparam NBYTES = 11;
     function [7:0] byte_at; input [3:0] i;
         case (i)
@@ -33,10 +29,10 @@ module cdce_i2c (
             4: byte_at = 8'h00;     // 0x15
             5: byte_at = 8'h01;     // 0x16: Pdiv2 = 1
             6: byte_at = 8'h01;     // 0x17: Pdiv3 = 1
-            7: byte_at = v60 ? 8'h3D : 8'h03;   // 0x18: N[11:4]
-            8: byte_at = v60 ? 8'hE0 : 8'h70;   // 0x19: N[3:0], R[8:5]
-            9: byte_at = v60 ? 8'hF3 : 8'h33;   // 0x1A: R[4:0], Q[5:3]
-            default: byte_at = v60 ? 8'hCD : 8'hED; // 0x1B: Q[2:0], P, VCO range
+            7: byte_at = pll[31:24];    // 0x18: N[11:4]
+            8: byte_at = pll[23:16];    // 0x19: N[3:0], R[8:5]
+            9: byte_at = pll[15:8];     // 0x1A: R[4:0], Q[5:3]
+            default: byte_at = pll[7:0]; // 0x1B: Q[2:0], P, VCO range
         endcase
     endfunction
 

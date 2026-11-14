@@ -7,15 +7,19 @@
 //   - clock: dot4x, 31.53 MHz (PAL); the app's System Mode switches it live to
 //     NTSC, PAL-60 or NTSC-50 (T40, mode_ctl.v).
 //   - memory: block RAM (c64_mem, inside c64_core) in place of the SDRAM port.
-// and replaces kawari's 576p output with 1080p50 (1080p60 in the 60 Hz modes):
-//   - vic_scaler takes the VIC's native pixels, scales them 4x (4.5x
-//     vertically at 60 Hz) and puts out 1080p with 2640 x 1125 (2200 x 1125)
-//     clocks per frame (CEA blanking), one frame per VIC frame.
-//   - The pixel clock, 148.87 MHz = 6875/1456 of dot4x (148.06 MHz = 61875/13676
-//     of NTSC's), comes from the board's CDCEL824 (55/14, or 990/263) fed with
-//     37.89 MHz = 125/104 of dot4x from a second MMCM; it is also the GTP
-//     reference (1.489 Gb/s per lane, two pixels per 20-bit word), so picture
-//     and VIC stay locked.
+// and replaces kawari's 576p output with the HDMI modes of U16 (576p, 720p,
+// 1080p at 50 Hz; 480p, 720p, 1080p, 800 x 600 at 60 Hz; the family follows
+// the System Mode; power-up 1080p, the app asks for its mode at 0x4F00 of the
+// overlay window, mode_req.v), every one locked to the VIC frame:
+//   - hdmi_timing.v runs the mode's frame, one VIC frame long; vic_scaler.v
+//     takes the VIC's native pixels and scales them onto it at the app's scale
+//     (Integer, Fit, Fill, 0x4F01).
+//   - The TMDS clock (122.7-149.1 MHz, tools/hdmi_modes.py) comes from the
+//     board's CDCEL824 (cdce_mode.v, N/M per row) fed with 37.89 MHz = 125/104
+//     of dot4x from a second MMCM; it is also the GTP reference (two TMDS bits
+//     per pix_clk on each lane), so picture and VIC stay locked. Rows with a
+//     pixel clock below 25 MHz x gear repeat each pixel (gear 2, 3 or 5:
+//     hdmi_timing's ce, tmds_rep.v).
 // Keyboard: the C64U's own, scanned over I2C (c64u_keyboard); joysticks and
 // RESTORE straight from their pins. Tied off: tape. The expansion port and the
 // SID sockets: docs/specs/T16-cartridge-port.md §13. The serial bus
@@ -109,6 +113,7 @@ module top #(
     output wire        BLING_LED,           // keyboard LEDs, WS2812 chain
     output wire        LED_DATA, LED_CLOCK  // case LED strip, WS2812 or APA102
 );
+`include "hdmi_modes.vh"                // U16: the HDMI rows (hm_rate, hm_rate_alt, hm_aspect here)
     // The expansion port (T16 §13): c64_core's slot_port.v drives it; idle
     // (transceivers off with DIR towards the port, strobes high, PHI2/DOTCLK
     // low, BA high, A12-A15 and R/W released) unless the app's
@@ -803,10 +808,14 @@ module top #(
     );
 
     // ---- program both synthesizers -------------------------------------------
+    // (U16: the HDMI row the app asked for, vm_mode / vm_rst from mode_req.v in the HDMI section; a System Mode switch's lock loss
+    // restarts the sequence as well, with the row of the new family)
     wire scl_low, sda_low, i2c_done;
     wire mc_cdce_v60;
-    cdce_i2c i2c (.clk(clk50), .rst(por_rst | ~clocks_ok), .scl_low(scl_low),
-                  .sda_low(sda_low), .done(i2c_done), .v60(mc_cdce_v60));
+    wire [3:0] vm_mode;
+    wire       vm_rst;
+    cdce_mode i2c (.clk(clk50), .rst(por_rst | ~clocks_ok | vm_rst), .scl_low(scl_low),
+                   .sda_low(sda_low), .done(i2c_done), .mode(vm_mode));
     // After the synthesizers, the keyboard scan takes the buses over. Which of
     // the three buses the keyboard expander sits on differs between board
     // versions (Gideon's bootloader swaps them by board revision), so the scan
@@ -1475,17 +1484,15 @@ module top #(
         .tx_view(tx_view)
     );
 
-    // ---- 1080p with audio ------------------------------------------------------------
-    // The GTPs run on usrclk = pixel clock / 2. An MMCM makes the pixel clock
-    // (x2) from it, phase-locked, so the scaler and kawari's HDMI encoder (one
-    // pixel per clock, data islands with the SID's audio) run at 148.87 MHz
-    // (NTSC-50 149.14 MHz, 60 Hz modes: 148.06-148.24 MHz) and pairs of symbols go to the GTPs
-    // over a plain register stage.
+    // ---- HDMI with audio (U16) -----------------------------------------------------------
+    // The GTPs run on usrclk = pix_clk / 2. An MMCM makes pix_clk = the TMDS clock (x2) from it, phase-locked: 122.7-149.1 MHz over the
+    // rows of U16 D2 (tools/hdmi_modes.py). A pixel lasts `gear` pix_clk (1, 2, 3 or 5); every register of the picture chain after
+    // hdmi_timing changes only when its ce is high, the encoder too, and tmds_rep.v sends each TMDS bit gear times.
     wire        usrclk, gt_ready;
     wire        pfb, pfb_bufg, pix_mmcm, pix_locked;
     MMCME2_BASE #(
-        .CLKIN1_PERIOD(13.194), .DIVCLK_DIVIDE(1), .CLKFBOUT_MULT_F(12.0),  // VCO 893 MHz (PAL)
-        .CLKOUT0_DIVIDE_F(6.0)                                             // 148.87 MHz (PAL)
+        .CLKIN1_PERIOD(13.194), .DIVCLK_DIVIDE(1), .CLKFBOUT_MULT_F(12.0),  // VCO 6 x the TMDS clock: 736-895 MHz over the rows
+        .CLKOUT0_DIVIDE_F(6.0)                                             // = the TMDS clock (period: 1080p50 PAL, the fastest)
     ) mmcm_pix (
         .CLKIN1(usrclk), .CLKFBIN(pfb_bufg), .CLKFBOUT(pfb), .CLKOUT0(pix_mmcm),
         .LOCKED(pix_locked), .RST(~gt_ready), .PWRDWN(1'b0),
@@ -1496,26 +1503,59 @@ module top #(
     BUFG bg_pix (.I(pix_mmcm), .O(pix_clk));
     rst_sync rs_pix (.clk(pix_clk), .arst(~pix_locked), .rst(pix_rst));
 
+    // the mode request and the scale (cpu_clk, the overlay window 0x4F00 / 0x4F01, status 0x4F04-0x4F0A), the synthesizer's row
+    // (clk50, cdce_mode above), the timing's mode (pix_clk)
+    wire [3:0]  mode_pix, m_mode;
+    wire [1:0]  scale_pix;
+    wire        running, pce, fstart;
+    wire [7:0]  mr_rdata, o_rdata;
+    wire        mr_rhit;
+    assign ovl_rdata = mr_rhit ? mr_rdata : o_rdata;
+    mode_req mreq (
+        .clk_sys(cpu_clk), .we(ovl_we), .addr(ovl_addr), .wdata(ovl_wdata), .rdata(mr_rdata), .rhit(mr_rhit),
+        .clk50(clk50), .fam_v60(mc_cdce_v60), .vm_mode(vm_mode), .vm_rst(vm_rst),
+        .clk_pix(pix_clk), .mode_pix(mode_pix), .fstart(fstart), .scale_pix(scale_pix),
+        .gt_ready(gt_ready), .pix_locked(pix_locked), .running(running), .mode_q(m_mode)
+    );
+
+    wire        align, t_de, t_hs, t_vs;
+    wire [11:0] t_cx, m_hact, m_xact0, m_htot_m1;
+    wire [10:0] t_cy, m_vact, m_yact0;
+    wire  [3:0] m_gear;
+    wire  [6:0] m_vic;
+    hdmi_timing mtim (
+        .clk(pix_clk), .rst(pix_rst), .mode(mode_pix), .align(align), .valid(), .aligned(),
+        .ce(pce), .rgb(), .de(t_de), .hs(t_hs), .vs(t_vs), .cx(t_cx), .cy(t_cy), .running(running),
+        .hact(m_hact), .vact(m_vact), .xact0(m_xact0), .yact0(m_yact0), .gear(m_gear), .htot_m1(m_htot_m1), .vtot_m1(),
+        .vic(m_vic), .rate(), .sx_e(), .fw_m1(), .sy_e(), .ey_e(), .ph_e(), .mode_q(m_mode)
+    );
+    assign fstart = pce && t_cx == 12'd0 && t_cy == 11'd0;
+
+    // the VIC picture on the timing's counters, at the scale in use
     wire [23:0] s_rgb, rgb;
     wire        s_de, s_hs, s_vs, de, hs, vs, video_locked;
     wire [11:0] s_cx, cx;
     wire [10:0] s_cy, cy;
+    wire [81:0] geom;                               // hm_geom(m_mode, scale_pix): the scaler's and the text layer's geometry
     vic_scaler scaler (
         .vclk(sys_clk), .pix(pix_color), .px(pix_x), .py(pix_y),
-        .clk(pix_clk), .rst(pix_rst),
+        .clk(pix_clk), .rst(pix_rst), .ce(pce),
         .pal_clk(cpu_clk), .pal_we(pal_we), .pal_addr(pal_addr), .pal_wdata(pal_wdata),
+        .mode(m_mode), .scale(scale_pix), .t_de(t_de), .t_hs(t_hs), .t_vs(t_vs), .t_cx(t_cx), .t_cy(t_cy),
+        .xact0(m_xact0), .yact0(m_yact0), .hact(m_hact), .vact(m_vact), .htot_m1(m_htot_m1), .geom(geom), .align(align),
         .rgb(s_rgb), .de(s_de), .hs(s_hs), .vs(s_vs), .cx(s_cx), .cy(s_cy), .locked(video_locked),
-        .blank(c64_halted), .x_text(x_text), .v60(v60), .scan(scanlines)
+        .blank(c64_halted), .x_text(x_text), .scan(scanlines)
     );
 
-    // the app's menu (U64-II overlay, 0x10140000) on top of the picture
+    // the app's menu (U64-II overlay, 0x10140000) on top of the picture, centred on the active area
     wire [23:0] o_rgb;
     wire        o_de, o_hs, o_vs;
     wire [11:0] o_cx;
     wire [10:0] o_cy;
     overlay ovl (
-        .clk_sys(cpu_clk), .we(ovl_we), .addr(ovl_addr), .wdata(ovl_wdata), .rdata(ovl_rdata),
-        .clk(pix_clk), .rgb_in(s_rgb), .de_in(s_de), .hs_in(s_hs), .vs_in(s_vs),
+        .clk_sys(cpu_clk), .we(ovl_we), .addr(ovl_addr), .wdata(ovl_wdata), .rdata(o_rdata),
+        .clk(pix_clk), .ce(pce), .hact(m_hact), .vact(m_vact), .xact0(m_xact0), .yact0(m_yact0),
+        .rgb_in(s_rgb), .de_in(s_de), .hs_in(s_hs), .vs_in(s_vs),
         .cx_in(s_cx), .cy_in(s_cy),
         .rgb(o_rgb), .de(o_de), .hs(o_hs), .vs(o_vs), .cx(o_cx), .cy(o_cy),
         .own_keyboard(ovl_own)
@@ -1534,12 +1574,13 @@ module top #(
         .v_rdy(v_rdy), .v_wdf_data(v_wdf_data), .v_wdf_mask(v_wdf_mask), .v_wdf_wren(v_wdf_wren),
         .v_rd_data(c_rd_data), .v_rd_data_valid(v_rd_valid), .v_urgent(v_urgent),
         .vclk(sys_clk), .pix(pix_color), .px(pix_x), .py(pix_y), .v60(v60),
-        .clk(pix_clk), .rgb_in(o_rgb), .de_in(o_de), .hs_in(o_hs), .vs_in(o_vs), .cx_in(o_cx), .cy_in(o_cy),
+        .clk(pix_clk), .ce(pce), .hact(m_hact), .vact(m_vact), .xact0(m_xact0), .yact0(m_yact0),
+        .rgb_in(o_rgb), .de_in(o_de), .hs_in(o_hs), .vs_in(o_vs), .cx_in(o_cx), .cy_in(o_cy),
         .rgb(p_rgb), .de(p_de), .hs(p_hs), .vs(p_vs), .cx(p_cx), .cy(p_cy)
     );
 
     // the freeze menu's C64 text on top: the still the app drew on the pixel
-    // layer stays below it (trx_io page 6 from 0x0C0)
+    // layer stays below it (trx_io page 6 from 0x0C0); its area and steps are the scale's (hm_geom)
     c64_text txt (
         .clk_sys(cpu_clk), .we(px_we), .re(px_re), .addr(cw_addr[11:0]), .wdata(cw_wdata),
         .rdata(tx_rdata),
@@ -1548,41 +1589,41 @@ module top #(
         .port_req(tx_req), .port_addr(tx_paddr), .port_rom(tx_rom), .port_grant(tx_go),
         .port_rdata(ram_rdata), .cram_addr(tx_cram_addr), .cram_grant(!win_cram_use),
         .cram_rdata(cram_rdata),
-        .clk(pix_clk), .rgb_in(p_rgb), .de_in(p_de), .hs_in(p_hs), .vs_in(p_vs), .cx_in(p_cx), .cy_in(p_cy),
+        .clk(pix_clk), .ce(pce), .xact0(m_xact0), .yact0(m_yact0), .xt0(geom[22:11]), .yt0(geom[10:0]),
+        .hn(geom[81:76]), .hd(geom[75:70]), .tvn(geom[57:52]), .tvd(geom[51:46]),
+        .rgb_in(p_rgb), .de_in(p_de), .hs_in(p_hs), .vs_in(p_vs), .cx_in(p_cx), .cy_in(p_cy),
         .rgb(rgb), .de(de), .hs(hs), .vs(vs), .cx(cx), .cy(cy)
     );
 
-    // T40: per System Mode the AVI VIC code (31 1080p50, 16 1080p60) and the
-    // pixel clock for the encoder's 48 kHz audio tick (mode_ctl.v's dot4x x
-    // 6875/1456 or 61875/13676)
+    // the encoder's pixel clock rate for its 48 kHz audio tick and N / CTS: the row's (hm_rate) in the family's first System Mode
+    // (PAL, NTSC), hm_rate_alt in its second (NTSC-50, PAL-60; T40). The VIC code and the frame are the timing's.
     (* ASYNC_REG = "TRUE" *) reg [1:0] vm_p1 = 2'd0, vm_p = 2'd0;
-    reg  [6:0]  hdmi_vic = 7'd31;
     reg  [31:0] hdmi_rate = 32'd148869143;
+    reg  [1:0]  hdmi_aspect = 2'd2;
+    reg  [11:0] e_fwm1 = 12'd0;
+    reg  [10:0] e_ey = 11'd0;
     always @(posedge pix_clk) begin
         vm_p1 <= vmode; vm_p <= vm_p1;
-        case (vm_p)
-            2'd1:    begin hdmi_vic <= 7'd16; hdmi_rate <= 32'd148062470; end
-            2'd2:    begin hdmi_vic <= 7'd16; hdmi_rate <= 32'd148240988; end
-            2'd3:    begin hdmi_vic <= 7'd31; hdmi_rate <= 32'd149138494; end
-            default: begin hdmi_vic <= 7'd31; hdmi_rate <= 32'd148869143; end
-        endcase
+        hdmi_rate   <= (vm_p == 2'd2 || vm_p == 2'd3) ? hm_rate_alt(m_mode) : hm_rate(m_mode);
+        hdmi_aspect <= hm_aspect(m_mode);
+        e_fwm1      <= m_xact0 + m_hact - 12'd1;
+        e_ey        <= m_yact0 + m_vact;
     end
     wire [9:0] tmds_0, tmds_1, tmds_2;
-    // data islands: 7 packets a line fit into both blankings (cx 4-242)
+    // data islands: 3 packets a line fit into the shortest blanking (576p: 144 pixels; cx 4-112, the video preamble behind them)
     hdmi #(
-        .DVI_OUTPUT(1'b0), .IT_CONTENT(1'b1), .VIDEO_ID_CODE(31),
-        .VIDEO_RATE(149_138_494), .RUNTIME(1), .MAX_PACKETS(7),
+        .DVI_OUTPUT(1'b0), .IT_CONTENT(1'b1), .VIDEO_ID_CODE(0),
+        .VIDEO_RATE(149_138_494), .RUNTIME(1), .MAX_PACKETS(3),
         .AUDIO_RATE(48_000), .AUDIO_BIT_WIDTH(24),
         .BIT_WIDTH(12), .BIT_HEIGHT(11),
-        .SCREEN_X_START(768), .SCREEN_X_END(2688), .SCREEN_Y_START(45), .SCREEN_Y_END(1125),
-        .FRAME_WIDTH(2688), .FRAME_HEIGHT(1125),
         .VENDOR_NAME(64'h5452583634000000),                        // "TRX64"
         .PRODUCT_DESCRIPTION(128'h43363420556C74696D61746500000000), // "C64 Ultimate"
         .SOURCE_DEVICE_INFORMATION(8'h08)
     ) hdmi_enc (
-        .clk_pixel_x5(1'b0), .clk_pixel(pix_clk), .reset(pix_rst),
+        .clk_pixel_x5(1'b0), .clk_pixel(pix_clk), .ce(pce | pix_rst), .reset(pix_rst),
         .rgb(rgb), .hsync(hs), .vsync(vs), .cx(cx), .cy(cy), .de(de),
-        .vic_code(hdmi_vic), .video_rate(hdmi_rate),
+        .vic_code(m_vic), .video_rate(hdmi_rate), .aspect(hdmi_aspect),
+        .sx_e(m_xact0), .fw_m1(e_fwm1), .sy_e(m_yact0), .ey_e(e_ey),
         .audio_sample_word_0(hdmi_snd[47:24]), .audio_sample_word_1(hdmi_snd[23:0]),
         .audio_sample_en(hdmi_sample_en),
         .tmds_0(tmds_0), .tmds_1(tmds_1), .tmds_2(tmds_2)
@@ -1620,37 +1661,29 @@ module top #(
     assign AUDIO_SDI   = i2s_data;
     assign SPEAKER_DATA = i2s_spk;
 
-    // two symbols per GTP word, the older one in the low half (sent first)
-    reg  [29:0] sym_prev;
-    reg  [59:0] sym_pair;
-    always @(posedge pix_clk) begin
-        sym_prev <= {tmds_2, tmds_1, tmds_0};
-        sym_pair <= {tmds_2, tmds_1, tmds_0, sym_prev};
-    end
-    reg  [59:0] word;
-    always @(posedge usrclk) word <= sym_pair;
-    // word = {new: t2 t1 t0, old: t2 t1 t0}
-    wire [19:0] w_red   = {word[59:50], word[29:20]};
-    wire [19:0] w_green = {word[49:40], word[19:10]};
-    wire [19:0] w_blue  = {word[39:30], word[9:0]};
-
+    // the TMDS bit repeater (gear) and the GTPs: two TMDS clocks per 20-bit word, the older one in the low half (sent first)
+    wire [19:0] w0, w1, w2, wc;
+    tmds_rep rep (
+        .clk(pix_clk), .usrclk(usrclk), .rst(pix_rst), .ce(pce), .gear(m_gear),
+        .sym0(tmds_0), .sym1(tmds_1), .sym2(tmds_2), .w0(w0), .w1(w1), .w2(w2), .wc(wc)
+    );
     hdmi_gtp gtp (
         .sysclk(clk50), .reset(gt_rst),
         .refclk_p(HDMI_REFCLK_P), .refclk_n(HDMI_REFCLK_N),
         // Lane 2 (TMDS 0, blue) is wired with P and N swapped on the board.
-        .tx0(w_red), .tx1(w_green), .tx2(~w_blue),
-        .tx3(20'b00000_11111_00000_11111),  // TMDS clock: two pixels per word
+        .tx0(w2), .tx1(w1), .tx2(~w0),
+        .tx3(wc),                           // the TMDS clock: one period per pixel (10 x gear line bits)
         .usrclk(usrclk), .ready(gt_ready),
         .txp({HDMI_CLK_P, HDMI_DATA_P[0], HDMI_DATA_P[1], HDMI_DATA_P[2]}),
         .txn({HDMI_CLK_N, HDMI_DATA_N[0], HDMI_DATA_N[1], HDMI_DATA_N[2]})
     );
 
     // T40: the HDMI output as measured: frames per second (clk50 window) and
-    // pixel clocks per frame, from the scaler's vsync
+    // pix_clk (TMDS clocks) per frame, from the timing's vsync (its leading edge in either polarity is a rising edge once a frame)
     reg        hm_vs_q = 1'b0, hm_tgl = 1'b0;
     reg [23:0] hm_pc = 24'd0, hm_pcf = 24'd0;
     always @(posedge pix_clk) begin
-        hm_vs_q <= s_vs;
+        hm_vs_q <= t_vs;
         hm_pc   <= hm_pc + 24'd1;
         if (s_vs && !hm_vs_q) begin hm_pcf <= hm_pc; hm_pc <= 24'd1; hm_tgl <= ~hm_tgl; end
     end

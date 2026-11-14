@@ -5,7 +5,7 @@
 // Pixel layer: an RGB565 picture in DDR2 (LVGL LV_COLOR_FORMAT_RGB565: one
 // little-endian 16-bit word per pixel, R in bits 15:11, G 10:5, B 4:0), W x H
 // source pixels (W <= 960), each shown as S x S output pixels (S = 1..3), its
-// top left at output pixel (X0, Y0) of the 1920 x 1080 frame, over the C64
+// top left at output pixel (X0, Y0) of the mode's active area (U16 D6: cx / cy from xact0 / yact0, clipped to hact x vact), over the C64
 // and overlay.v, under the freeze menu's text (C64 -> overlay.v -> this ->
 // c64_text.v). Each channel is widened to 8 bits by
 // repeating its top bits (R5 -> {R5, R5[4:2]}, G6 -> {G6, G6[5:4]}), so 0 and
@@ -20,11 +20,12 @@
 // written by the fetcher in ui_clk, read in the pixel clock). When source
 // line m starts on screen, the fetcher is asked for line m + 1 (line 0 at the
 // frame start, cy = 0): ceil(W / 8) MIG reads back to back (120 at W = 960,
-// 1.6 us of the S x 17.7 us it has; in mig_arb the video client takes turns
+// 1.6 us of the S output lines it has, 17.7 us each at 1080p, longer in every other mode of U16 D2; in mig_arb the video client takes turns
 // with the RISC-V/REU pair, and goes before them once a line fetch is 5.3 us
 // old: v_urgent). A request that comes while the previous
 // line is still being read stops that one (it is late anyway); the new one
 // starts once the reads in flight have landed.
+// Pixel repetition: every register of the pixel side changes only when ce is high (hdmi_timing.v).
 // Page flip: a write of PX_BACK (its byte 3) asks for a flip; at the next
 // frame start the shown buffer (PX_FRONT's, which does not follow: write-only) becomes
 // PX_BACK's and the flip-done cause is raised.
@@ -73,7 +74,7 @@
 //   0A4 PX_STATUS    R   b0 flip pending, b1 vertical blank, b15:8 lines not
 //                        shown for underrun (wrapping), b31:16 frames (wrapping)
 // Events for trx_io's IRQ_CAUSE (clk_sys pulses): ev_vsync at every frame
-// start (cy = 0, 45 lines before the first visible line), ev_flip when a
+// start (cy = 0, the vertical blanking of the mode, yact0 lines, before the first visible line), ev_flip when a
 // flip was done.
 module pix_layer #(
     parameter [9:0] X0S = 10'd96,       // still window, as vic_scaler's X0, Y0
@@ -108,6 +109,11 @@ module pix_layer #(
     input  wire         v60,            // 65 x 263 VIC (any clock; as vic_scaler's)
 
     input  wire         clk,
+    input  wire         ce,             // pixel enable (hdmi_timing.v)
+    input  wire [11:0]  hact,           // the mode's active area and where it starts in cx / cy
+    input  wire [10:0]  vact,
+    input  wire [11:0]  xact0,
+    input  wire [10:0]  yact0,
     input  wire [23:0]  rgb_in,
     input  wire         de_in, hs_in, vs_in,
     input  wire [11:0]  cx_in,
@@ -216,7 +222,7 @@ module pix_layer #(
     reg [16:0] c_key = 17'd0;
     reg [31:0] c_front = 32'd0, c_back = 32'd0;
     reg        flip_req = 1'b0, flip_tgl = 1'b0, flip_seen = 1'b0, vs_tgl = 1'b0, under_tgl = 1'b0;
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         p_cfg   <= {p_cfg[1:0], cfg_tgl};
         p_front <= {p_front[1:0], front_tgl};
         p_back  <= {p_back[1:0], back_tgl};
@@ -225,7 +231,7 @@ module pix_layer #(
     assign px_flip_tgl  = flip_tgl;
     assign px_flip_seen = flip_seen;
     assign px_under_tgl = under_tgl;
-    assign px_vblank    = cy_in < 11'd45;
+    assign px_vblank    = cy_in < yact0;
 
     // per frame
     reg        f_en = 1'b0, par = 1'b0;
@@ -241,7 +247,7 @@ module pix_layer #(
     reg [15:0] f_key;
     wire [1:0] s_new = (c_ctrl[5:4] == 2'd0) ? 2'd1 : c_ctrl[5:4];
     wire       en_new = c_ctrl[0] && c_ctrl[3:1] == 3'd1 && c_w != 0 && c_h != 0 &&
-                        c_x0 < 16'd1920 && c_y0 < 16'd1080;
+                        c_x0 < {4'd0, hact} && c_y0 < {5'd0, vact};
 
     // fetch requests (stable from their toggle to the next request)
     reg        rq_tgl = 1'b0;
@@ -261,7 +267,7 @@ module pix_layer #(
     reg [10:0] m;
     reg [1:0]  sub;
 
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         if (p_cfg[2] != p_cfg[1]) begin
             c_ctrl <= r_ctrl; c_w <= r_w; c_h <= r_h; c_stride <= r_stride;
             c_x0 <= r_x0; c_y0 <= r_y0; c_ga <= r_ga; c_key <= r_key;
@@ -279,9 +285,9 @@ module pix_layer #(
             f_en   <= en_new;
             f_s    <= s_new;
             f_w    <= (c_w > 16'd960) ? 10'd960 : c_w[9:0];
-            f_hm1  <= ((c_h > 16'd1080) ? 11'd1080 : c_h[10:0]) - 11'd1;
-            f_xs   <= 12'd768 + c_x0[11:0];
-            f_ys   <= 11'd45 + c_y0[10:0];
+            f_hm1  <= ((c_h > {5'd0, vact}) ? vact : c_h[10:0]) - 11'd1;
+            f_xs   <= xact0 + c_x0[11:0];
+            f_ys   <= yact0 + c_y0[10:0];
             f_stride <= c_stride;
             f_ga   <= {1'b0, c_ga} + c_ga[7];
             f_ken  <= c_key[16];
@@ -345,7 +351,7 @@ module pix_layer #(
     reg [9:0]  pidx;
     reg [1:0]  hsub;
     wire [9:0] pidx_n = pidx + 10'd1;
-    always @(posedge clk)
+    always @(posedge clk) if (ce)
         if (cx_in == f_xs) begin
             h_on <= line_ok; pidx <= 10'd0; hsub <= 2'd0;
         end else if (h_on) begin
@@ -368,7 +374,7 @@ module pix_layer #(
     integer i;
     // RGB565 -> 888 by bit replication
     wire [23:0] fg888 = {fg5[15:11], fg5[15:13], fg5[10:5], fg5[10:9], fg5[4:0], fg5[4:2]};
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         vrgb[1] <= rgb_in; vctl[1] <= {de_in, hs_in, vs_in, cx_in, cy_in};
         for (i = 2; i <= 8; i = i + 1) begin vrgb[i] <= vrgb[i-1]; vctl[i] <= vctl[i-1]; end
         // E1
@@ -474,7 +480,7 @@ module pix_layer #(
             cur_tag  <= n_tag;
         end
         // a line not in after 400 clocks (5.3 us of the 17.7 us an output
-        // line takes) goes before the RISC-V and the REU in mig_arb
+        // line takes at 1080p; longer in the other modes) goes before the RISC-V and the REU in mig_arb
         if (!run) age <= 10'd0;
         else if (age != 10'h3FF) age <= age + 10'd1;
         v_urgent <= run && age >= 10'd400;

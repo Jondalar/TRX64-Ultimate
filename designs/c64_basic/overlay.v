@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Ultimate app's menu overlay (U64-II, 0x10140000) over the 1080p picture.
+// The Ultimate app's menu overlay (U64-II, 0x10140000) over the picture.
 //
 // CPU side (clk_sys, the app's IO bus through ultimate_sys), offsets from 0x10140000:
 //   0x0000-0x000D  registers as Gideon's char_generator_regs (write only, read 0)
@@ -9,18 +9,20 @@
 //   0x4000 (HDMI timing) and the rest: ignored, read 0.
 // Pixel side (clk): drawn as Gideon's char_generator_slave12 draws it (8-pixel
 // ROM font or the 12 x 24 font_pkg with big_font, stretch_y, the 9th line, reverse,
-// one colour index made transparent), with two differences for our fixed 1080p:
+// one colour index made transparent), with differences for the host's HDMI modes (T164 WP6):
 //   - X_ON / Y_ON are not used: the app sets them for the HDMI mode it thinks it
-//     drives. The box is centred on the 1920 x 1080 frame instead.
-//   - Every character pixel is SX x SY output pixels, each 1..4, the largest
-//     that keep the box inside the C64's text area at 4x (1280 x 800), so the
-//     menu covers the C64 screen with about its proportions (SD settings 40 x 25
-//     of 8 x 9: 4 x 3, 1280 x 675; 1080p settings 40 x 25 of 12 x 23: 2 x 1,
-//     960 x 575).
+//     drives. The box is centred on the mode's active area (hact x vact, at xact0 / yact0
+//     of the counters) instead, and nothing is drawn outside it (de_in).
+//   - Every character pixel is SX x SY output pixels, each 1..4: SY the largest whole factor that keeps
+//     the box inside the active height, SX the largest that keeps it inside the width, at most 2 x SY
+//     (40 x 25 cells of 12 x 23: 480 x 575 shows as 2 x 1). A 960 x 540 canvas is therefore shown at
+//     max(1, floor(vact / 540)) in every mode and a canvas of the mode's own size at 1; a box wider than the
+//     active area is cut at its right (S9), never shifted.
+//   - Pixel repetition: every register of the pixel side changes only when ce is high (hdmi_timing.v).
 // Registers and palette cross into clk as quasi-static values (taken at the
 // start of each frame); the RAMs are dual-ported block RAM.
-// Video in: vic_scaler's rgb and counters (cx 768-2687, cy 45-1124 active);
-// out: the same, five clocks later, with the overlay on top.
+// Video in: the picture's rgb and counters (cx xact0 .. xact0 + hact - 1, cy yact0 .. yact0 + vact - 1 active);
+// out: the same, five ce ticks later, with the overlay on top.
 module overlay (
     input  wire        clk_sys,
     input  wire        we,
@@ -29,6 +31,11 @@ module overlay (
     output reg  [7:0]  rdata,           // one clk_sys after addr
 
     input  wire        clk,
+    input  wire        ce,              // T107: pixel enable (hdmi_timing.v)
+    input  wire [11:0] hact,            // the mode's active area and where it starts in cx / cy
+    input  wire [10:0] vact,
+    input  wire [11:0] xact0,
+    input  wire [10:0] yact0,
     input  wire [23:0] rgb_in,
     input  wire        de_in, hs_in, vs_in,
     input  wire [11:0] cx_in,
@@ -117,7 +124,7 @@ module overlay (
     reg [5:0]  nl;
     reg [11:0] ptr;
     reg [3:0]  tr;
-    always @(posedge clk)
+    always @(posedge clk) if (ce)
         if (cy_in == 11'd0 && cx_in == 12'd0) begin
             cw <= r_cw; ch <= r_ch; big <= r_big; stretch <= r_stretch; on <= r_on;
             cpl <= r_cpl; nl <= r_nl; ptr <= r_ptr[11:0]; tr <= r_tr;
@@ -127,21 +134,25 @@ module overlay (
     reg [4:0]  lpr;                     // output lines per character row (big font skips 3 of 4)
     reg [11:0] w;                       // box in character pixels
     reg [10:0] h;
-    reg [2:0]  sx, sy;                  // scale 1..4
+    reg [2:0]  sx0, sx, sy;             // scale 1..4
     reg [12:0] ws;
     reg [11:0] hs_;
+    // the area the box may cover: the whole active area of the mode
+    wire [11:0] aw = hact;
+    wire [10:0] ah = vact;
     reg [11:0] xs_m1;                   // cx of the first box pixel, minus one
     reg [10:0] y0;                      // first box line (0 = first active line)
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         lpr <= big ? ch - {2'b00, ch[4:2]} : ch;
         w   <= cpl * cw;
         h   <= nl * lpr;
-        sx  <= (4 * w <= 1280) ? 3'd4 : (3 * w <= 1280) ? 3'd3 : (2 * w <= 1280) ? 3'd2 : 3'd1;
-        sy  <= (4 * h <= 800)  ? 3'd4 : (3 * h <= 800)  ? 3'd3 : (2 * h <= 800)  ? 3'd2 : 3'd1;
+        sx0 <= (4 * w <= aw) ? 3'd4 : (3 * w <= aw) ? 3'd3 : (2 * w <= aw) ? 3'd2 : 3'd1;
+        sy  <= (4 * h <= ah) ? 3'd4 : (3 * h <= ah) ? 3'd3 : (2 * h <= ah) ? 3'd2 : 3'd1;
+        sx  <= (sx0 > {sy, 1'b0}) ? {sy[1:0], 1'b0} : sx0;       // at most 2 x SY (only SY 1 can cut)
         ws  <= w * sx;
         hs_ <= h * sy;
-        xs_m1 <= 12'd767 + ((ws < 1920) ? (12'd1920 - ws[11:0]) >> 1 : 12'd0);
-        y0    <= (hs_ < 1080) ? (11'd1080 - hs_[10:0]) >> 1 : 11'd0;
+        xs_m1 <= xact0 - 12'd1 + ((ws < hact) ? (hact - ws[11:0]) >> 1 : 12'd0);
+        y0    <= (hs_ < vact) ? (vact - hs_[10:0]) >> 1 : 11'd0;
     end
 
     // ---- per line: which character line is drawn ------------------------------
@@ -150,8 +161,8 @@ module overlay (
     reg [2:0]  sv;                      // repeat of the current character line
     reg [5:0]  rows_left;
     reg        started, line_on;
-    wire [10:0] vy = cy_in - 11'd45;
-    always @(posedge clk) begin
+    wire [10:0] vy = cy_in - yact0;
+    always @(posedge clk) if (ce) begin
         if (cx_in == 12'd16) begin
             if (cy_in == 11'd0) begin
                 row_ptr <= ptr; char_y <= 5'd0; sv <= 3'd0; rows_left <= nl;
@@ -173,9 +184,9 @@ module overlay (
             end
         end
         if (cx_in == 12'd32) begin
-            if (cy_in >= 11'd45 && vy == y0) started <= 1'b1;
+            if (cy_in >= yact0 && vy == y0) started <= 1'b1;
             line_on <= on && w != 12'd0 && rows_left != 6'd0 &&
-                       (started || (cy_in >= 11'd45 && vy == y0));
+                       (started || (cy_in >= yact0 && vy == y0));
         end
     end
 
@@ -184,7 +195,7 @@ module overlay (
     reg [2:0]  sh;
     reg [3:0]  bit_;
     reg [7:0]  char_x;
-    always @(posedge clk)
+    always @(posedge clk) if (ce)
         if (cx_in == xs_m1) begin
             run <= line_on; sh <= 3'd0; bit_ <= cw - 4'd1; char_x <= 8'd0;
         end else if (run) begin
@@ -205,7 +216,7 @@ module overlay (
     reg [7:0] scr_q, col_q;
     reg       run_b;
     reg [3:0] bit_b;
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         scr_q <= scr[row_ptr + char_x];
         col_q <= col[row_ptr + char_x];
         run_b <= run;
@@ -225,7 +236,7 @@ module overlay (
     reg        run_c, rev_c;
     reg [3:0]  bit_c;
     reg [7:0]  col_c;
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         f8    <= font8[{scr_q[6:0], row8}];
         f12   <= font12[{scr_q[6:0], char_y[4:2]}];
         run_c <= run_b;
@@ -246,7 +257,7 @@ module overlay (
     reg         run_d, rev_d;
     reg  [3:0]  bit_d;
     reg  [7:0]  col_d;
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         glyph_d <= glyph;
         run_d   <= run_c;
         rev_d   <= rev_c;
@@ -257,7 +268,7 @@ module overlay (
     wire [3:0]  idx    = fg ? col_d[3:0] : col_d[7:4];
     reg  [3:0]  p_idx;
     reg         p_opq, p_dim;
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         p_idx <= idx;
         p_opq <= run_d && idx != tr;
         p_dim <= run_d && idx == tr;    // inside the box: the C64 at half brightness
@@ -268,12 +279,13 @@ module overlay (
     reg [2:0]  ctl_d [1:4];
     reg [11:0] cx_d  [1:4];
     reg [10:0] cy_d  [1:4];
-    always @(posedge clk) begin
+    always @(posedge clk) if (ce) begin
         rgb_d[1] <= rgb_in;   rgb_d[2] <= rgb_d[1]; rgb_d[3] <= rgb_d[2]; rgb_d[4] <= rgb_d[3];
         ctl_d[1] <= {de_in, hs_in, vs_in}; ctl_d[2] <= ctl_d[1]; ctl_d[3] <= ctl_d[2]; ctl_d[4] <= ctl_d[3];
         cx_d[1]  <= cx_in;    cx_d[2]  <= cx_d[1];  cx_d[3]  <= cx_d[2];  cx_d[4]  <= cx_d[3];
         cy_d[1]  <= cy_in;    cy_d[2]  <= cy_d[1];  cy_d[3]  <= cy_d[2];  cy_d[4]  <= cy_d[3];
-        rgb <= p_opq ? {pal_r[p_idx], pal_g[p_idx], pal_b[p_idx]} :
+        rgb <= !ctl_d[4][2] ? rgb_d[4] :
+               p_opq ? {pal_r[p_idx], pal_g[p_idx], pal_b[p_idx]} :
                p_dim ? {1'b0, rgb_d[4][23:17], 1'b0, rgb_d[4][15:9], 1'b0, rgb_d[4][7:1]} :
                        rgb_d[4];
         {de, hs, vs} <= ctl_d[4];

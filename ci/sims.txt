@@ -33,7 +33,13 @@
 1|dma_bus|600|sh designs/c64_basic/sim/dma_bus/run.sh
 1|eth|900|sh designs/c64_basic/sim/eth/run.sh
 2|input|1200|JOBS=3 sh designs/c64_basic/sim/input/run.sh
-1|scaler|900|ci/sim_iv.sh tb_scaler.v
+# U16: vic_scaler on hdmi_timing, every HDMI row at every scale (21 runs + 3 controls); the timing per row; the mode request path,
+# the synthesizer bytes and the scale register; the TMDS bit repeater; the freeze text's geometry per row and scale
+1|scaler|2400|JOBS=3 sh designs/c64_basic/sim/scaler/run.sh
+1|hdmi_timing|900|ci/sim_iv.sh tb_hdmi_timing.v
+1|mode_req|1800|ci/sim_iv.sh tb_mode_req.v && ci/sim_iv.sh tb_mode_req.v -DPHASE_I2C && ci/sim_iv.sh tb_mode_req.v -DPHASE_SCALE
+1|tmds_rep|300|ci/sim_iv.sh tb_tmds_rep.v
+1|text_geom|1800|JOBS=3 sh designs/c64_basic/sim/text/run.sh
 1|sock_audio|600|ci/sim_iv.sh tb_sock_audio.v
 2|steal|1800|cd designs/c64_basic/sim/steal && JOBS=3 sh build.sh && cd build/run && ../tb_steal run
 2|reu|1800|cd designs/c64_basic/sim/reu && JOBS=3 sh build.sh && cd build/run && ../tb_reu run
