@@ -62,7 +62,7 @@ Where we are (2026-10-09; older entries in [docs/todo/overview-history.md](docs/
 | OPT-mig | ✅ | MIG without XADC, 2 bank machines | – | [OPT-mig](docs/specs/OPT-mig.md#status-and-history) |
 | OPT-kb | ✅ | c64u_keyboard 721 -> 294 LUT, formally equivalent | – | [OPT-kb](docs/specs/OPT-kb.md#status-and-history) |
 | OPT-rvmul | ✅ | rvlite register file -> multiplier path pipelined | – | [OPT-rvmul](docs/specs/OPT-rvmul.md#status-and-history) |
-| T25 | ✅ | SID: Dag Lem's reDIP at UltiSID level (8 SIDs), mixer, sampler | T25.6: the sampler status as the pending mask of all voices (ADR-0069, decided 2026-11-14, not built) | [T25](docs/todo/T25.md) |
+| T25 | ✅ | SID: Dag Lem's reDIP at UltiSID level (8 SIDs), mixer, sampler | T25.6: the status mask (ADR-0069) built 2026-11-14, board test `U12-UA972` open | [T25](docs/todo/T25.md) |
 | T28 | ✅ | UCI (Ultimate command interface at $DF1C-$DF1F) | – | [T28-uci](docs/specs/T28-uci.md#status-and-history) |
 | T29 | ✅ | Turbo: CPU up to 63 cycles per C64 cycle | – | [T29-turbo](docs/specs/T29-turbo.md#status-and-history) |
 | T33 | ✅ | Generic cartridge decoder per Alex's mapping descriptor | – | [T33-generic-cart-decoder](docs/specs/T33-generic-cart-decoder.md#status-and-history) |

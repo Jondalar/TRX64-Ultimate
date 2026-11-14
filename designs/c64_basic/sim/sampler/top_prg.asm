@@ -157,8 +157,8 @@ play:   lda #0
         jmp *
         * = $C200
 irq:    pha
-        lda $DF60
-        and #1
+        lda $DF60               ; the status is the mask of all voices (ADR-0069): voice 2 is bit 2
+        and #4
         beq irqe
         inc $C801
         lda #$FF

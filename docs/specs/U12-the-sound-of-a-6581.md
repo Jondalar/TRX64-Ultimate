@@ -357,7 +357,7 @@ the only one that costs no new dependency, and none of the three is built.
 **Q5 — answered 2026-11-14, Alex: the mask.** *"Maske, die anderen Programme sind fuer Gideons Cores,
 nicht meinen"*. The status byte of every voice window becomes the 8 bit pending mask of all voices;
 [ADR-0069](../adr/0069-ultimate-audio-status-is-the-mask-of-all-voices.md), built under
-[T25.6](T25.6-sampler.md). `U12-UA972` is expected to pass after that change.
+[T25.6](T25.6-sampler.md) on 2026-11-14 (benches green). `U12-UA972` is expected to pass on a bitstream with it.
 
 **Q5 (as asked) — Is the IRQ status register a per-voice flag or a mask of all voices?** This decides whether
 his test program can pass on our hardware at all, and it is the one thing in the review that is a

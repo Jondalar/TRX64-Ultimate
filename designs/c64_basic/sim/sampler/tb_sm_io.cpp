@@ -90,10 +90,10 @@ int main(int argc, char **argv)
     bool ok = g.size() == 16;
     for (size_t i = 0; i < g.size() && i < 16; i++) ok = ok && g[i] == (((int8_t)(20 + 7 * i)) * 256 * 63 * 166) >> 11;
     CHECK(ok, "voice 7 played from the app alone (%zu samples)", g.size());
-    CHECK(app(0xE0, false) == 0x01 && d->irq == 1, "status 1 and the IRQ line");
-    // the C64 reads the status of voice 7? no: the window has 7 voices; voice 6 is $DFE0. Voice 7 is not visible
+    CHECK(app(0xE0, false) == 0x80 && d->irq == 1, "status: the mask with voice 7, and the IRQ line");
+    // the C64's window has voices 0..6 ($DF20..$DFE0); voice 7 has none, so its bit is not in the C64's mask
     d->bus_addr = 0xDF20; for (int i = 0; i < 8; i++) step();
-    CHECK(d->oe && d->dout == 0, "C64 reads voice 0's status");
+    CHECK(d->oe && d->dout == 0, "C64 reads the mask without voice 7");
     app(0xFF, true, 0xFF);
     CHECK(app(0xE0, false) == 0x00, "acknowledged");
     printf("%d checks, %d failed\n", checks, fails);

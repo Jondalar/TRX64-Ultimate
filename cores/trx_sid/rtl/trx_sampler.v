@@ -69,14 +69,12 @@ localparam [7:0] VERSION = 8'h01;
 always @(posedge clk) en_s <= {en_s[0], c64_en};
 wire en = en_s[1];
 reg   [7:0] irq_pend = 8'd0;                // clk2x register, read here (a few ns of mux, a half-rate path)
-// a read of a: {the sampler answers, the byte}; the bus read and the monitor's look (U13) both take it from here
+// a read of a: {the sampler answers, the byte}; the bus read and the monitor's look (U13) both take it from here.
+// Status (+0) is the pending mask of the voices the C64 can see, bit n = voice n, the same in every window
+// (ADR-0069); voice 7 has no window here, so bit 7 reads 0.
 function [8:0] rd_val(input [15:0] a, input e, input [7:0] ip);
-    reg [2:0] v;
-    begin
-        v = a[7:5] - 3'd1;
-        rd_val = {e && a[15:8] == 8'hDF && a[7:5] != 3'd0,
-                  a[4:0] == 5'd0 ? {7'd0, ip[v]} : a[4:0] == 5'd1 ? VERSION : 8'd0};
-    end
+    rd_val = {e && a[15:8] == 8'hDF && a[7:5] != 3'd0,
+              a[4:0] == 5'd0 ? {1'b0, ip[6:0]} : a[4:0] == 5'd1 ? VERSION : 8'd0};
 endfunction
 wire  [8:0] rd_bus = rd_val(bus_addr, en, irq_pend);
 always @(posedge clk) begin
@@ -359,7 +357,7 @@ always @(posedge clk2x) begin
     if (op) begin
         if (slot_c) c_pend <= 1'b0; else begin a_pend <= 1'b0; a_rs_tgl <= ~a_rs_tgl; end
         if (!slot_c && !a_w)
-            a_rdata <= (op_wd == 3'd0 && op_ln == 2'd0) ? {7'd0, irq_pend[op_v]} :
+            a_rdata <= (op_wd == 3'd0 && op_ln == 2'd0) ? irq_pend :     // all eight voices (ADR-0069)
                        (op_wd == 3'd0 && op_ln == 2'd1) ? VERSION : 8'd0;
         if (op_w && op_wd == 3'd7 && op_ln == 2'd3) irq_pend[op_v] <= 1'b0;
         // rd = the old word: a write that keeps the enable bit changes repeat / IRQ only

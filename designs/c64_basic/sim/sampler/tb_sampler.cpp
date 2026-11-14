@@ -345,11 +345,22 @@ int main(int argc, char **argv)
         CHECK(c64_rd(0xDF20) == 1, "IRQ at a loop wrap");
         c64_wr(0xDF20, 0);
         c64_wr(0xDF3F, 0xFF);
-        // status is per voice
+        // status is the pending mask of all voices, the same in every window (ADR-0069)
         vsetup(3, REU + 0x3000, 8, 20, 63, 15);
         c64_wr(0xDF80, 0x05); run(60);
-        CHECK(c64_rd(0xDF80) == 1 && c64_rd(0xDF20) == 0 && c64_rd(0xDF40) == 0, "status is per voice");
+        CHECK(c64_rd(0xDF80) == 0x08 && c64_rd(0xDF20) == 0x08 && c64_rd(0xDF40) == 0x08, "status is the mask (voice 3)");
         c64_wr(0xDF80, 0); c64_wr(0xDF9F, 0xFF);
+        CHECK(c64_rd(0xDF20) == 0 && d->irq == 0, "mask clear after the ack");
+        // GideonZ/1541ultimate#972's test: voices 0 and 1 pending -> $DF20 == 3, each acknowledged at its own +1F
+        vsetup(0, REU + 0x3000, 8, 20, 63, 15);
+        vsetup(1, REU + 0x3000, 8, 20, 63, 15);
+        c64_wr(0xDF20, 0x05); c64_wr(0xDF40, 0x05); run(60);
+        CHECK(c64_rd(0xDF20) == 0x03 && c64_rd(0xDF40) == 0x03 && d->irq == 1, "two voices pending read 3 (#972)");
+        c64_wr(0xDF3F, 0xFF);
+        CHECK(c64_rd(0xDF20) == 0x02 && d->irq == 1, "voice 0 acknowledged, voice 1 still pending");
+        c64_wr(0xDF5F, 0xFF);
+        CHECK(c64_rd(0xDF20) == 0x00 && d->irq == 0, "both acknowledged");
+        c64_wr(0xDF20, 0); c64_wr(0xDF40, 0);
         // restart: ctrl 0 then 1 starts from START again
         vsetup(0, REU + 0x3000, 16, 150, 63, 15);
         c64_wr(0xDF20, 0x01); run(100);
@@ -392,7 +403,8 @@ int main(int argc, char **argv)
         CHECK(app_op(0x20 * 7 + 0, false, 0) == 0x00, "app reads status 0");
         vsetup(7, REU + 0x3000, 8, 20, 63, 15);
         vw(7, 0, 0x05); run(60);
-        CHECK(app_op(0xE0, false, 0) == 0x01, "app reads status 1");
+        CHECK(app_op(0xE0, false, 0) == 0x80, "app reads the mask, voice 7 pending");
+        CHECK(c64_rd(0xDF20) == 0x00, "the C64 does not see voice 7 in the mask");
         app_op(0xFF, true, 0xFF);
         CHECK(app_op(0xE0, false, 0) == 0x00, "app acknowledges");
         vw(7, 0, 0);
