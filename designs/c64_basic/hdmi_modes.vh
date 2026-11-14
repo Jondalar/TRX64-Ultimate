@@ -6,7 +6,7 @@
 // hm_cdce_lock: CDCE registers 0x18..0x1B (N[11:4]; N[3:0],R[8:5]; R[4:0],Q[5:3]; Q[2:0],P,range): the frame is exactly the VIC frame.
 // hm_rate: the pixel clock in Hz (TMDS clock / gear, for N/CTS) in the family's first System Mode (PAL, NTSC); hm_rate_alt in its
 // second (NTSC-50, PAL-60).
-// hm_align: the VIC line at which vic_scaler aligns the frame (one per row, for every scale).
+// hm_align(m, sc): the VIC line at which vic_scaler aligns the frame (one per row and scale: a scale change re-aligns it once).
 // hm_geom(m, sc), sc = scale 0 Integer, 1 Fit, 2 Fill (U16 D3): {hn[5:0], hd[5:0], vn[5:0], vd[5:0], tvn[5:0], tvd[5:0], xw0[11:0],
 // yw0[10:0], xt0[11:0], yt0[10:0]}: vic_scaler steps hn/hd VIC pixels per output pixel and vn/vd VIC lines per output line from the
 // window's first pixel / line (xw0, yw0, relative to the active origin); c64_text's text area from (xt0, yt0), hn/hd C64 pixels per
@@ -103,42 +103,56 @@ function [31:0] hm_rate_alt(input [3:0] m);
     endcase
 endfunction
 
-function [8:0] hm_align(input [3:0] m);
-    case (m)
-    4'd0: hm_align = 9'd78;  // 576p/480p 50 Hz
-    4'd1: hm_align = 9'd28;  // 1280x720 50 Hz
-    4'd2: hm_align = 9'd20;  // 1920x1080 50 Hz
-    4'd6: hm_align = 9'd95;  // 576p/480p 60 Hz
-    4'd7: hm_align = 9'd35;  // 1280x720 60 Hz
-    4'd8: hm_align = 9'd37;  // 1920x1080 60 Hz
-    4'd9: hm_align = 9'd56;  // 800x600 60 Hz
+function [8:0] hm_align(input [3:0] m, input [1:0] sc);
+    case ({sc, m})
+    {2'd0, 4'd0}: hm_align = 9'd24;  // 576p/480p 50 Hz Integer
+    {2'd0, 4'd1}: hm_align = 9'd28;  // 1280x720 50 Hz Integer
+    {2'd0, 4'd2}: hm_align = 9'd20;  // 1920x1080 50 Hz Integer
+    {2'd0, 4'd6}: hm_align = 9'd47;  // 576p/480p 60 Hz Integer
+    {2'd0, 4'd7}: hm_align = 9'd35;  // 1280x720 60 Hz Integer
+    {2'd0, 4'd8}: hm_align = 9'd37;  // 1920x1080 60 Hz Integer
+    {2'd0, 4'd9}: hm_align = 9'd56;  // 800x600 60 Hz Integer
+    {2'd1, 4'd0}: hm_align = 9'd24;  // 576p/480p 50 Hz Fit
+    {2'd1, 4'd1}: hm_align = 9'd20;  // 1280x720 50 Hz Fit
+    {2'd1, 4'd2}: hm_align = 9'd20;  // 1920x1080 50 Hz Fit
+    {2'd1, 4'd6}: hm_align = 9'd47;  // 576p/480p 60 Hz Fit
+    {2'd1, 4'd7}: hm_align = 9'd35;  // 1280x720 60 Hz Fit
+    {2'd1, 4'd8}: hm_align = 9'd35;  // 1920x1080 60 Hz Fit
+    {2'd1, 4'd9}: hm_align = 9'd44;  // 800x600 60 Hz Fit
+    {2'd2, 4'd0}: hm_align = 9'd20;  // 576p/480p 50 Hz Fill
+    {2'd2, 4'd1}: hm_align = 9'd20;  // 1280x720 50 Hz Fill
+    {2'd2, 4'd2}: hm_align = 9'd20;  // 1920x1080 50 Hz Fill
+    {2'd2, 4'd6}: hm_align = 9'd35;  // 576p/480p 60 Hz Fill
+    {2'd2, 4'd7}: hm_align = 9'd35;  // 1280x720 60 Hz Fill
+    {2'd2, 4'd8}: hm_align = 9'd35;  // 1920x1080 60 Hz Fill
+    {2'd2, 4'd9}: hm_align = 9'd35;  // 800x600 60 Hz Fill
     default: hm_align = 0;
     endcase
 endfunction
 
 function [81:0] hm_geom(input [3:0] m, input [1:0] sc);
     case ({sc, m})
-    {2'd0, 4'd0}: hm_geom = {6'd1, 6'd1, 6'd1, 6'd1, 6'd1, 6'd1, 12'd160, 11'd153, 12'd200, 11'd188};  // 576p/480p 50 Hz Integer: window 400x270, text 320x200, margins 3.0 / -74.3 lines
+    {2'd0, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd5, 6'd9, 6'd5, 6'd9, 12'd0, 11'd45, 12'd72, 11'd108};  // 576p/480p 50 Hz Integer: window 720x486, text 576x360, margins 3.0 / 33.2 lines
     {2'd0, 4'd1}: hm_geom = {6'd1, 6'd2, 6'd1, 6'd2, 6'd1, 6'd2, 12'd240, 11'd90, 12'd320, 11'd160};  // 1280x720 50 Hz Integer: window 800x540, text 640x400, margins 3.5 / 14.3 lines
     {2'd0, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Integer: window 1600x1080, text 1280x800, margins 3.2 / 29.9 lines
-    {2'd0, 4'd6}: hm_geom = {6'd1, 6'd1, 6'd1, 6'd1, 6'd1, 6'd1, 12'd120, 11'd120, 12'd160, 11'd140};  // 576p/480p 60 Hz Integer: window 400x240, text 320x200, margins 3.9 / -59.9 lines
+    {2'd0, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd5, 6'd9, 6'd5, 6'd8, 12'd0, 11'd24, 12'd64, 11'd80};  // 576p/480p 60 Hz Integer: window 640x432, text 512x320, margins 3.9 / 35.7 lines
     {2'd0, 4'd7}: hm_geom = {6'd1, 6'd3, 6'd1, 6'd3, 6'd1, 6'd3, 12'd40, 11'd0, 12'd160, 11'd60};  // 1280x720 60 Hz Integer: window 1200x720, text 960x600, margins 3.3 / 47.0 lines
     {2'd0, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd60, 12'd320, 11'd140};  // 1920x1080 60 Hz Integer: window 1600x960, text 1280x800, margins 3.8 / 43.4 lines
     {2'd0, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd1, 6'd2, 6'd1, 6'd2, 12'd0, 11'd60, 12'd80, 11'd100};  // 800x600 60 Hz Integer: window 800x480, text 640x400, margins 3.0 / 14.5 lines
-    {2'd1, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd5, 6'd9, 6'd5, 6'd9, 12'd0, 11'd45, 12'd72, 11'd108};  // 576p/480p 50 Hz Fit: window 720x486, text 576x360, margins 57.0 / -20.8 lines
-    {2'd1, 4'd1}: hm_geom = {6'd3, 6'd8, 6'd3, 6'd8, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 50 Hz Fit: window 1067x720, text 854x534, margins 11.3 / 21.9 lines
+    {2'd1, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd5, 6'd9, 6'd5, 6'd9, 12'd0, 11'd45, 12'd72, 11'd108};  // 576p/480p 50 Hz Fit: window 720x486, text 576x360, margins 3.0 / 33.2 lines
+    {2'd1, 4'd1}: hm_geom = {6'd3, 6'd8, 6'd3, 6'd8, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 50 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 29.9 lines
     {2'd1, 4'd2}: hm_geom = {6'd1, 6'd4, 6'd1, 6'd4, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 50 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 29.9 lines
-    {2'd1, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd5, 6'd9, 6'd5, 6'd8, 12'd0, 11'd24, 12'd64, 11'd80};  // 576p/480p 60 Hz Fit: window 640x432, text 512x320, margins 51.9 / -12.3 lines
+    {2'd1, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd5, 6'd9, 6'd5, 6'd8, 12'd0, 11'd24, 12'd64, 11'd80};  // 576p/480p 60 Hz Fit: window 640x432, text 512x320, margins 3.9 / 35.7 lines
     {2'd1, 4'd7}: hm_geom = {6'd3, 6'd8, 6'd1, 6'd3, 6'd3, 6'd8, 12'd106, 11'd0, 12'd213, 11'd93};  // 1280x720 60 Hz Fit: window 1067x720, text 854x534, margins 3.3 / 47.0 lines
-    {2'd1, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd2, 6'd9, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 60 Hz Fit: window 1600x1080, text 1280x800, margins 5.2 / 44.9 lines
-    {2'd1, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd4, 6'd9, 6'd1, 6'd2, 12'd0, 11'd30, 12'd80, 11'd100};  // 800x600 60 Hz Fit: window 800x540, text 640x400, margins 15.2 / 26.2 lines
-    {2'd2, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd15, 6'd32, 6'd15, 6'd32, 12'd0, 11'd0, 12'd72, 11'd74};  // 576p/480p 50 Hz Fill: window 720x576, text 576x427, margins 61.4 / -15.9 lines
-    {2'd2, 4'd1}: hm_geom = {6'd5, 6'd16, 6'd3, 6'd8, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 50 Hz Fill: window 1280x720, text 1024x534, margins 11.3 / 21.9 lines
+    {2'd1, 4'd8}: hm_geom = {6'd1, 6'd4, 6'd2, 6'd9, 6'd1, 6'd4, 12'd160, 11'd0, 12'd320, 11'd140};  // 1920x1080 60 Hz Fit: window 1600x1080, text 1280x800, margins 3.2 / 46.9 lines
+    {2'd1, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd4, 6'd9, 6'd1, 6'd2, 12'd0, 11'd30, 12'd80, 11'd100};  // 800x600 60 Hz Fit: window 800x540, text 640x400, margins 3.2 / 38.2 lines
+    {2'd2, 4'd0}: hm_geom = {6'd5, 6'd9, 6'd15, 6'd32, 6'd15, 6'd32, 12'd0, 11'd0, 12'd72, 11'd74};  // 576p/480p 50 Hz Fill: window 720x576, text 576x427, margins 3.4 / 42.1 lines
+    {2'd2, 4'd1}: hm_geom = {6'd5, 6'd16, 6'd3, 6'd8, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 50 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 29.9 lines
     {2'd2, 4'd2}: hm_geom = {6'd5, 6'd24, 6'd1, 6'd4, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 50 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 29.9 lines
-    {2'd2, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd1, 6'd2, 6'd9, 6'd16, 12'd0, 11'd0, 12'd64, 11'd62};  // 576p/480p 60 Hz Fill: window 640x480, text 512x356, margins 63.4 / -0.3 lines
+    {2'd2, 4'd6}: hm_geom = {6'd5, 6'd8, 6'd1, 6'd2, 6'd9, 6'd16, 12'd0, 11'd0, 12'd64, 11'd62};  // 576p/480p 60 Hz Fill: window 640x480, text 512x356, margins 3.4 / 59.7 lines
     {2'd2, 4'd7}: hm_geom = {6'd5, 6'd16, 6'd1, 6'd3, 6'd3, 6'd8, 12'd0, 11'd0, 12'd128, 11'd93};  // 1280x720 60 Hz Fill: window 1280x720, text 1024x534, margins 3.3 / 47.1 lines
-    {2'd2, 4'd8}: hm_geom = {6'd5, 6'd24, 6'd2, 6'd9, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 60 Hz Fill: window 1920x1080, text 1536x800, margins 5.2 / 44.9 lines
-    {2'd2, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd2, 6'd5, 6'd9, 6'd20, 12'd0, 11'd0, 12'd80, 11'd77};  // 800x600 60 Hz Fill: window 800x600, text 640x445, margins 24.4 / 35.6 lines
+    {2'd2, 4'd8}: hm_geom = {6'd5, 6'd24, 6'd2, 6'd9, 6'd1, 6'd4, 12'd0, 11'd0, 12'd192, 11'd140};  // 1920x1080 60 Hz Fill: window 1920x1080, text 1536x800, margins 3.2 / 46.9 lines
+    {2'd2, 4'd9}: hm_geom = {6'd1, 6'd2, 6'd2, 6'd5, 6'd9, 6'd20, 12'd0, 11'd0, 12'd80, 11'd77};  // 800x600 60 Hz Fill: window 800x600, text 640x445, margins 3.4 / 56.6 lines
     default: hm_geom = 0;
     endcase
 endfunction

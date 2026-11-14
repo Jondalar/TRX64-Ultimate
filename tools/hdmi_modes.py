@@ -12,8 +12,8 @@ Ported from TRX64U-MultiCore tools/hdmi_modes.py (its host edition, T164 WP1, at
 the clock chain, the CDCE register rules (regs, decode_regs, chip_check), cdce_exact, lock_for, Gideon's mode table and the index
 scheme are that tool's. This edition differs (spec U16 D1-D3): every row is locked to the VIC frame (no frame buffer), the rows are
 0, 1, 2, 6, 7, 8, 9, row 6 (480p) has 800 x 526 instead of CEA's 525 lines (525 does not lock), the pixel rate is given for both
-System Modes of a family, each row carries its frame align line (hm_align) and, for each of the three scales (Integer, Fit,
-Fill), the scaler's and the text layer's geometry (hm_geom).
+System Modes of a family, and each row carries, for each of the three scales (Integer, Fit, Fill), its frame align line (hm_align)
+and the scaler's and the text layer's geometry (hm_geom).
 
 Source of the timings: Gideon's table, software/ultimate-app/software/u64/hdmi_scan.cc (sm_*), as MultiCore took it. The clock
 chain (designs/c64_basic/top.v): dot4x -> mmcm_ref x31.25/26 -> CDCE (cdce_mode.v, I2C 0x64) -> GTP REFCLK = TMDS clock f_t ->
@@ -136,15 +136,16 @@ SCALES = ("Integer", "Fit", "Fill")           # U16 D3: the Scale setting (0x4F0
 def steps(fam, ha, va, sc):
     """U16 D3: the picture's steps per output pixel / line (VIC pixels h, VIC lines v) and the text layer's vertical step tv for scale sc.
     Fit: the largest factor s with today's 1600 x 1080 proportion (4 s per VIC pixel, vertically 4 s at 50 Hz and 4.5 s at 60 Hz).
-    Integer: the largest whole k, the same on both axes, whose 400 x 270 (240) window fits. Fill: hact / 400 and vact / 270 (240).
+    Integer: the largest whole k, the same on both axes, whose 400 x 270 (240) window fits; where that is 1 (576p, 480p: the 64-line
+    ring cannot hold a window read at 1 line per VIC line, U16 D3, Alex 2026-11-14) Integer is Fit. Fill: hact / 400 and vact / 270 (240).
     The text area (U16 D6) follows the picture horizontally and, vertically, the factor the 50 Hz window (270 lines) would have at this
     scale, in both families (1080p60 Fit: 4 x 4 as before U16, not 4.5)."""
     wpx, wln = WIN[fam]
-    if sc == 1:
+    k = min(ha // wpx, va // wln)
+    if sc == 1 or (sc == 0 and k < 2):
         s_ = min(F(ha, PIC_1080[0]), F(va, PIC_1080[1]))
         h, v, tv = 1 / (4 * s_), 1 / ((F(9, 2) if fam else 4) * s_), 1 / (4 * s_)
     elif sc == 0:
-        k = min(ha // wpx, va // wln)
         h = v = tv = F(1, k)
     else:
         h, v, tv = F(wpx, ha), F(wln, va), F(WIN[0][1], va)
@@ -179,12 +180,12 @@ def geom(fam, ha, va, htot, vtot, sc, align):
     return dict(hn=h.numerator, hd=h.denominator, vn=v.numerator, vd=v.denominator, tvn=tv.numerator, tvd=tv.denominator,
                 ww=ww, wh=wh, xw0=xw0, yw0=yw0, tw=tw, th=th, xt0=xt0, yt0=yt0, m_read=mf, m_ring=mo)
 
-def align_for(fam, ha, va, htot, vtot):
-    """U16 D3: one align line per row for all three scales (a scale change is taken at a frame start without re-aligning): the smallest
-    at which every window pixel of every scale is read at least MARGIN lines after the VIC wrote it."""
+def align_for(fam, ha, va, htot, vtot, sc):
+    """U16 D3: one align line per row and scale (a scale change re-aligns the output frame once): the smallest at which every window
+    pixel is read at least MARGIN lines after the VIC wrote it."""
     for A in range(0, 2 * VIC_LINES[fam]):
-        if all(geom(fam, ha, va, htot, vtot, sc, A)["m_read"] >= MARGIN for sc in range(3)): return A
-    raise SystemExit("row %dx%d: no align line" % (ha, va))
+        if geom(fam, ha, va, htot, vtot, sc, A)["m_read"] >= MARGIN: return A
+    raise SystemExit("row %dx%d scale %s: no align line" % (ha, va, SCALES[sc]))
 
 def compute():
     rows = []
@@ -197,10 +198,10 @@ def compute():
                 for vm in DOT4X if VM_FAM[vm] == fam}
         rows.append(dict(idx=m, fam=fam, name=HDMI_NAMES[hd], vic=vic, asp=asp, ha=ha, hfp=hfp, hs=hs, hbp=hbp, hpol=hpol, va=va,
                          vfp=vfp, vs=vs, vbp=vbp, vpol=vpol, gear=gear, pclk=pclk, htot=htot, vtot=vtot, lk=lk, rate=rate,
-                         align=align_for(fam, ha, va, htot, vtot)))
+                         align=[align_for(fam, ha, va, htot, vtot, sc) for sc in range(3)]))
         r = rows[-1]
-        r["align_hw"] = r["align"] % VIC_LINES[fam]
-        r["gs"] = [geom(fam, ha, va, htot, vtot, sc, r["align"]) for sc in range(3)]
+        r["align_hw"] = [a % VIC_LINES[fam] for a in r["align"]]
+        r["gs"] = [geom(fam, ha, va, htot, vtot, sc, r["align"][sc]) for sc in range(3)]
     return rows
 
 def nm(r): return "%s %d Hz" % (r["name"], 50 if r["fam"] == 0 else 60)
@@ -244,7 +245,7 @@ def limits(rows):
         sh = SHIPPED.get(r["idx"])
         if sh:
             if tuple(r["lk"]["bytes"]) != sh["cdce"]: bad.append("%s: CDCE bytes %s, the design shipped %s" % (n, r["lk"]["bytes"], sh["cdce"]))
-            if r["align"] != sh["align"]: bad.append("%s: align line %d, vic_scaler.v had %d" % (n, r["align"], sh["align"]))
+            if r["align"][1] != sh["align"]: bad.append("%s: align line %d at Fit, vic_scaler.v had %d" % (n, r["align"][1], sh["align"]))
             for vm, want in sh["rate"].items():
                 if r["rate"][vm] != want: bad.append("%s vmode %d: rate %d, top.v had %d" % (n, vm, r["rate"][vm], want))
             if (g["ww"], g["wh"], g["xw0"], g["yw0"], g["xt0"], g["yt0"], g["tw"], g["th"]) != (1600, 1080, 160, 0, 320, 140, 1280, 800):
@@ -268,7 +269,7 @@ def vh(rows):
          "// hm_cdce_lock: CDCE registers 0x18..0x1B (N[11:4]; N[3:0],R[8:5]; R[4:0],Q[5:3]; Q[2:0],P,range): the frame is exactly the VIC frame.",
          "// hm_rate: the pixel clock in Hz (TMDS clock / gear, for N/CTS) in the family's first System Mode (PAL, NTSC); hm_rate_alt in its",
          "// second (NTSC-50, PAL-60).",
-         "// hm_align: the VIC line at which vic_scaler aligns the frame (one per row, for every scale).",
+         "// hm_align(m, sc): the VIC line at which vic_scaler aligns the frame (one per row and scale: a scale change re-aligns it once).",
          "// hm_geom(m, sc), sc = scale 0 Integer, 1 Fit, 2 Fill (U16 D3): {hn[5:0], hd[5:0], vn[5:0], vd[5:0], tvn[5:0], tvd[5:0], xw0[11:0],",
          "// yw0[10:0], xt0[11:0], yt0[10:0]}: vic_scaler steps hn/hd VIC pixels per output pixel and vn/vd VIC lines per output line from the",
          "// window's first pixel / line (xw0, yw0, relative to the active origin); c64_text's text area from (xt0, yt0), hn/hd C64 pixels per",
@@ -288,7 +289,11 @@ def vh(rows):
                     ((r["idx"],) + tuple(r["lk"]["bytes"]) + (r["lk"]["N"], r["lk"]["M"], r["lk"]["P"], r["lk"]["Q"], r["lk"]["R"], r["gear"] * r["htot"] * r["vtot"])))
     block("function [31:0] hm_rate(input [3:0] m);", rows, lambda r: "    4'd%d: hm_rate = 32'd%d;%s" % (r["idx"], r["rate"][VM_PRIMARY[r["fam"]]], c(r)))
     block("function [31:0] hm_rate_alt(input [3:0] m);", rows, lambda r: "    4'd%d: hm_rate_alt = 32'd%d;%s" % (r["idx"], r["rate"][VM_ALT[r["fam"]]], c(r)))
-    block("function [8:0] hm_align(input [3:0] m);", rows, lambda r: "    4'd%d: hm_align = 9'd%d;%s" % (r["idx"], r["align_hw"], c(r)))
+    L.extend(["function [8:0] hm_align(input [3:0] m, input [1:0] sc);", "    case ({sc, m})"])
+    for sc in range(3):
+        for r in rows:
+            L.append("    {2'd%d, 4'd%d}: hm_align = 9'd%d;  // %s %s" % (sc, r["idx"], r["align_hw"][sc], nm(r), SCALES[sc]))
+    L.extend(["    default: hm_align = 0;", "    endcase", "endfunction", ""])
     L.extend(["function [81:0] hm_geom(input [3:0] m, input [1:0] sc);", "    case ({sc, m})"])
     for sc in range(3):
         for r in rows:
@@ -305,12 +310,12 @@ def table(rows):
     for r in rows:
         lk = r["lk"]
         for sc, g in enumerate(r["gs"]):
-            head = ("%d | %s | %d | %d | %dx%d, %dx%d | %d/%d | %.6f | %s | %d" %
+            head = ("%d | %s | %d | %d | %dx%d, %dx%d | %d/%d | %.6f | %s" %
                     (r["idx"], nm(r), r["vic"], r["gear"], r["ha"], r["va"], r["htot"], r["vtot"], lk["N"], lk["M"],
                      float(DOT4X[VM_PRIMARY[r["fam"]]] * REF_PER_DOT4X * lk["N"] / lk["M"]) / 1e6,
-                     " / ".join(str(v) for _, v in sorted(r["rate"].items())), r["align_hw"])) if sc == 0 else " | | | | | | | | "
-            print("| %s | %s | %dx%d at (%d, %d) | %d/%d, %d/%d (%d/%d) | %dx%d at (%d, %d) | %.1f / %.1f |" %
-                  (head, SCALES[sc], g["ww"], g["wh"], g["xw0"], g["yw0"], g["hn"], g["hd"], g["vn"], g["vd"], g["tvn"], g["tvd"],
+                     " / ".join(str(v) for _, v in sorted(r["rate"].items())))) if sc == 0 else " | | | | | | | "
+            print("| %s | %d | %s | %dx%d at (%d, %d) | %d/%d, %d/%d (%d/%d) | %dx%d at (%d, %d) | %.1f / %.1f |" %
+                  (head, r["align_hw"][sc], SCALES[sc], g["ww"], g["wh"], g["xw0"], g["yw0"], g["hn"], g["hd"], g["vn"], g["vd"], g["tvn"], g["tvd"],
                    g["tw"], g["th"], g["xt0"], g["yt0"], float(g["m_read"]), float(g["m_ring"])))
 
 def decode(text):
@@ -319,7 +324,8 @@ def decode(text):
     bad = []
     def fn(name): return {int(m): v for m, v in re.findall(r"4'd(\d+): " + name + r" = ([^;]*);", text)}
     rowf, lck, rate, alt, lkd = fn("hm_row"), fn("hm_cdce_lock"), fn("hm_rate"), fn("hm_rate_alt"), fn("hm_locked")
-    if any(set(d) != ROWS for d in (rowf, lck, rate, alt, lkd, fn("hm_valid"), fn("hm_aspect"), fn("hm_align"))):
+    aln = {(int(a), int(m)) for a, m in re.findall(r"\{2'd(\d), 4'd(\d+)\}: hm_align = ", text)}
+    if any(set(d) != ROWS for d in (rowf, lck, rate, alt, lkd, fn("hm_valid"), fn("hm_aspect"))) or aln != {(sc, m) for sc in range(3) for m in ROWS}:
         return ["hdmi_modes.vh: the functions do not name exactly the rows of U16 D2"]
     for m in sorted(ROWS):
         n = "mode %d" % m

@@ -1,7 +1,7 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
-**Status:** IN PROGRESS (2026-11-14). `tools/hdmi_modes.py`, `hdmi_modes.vh`, `hdmi_timing.v` and the encoder fork are in; nothing is wired
-into `top.v` yet. Blocked on one question to Alex: Integer at 576p and 480p (§5, 2026-11-14 entries).
+**Status:** IN PROGRESS (2026-11-14). The mode table, its tool, `hdmi_timing.v` and the encoder fork are in; the gateware wiring is
+being built (§5).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -61,15 +61,20 @@ U16, "Ja ich will U17 gleich dazu"). The VIC window is 400 x 270 (60 Hz 400 x 24
   need not be whole numbers (the 60 Hz 1080p picture is 4.5x vertically already). Examples: 720p 1067 x 720, 576p 720 x 486, 480p
   640 x 432, 800 x 600 800 x 540.
 - **Integer:** the largest whole factor k, the same on both axes, whose picture fits the active area, centred, black border (1080p
-  50 Hz: 4 -> 1600 x 1080; 1080p 60 Hz: 4 -> 1600 x 960; 720p 50 Hz: 2 -> 800 x 540).
+  50 Hz: 4 -> 1600 x 1080; 1080p 60 Hz: 4 -> 1600 x 960; 720p 50 Hz: 2 -> 800 x 540). **Where k would be 1 (576p, 480p) Integer is Fit**
+  (Alex, 2026-11-14, "a"): a window read at one output line per VIC line gains 135 (120) VIC lines on the write in one frame and
+  overtakes the 64-line ring (§5).
 - **Fill:** the whole active area: x factor hact / 400, y factor vact / 270 (60 Hz: vact / 240).
 
-The scale is written at 0x4F01 (D4) and taken at a frame start, without the restart sequence.
+The scale is written at 0x4F01 (D4) and taken at a frame start, without the restart sequence (no CDCE, transmitter or MMCM restart).
+Each row and scale has its own align line (`hm_align(m, sc)`, the smallest at which every window pixel is read at least 3 lines after
+the VIC wrote it; Claude, 2026-11-14), so a scale change re-aligns the output frame once: one disturbed frame, the picture keeps its
+place. 1080p at Fit keeps today's lines (20 and 35); 1080p60 Integer aligns at 37 (the same picture place, 2 lines more delay).
 
 **D4 — The request register is MultiCore's** (Claude). `mode_req.v` as in MultiCore's host: write 0x4F00 of the
 application's overlay window = the index; read 0x4F04-0x4F09 = magic 0x48, version 1, flags, the mode running, the
 request counters. U16 adds (D3): write 0x4F01 = the scale (0 Integer, 1 Fit, 2 Fill; any other value is refused and nothing
-changes), read 0x4F0A = the scale in use. Both are free in both designs (checked 2026-11-14: overlay.v decodes no write in 0x4xxx
+changes), read 0x4F0A = the scale in use (power-up 1, Fit; the version at 0x4F05 stays 1). Both are free in both designs (checked 2026-11-14: overlay.v decodes no write in 0x4xxx
 and reads 0 there; MultiCore's mode_req.v writes only 0x4F00 and reads 0x4F04-0x4F09, its hdmi_out.v read mux takes only those, its
 applications define only 0x4F00 and 0x4F04-0x4F09 in `app/video/videomode.h`). This design is a C64-type core (`c64_type = 1`): the family part of a request is replaced by the
 System Mode's, and only a locked row is taken; anything else is refused and nothing changes. An accepted request
@@ -80,7 +85,8 @@ restarts the CDCE sequence, the transmitters and the pixel MMCM, as MultiCore's 
   host's mode as default (T105 D3, T107 D11c). Nothing to build in TRX64-Ultimate beyond the register; MultiCore
   has to let its coreapp offer the modes for `trx64u` (its descriptor) and write 0x4F01 for the scale (MultiCore's side; nothing of
   it is built here).
-- `trx64g` runs our application: it writes 0x4F00 from `CFG_HDMI_RESOLUTION` at start and on every change. 1024 x
+- `trx64g` runs our application: it writes 0x4F00 from `CFG_HDMI_RESOLUTION` at start and on every change; its default becomes
+  FullHD (1080p) in our fork (Alex, 2026-11-14, "a"; Gideon's is SD), so a machine that never set it keeps 1080p. 1024 x
   768 and 1280 x 1024 are taken as 800 x 600 in the 60 Hz family; in the 50 Hz family every PC mode is taken as
   576p (no 50 Hz PC row exists). A new config item "HDMI Picture Scale" (Integer / Fit / Fill, default Fit) beside "HDMI Scan
   Resolution" is written to 0x4F01 at start and on every change. Gideon's timing and scaler registers stay unread.
@@ -88,7 +94,14 @@ restarts the CDCE sequence, the transmitters and the pixel MMCM, as MultiCore's 
 **D6 — Every layer follows the active area** (Claude). `hdmi_timing` gives the counters, the active area's size and
 origin; `vic_scaler`, `overlay.v`, `c64_text.v` and `pix_layer.v` take them instead of their 1080p constants:
 the menu box centred on the active area with the largest character scale that fits, the freeze text in the scaled
-picture's window, the pixel layer's positions relative to the active area.
+picture's window, the pixel layer's positions relative to the active area. The freeze still the app draws on the pixel layer
+(`trx_video.cc`) is placed and sized from the running mode and scale (0x4F07, 0x4F0A), so it lies under the picture in every row and
+scale (Claude, 2026-11-14).
+
+**D8 — The encoder is MultiCore's fork** (Claude, 2026-11-14). `hdmi_enc/` (pixel enable, the frame at run time). Two behaviour changes
+against the vendor encoder this design used, accepted: the AVI InfoFrame's picture aspect at 1080p is 16:9 instead of "no data"
+(`hm_aspect`), and three data island packets per line instead of seven (MAX_PACKETS 3: 576p and 480p have only 144 / 160 clocks of
+blanking).
 
 **D7 — The hand-over contract gains one line** (both sides): `trx64u` and `trx64g` take the HDMI mode request at
 0x4F00 like MultiCore's host, for locked rows only, and the scale at 0x4F01. Changed only with MultiCore's agreement.
@@ -152,3 +165,9 @@ Scenario: Nothing that worked stops working
   before). Found while reading: Gideon's default for "HDMI Scan Resolution" is SD (`u64_config.cc`), so D5 puts a machine with default
   settings on 576p; the freeze still the app draws on the pixel layer (`trx_video.cc`: 800 x 540 at scale 2 from (160, 0)) is placed
   for 1080p and is not in D5 (a second question once the first is answered).
+- **2026-11-14, the answers (Alex, via the coordinator) and the choices taken with them (Claude).** Integer at 576p and 480p is Fit
+  (Alex, "a"; D3). The align line is one per row and scale (`hm_align(m, sc)`): with Integer gone from 576p / 480p the tool finds every
+  row and scale inside the ring with margins of at least 3 lines (576p 50 Hz Fit aligns at line 24, 480p at 47; 1080p Fit 20 and 35 as
+  shipped, 1080p60 Integer 37); a scale change re-aligns the frame once (D3). The freeze still is in scope (D6), the encoder's two
+  behaviour changes are accepted (D8). `tools/hdmi_modes.py check` passes, `selftest` 17 of 17; `hdmi_modes.vh` regenerated. trx64g's
+  default for "HDMI Scan Resolution" becomes FullHD (Alex, "a"; D5).
