@@ -1,8 +1,8 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
 **Status:** IN PROGRESS (2026-11-15). Gateware and the `trx64g` application part built, the boot splash in every row included (§5):
-every bench and the app's host test pass, the app compiles and runs in ue2emu; not yet run: Vivado (CI) and the board.
-Next: CI, then the board (§4).
+every bench and the app's host test pass, the app compiles and runs in ue2emu; CI (Vivado, all benches, the app) green (§5);
+not yet run: the board. Next: the board (§4).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -145,7 +145,7 @@ Scenario: Nothing that worked stops working
   frame's clock count in every row and every scale (Integer, Fit, Fill), the window lands inside the active area, the ring is never
   overtaken.
 - iverilog: `mode_req` (refusal, family replacement, restart sequence), from MultiCore's bench if it has one.
-- Vivado: the c64u build routes and meets timing (it stands at 81 % LUT, 99.89 % slices).
+- Vivado: the c64u build routes and meets timing (CI run 1924: WNS +0.109 ns, 83.3 % LUT, 8,147 of 8,150 slices; §5).
 - Board (Alex): each mode on a TV and on the projector; the boot splash, the menu, the freeze text and a pixel-layer picture in each;
   a System Mode switch (API) while the splash shows.
 
@@ -280,3 +280,8 @@ Scenario: Nothing that worked stops working
   "splash up: row 2, canvas 960 x 540 at scale 2, picture 960 x 540 at (0, 0)", heap free 2,756,032 at boot as before, the screen pixel
   for pixel the base build's except the version line (that build had no git hash). Not run: the splash in the other rows and its move
   (the emulator models the mode request only for MultiCore's host, with that host's layer); they need the board.
+- **2026-11-15, CI.** Run 1924 (d48734d8, the gateware): c64u routed, WNS +0.109 ns (before +0.018); Slice LUTs 27,144 of 32,600
+  (83.26 %, +691 against c8ceafa3), registers 29,338 (+477), slices 8,147 of 8,150 (99.96 %, 3 left; was 8,141), BRAM 58, DSP 24
+  unchanged. Every CI bench passes, the new ones included (`mode_req`, `hdmi_timing`, `tmds_rep`, `text_geom`, `scaler`); the
+  Simulations job now takes 34 min (was 9), the scaler bench runs alone as a long bench. Run 1929 (5a54a1d6, the app part): green, the
+  app built, bitstream and benches from the cache. The splash commit (5e3c1c01) rides on the next run.
