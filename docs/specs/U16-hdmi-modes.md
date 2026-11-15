@@ -1,8 +1,8 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
-**Status:** IN PROGRESS (2026-11-15). Gateware and the `trx64g` application part built, the boot splash in every row included (§5):
-every bench and the app's host test pass, the app compiles and runs in ue2emu; CI (Vivado, all benches, the app) green (§5);
-not yet run: the board. Next: the board (§4).
+**Status:** DONE (2026-11-15, Alex). Gateware, the `trx64g` application part and the boot splash in every row built; every bench
+and the app's host tests pass; CI (Vivado, the tier 1 benches, the app) green; the board test passed on a monitor at 50 Hz (§5).
+Not tested: the 60 Hz rows and a projector. Left open with the done: D7's contract line, the CI gaps and the 576p shape (§5).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -148,6 +148,7 @@ Scenario: Nothing that worked stops working
 - Vivado: the c64u build routes and meets timing (CI run 1924: WNS +0.109 ns, 83.3 % LUT, 8,147 of 8,150 slices; §5).
 - Board (Alex): each mode on a TV and on the projector; the boot splash, the menu, the freeze text and a pixel-layer picture in each;
   a System Mode switch (API) while the splash shows.
+  Run 2026-11-15 on a Samsung monitor at 50 Hz; there is no projector here (§5).
 
 ## 5. Status and history
 
@@ -289,3 +290,10 @@ Scenario: Nothing that worked stops working
   (720 x 576, AVI 4:3, pixels 16/15 wide) Fit and Fill do not correct the shape, so the C64 picture is 16/15 wider on the screen than
   at 1080p. A corrected Fit would be 675 x 486: row 0's geometry in `tools/hdmi_modes.py` (the gateware's
   `hdmi_modes.vh` and the app's `trx_hdmi_modes.h` are generated from it), then the benches again.
+- **2026-11-15, board (Alex): done.** `u16-422f9dce` (`trx64u.cor`, `trx64g.cor`, put on the SD by MultiCore) on a Samsung monitor,
+  System Mode 50 Hz: every "HDMI Scan Resolution" setting tried; the rows the monitor shows look right, a few it does not show (the
+  monitor's limits: *"mein Monitor halt einige nicht kann einfach/nicht will"*); the mode changes work. Alex: *"es sieht alles gut
+  aus"*, *"Mach das als done bitte"*. Not tested: a projector (none here; MultiCore's projector is the origin of this spec), the
+  60 Hz rows (480p, 720p60, 1080p60, 800 x 600). Left open with the done (Alex's call): D7's contract line needs MultiCore's side;
+  the app's host tests (`trxhdmitest`, the splash) are not in CI (`ci/app.sh` runs `app_space_test` and `openapi_check`, not `make host_tests`); the tier 2 benches (`statebus`,
+  `ring_core`) run only on main or with `[sims]`, so they first run with the merge; 576p keeps the square-pixel Fit (entry above).
