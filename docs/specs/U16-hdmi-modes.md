@@ -1,7 +1,8 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
-**Status:** IN PROGRESS (2026-11-15). Gateware built: every bench passes, yosys lint clean; not yet run: Vivado (CI) and the board.
-Next: the application part for `trx64g` (D5, D6's freeze still), handed to the next agent (§5).
+**Status:** IN PROGRESS (2026-11-15). Gateware and the `trx64g` application part built: every bench and the app's host test pass,
+the app compiles and runs in ue2emu; not yet run: Vivado (CI) and the board.
+Next: CI, then the board (§4). Open for Alex: the LVGL boot splash outside 1080p (§5, 2026-11-15, the application).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -204,3 +205,40 @@ Scenario: Nothing that worked stops working
   menu frames), `pixlayer/run.sh` and `run_still.sh`: all PASS. The Verilator tops (`statebus`, `ring_core`, tier 2) need GHDL in the
   CI container and were not run here; their `c64_text` instances with the new ports elaborate (iverilog, a wrong port name as
   control). Not run: Vivado, the board.
+- **2026-11-15, the application (agent).** `software/ultimate-app` branch `u16` (not pushed). In: "HDMI Scan Resolution" defaults to
+  FullHD (`u64_config.cc`; a stored SD stays, D5); the new item "HDMI Picture Scale" (Integer / Fit / Fill, default Fit, id 0xAE, free on
+  the page and in every store table) after it in Video Configuration, hidden on a bitstream without the request; `trx_io_hdmi_modes()`
+  (`trx_io.cc`: the TRX2 block, then magic 0x48 and version 1 at 0x4F04, so Gideon's HDMI registers in that window are never touched);
+  the request (D5) at start and on every change of the resolution or the System Mode, the scale at start and on its change (a change
+  hook). Mapping and the freeze still's place are pure functions over a table `tools/hdmi_modes.py gen` now also writes into the app
+  (`software/io/c64/trx_hdmi_modes.h`, hm_geom's numbers; `check` compares it when the submodule is there): `trx_hdmi.h`.
+  The freeze still (`trx_video.cc`, D6) takes the row and scale from 0x4F07 / 0x4F0A (before U16: 1080p Fit), puts the layer on the
+  scaler's window (scale 1 up to 960 output pixels wide, else 2 at half size; PX_POS = the window's origin), samples each layer pixel
+  at the VIC pixel the scaler shows at its first output pixel (`floor(x hn / hd)`, `floor(y vn / vd)`), and draws the software text
+  cells where c64_text.v draws them and Timewarp's bar from a layout scaled to the layer (800 x 540 gives the old constants exactly). A
+  row or scale change while the freeze is up re-lays the layer (off, two frame starts, new place, still drawn again). Buffers: in the
+  FreeRTOS heap (heap_4, `configTOTAL_HEAP_SIZE` 0x7A0000 = 7,995,392 bytes, the app's `malloc` wrapped into it), allocated at the
+  first freeze and kept, sized by the place and only grown: 1080p Fit 864,000 bytes each as before, 1080p Fill 1,036,800 (the largest;
+  1080p60 Integer 768,000, 720p Fit 385,920, 800 x 600 Fill 960,000, 576p Fill 829,440).
+  **Found while reading.** (a) mode_req checks a request against the family that runs when it arrives, and mode_ctl moves the family
+  only after halting the machine and reprogramming the clocks: a 800 x 600 request written right after a switch to 60 Hz would be
+  refused. The app waits (up to 2 s) until 0x4F07 is in the System Mode's family. (b) An accepted request restarts the synthesizer,
+  the transmitters and the pixel clock even for the row that runs, and the app's effectuate runs on every C64 reset: the app writes
+  only when the running row differs (the default at power-up writes nothing). (c) Gideon's path stays: `SetVideoMode1080p` is harmless
+  on this bitstream (app_i2c.v drops writes to the synthesizer, 0xC8; overlay.v ignores 0x4000-0x401D; the MMCM writes at 0x10200000
+  hit no region of ultimate_sys.vhd) and still needed on Gideon's. (d) The menu's character settings (`DetermineOverlaySettings`) are
+  now for the mode that runs: a 1280 x 1024 request at 50 Hz runs 576p, where its 600-line box would not fit.
+  **Tests.** Host test `make -C target/pc/linux/trxhdmitest test` (in `make host_tests`): 369 checks, the mapping for 6 settings x 2
+  families, the table's 21 entries, for every row and scale the plan within pix_layer.v's limits and over the window inside the active
+  area, every layer column and line sampled as a model of vic_scaler.v's accumulators shows it, every VIC pixel / line and text pixel /
+  line on the layer, 1080p Fit equal to the renderer before U16; controls: 3 of 4 mutations caught (the fourth, a floor for the
+  height, is equal on this table: every height divides). Build: `make -C target/u64ii/riscv/ultimate` in `u64-build-env` (Apple
+  container): no warning; `app_space.py measure`: 50T 1641.4 of 1920 KiB, 100T 1641.4 of 1792 KiB; 180.0 KiB above the image (gate
+  128). ue2emu 0.7.3 (`--board c64u --trx-io --caps 25E40202`, Interface Type Freeze; its C64 core has no mode request, so the
+  fallback path): the freeze still lies where the live picture was (window 160..1760, screen area 140..940 in both frames), 2 buffers
+  of 864,000 bytes, heap free 2,738,688 after them; the splash had 2 x 1,036,800 (adjacent) and 2,756,032 free at boot. heap_4 here
+  has no largest-block figure: whether a grow to 2 x 1,036,800 finds its holes after the first freeze is for the board's log line
+  (1080p Fill); if it does not, the freeze runs with one buffer or none, as before. Not run: the request, the scale and the re-lay
+  (they need the board).
+  **Open for Alex (not in this spec):** the LVGL boot splash (`trx_ui.cc`, `trx_lv_port.h`) and the apps' LVGL UI draw a 960 x 540
+  canvas at scale 2, the whole 1080p frame; in every other row it is cut (720p shows its top left 640 x 360 of 960 x 540).

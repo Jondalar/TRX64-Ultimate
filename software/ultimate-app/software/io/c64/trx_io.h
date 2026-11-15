@@ -55,6 +55,23 @@
 #define TRX_TURBO_ON       (1u << 30)
 #define TRX_TURBO_RAN      (1u << 28)
 
+// U16: the HDMI mode request and the picture's scale (TRX64-Ultimate designs/c64_basic/mode_req.v, docs/specs/U16-hdmi-modes.md
+// D4), bytes in the application's overlay window (U64II_OVERLAY_BASE, IOBASE + 0x140000) where overlay.v decodes nothing.
+// Bitstreams before U16 read 0 there; Gideon's have their HDMI registers in that 4 KB, so only trx_io_hdmi_modes() opens it.
+#define TRX_MR_BASE        (IOBASE + 0x144F00)
+#define TRX_MR_REQ         (TRX_MR_BASE + 0x0)  // W: family * 6 + hdmi; the family part is replaced by the System Mode's, a row
+                                                //    that does not lock is refused; an accepted one restarts the HDMI chain
+#define TRX_MR_SCALE       (TRX_MR_BASE + 0x1)  // W: 0 Integer, 1 Fit, 2 Fill; taken at a frame start, no restart
+#define TRX_MR_MAGIC       (TRX_MR_BASE + 0x4)  // R: 0x48
+#define TRX_MR_VERSION     (TRX_MR_BASE + 0x5)  // R: 1
+#define TRX_MR_FLAGS       (TRX_MR_BASE + 0x6)  // R: b7 the last request was refused
+#define TRX_MR_ROW         (TRX_MR_BASE + 0x7)  // R: the row the timing runs, 0..11
+#define TRX_MR_WRITES      (TRX_MR_BASE + 0x8)  // R: requests written (8 bit count)
+#define TRX_MR_DONE        (TRX_MR_BASE + 0x9)  // R: requests processed; equal to WRITES: FLAGS b7 is the last one's
+#define TRX_MR_SCALE_USED  (TRX_MR_BASE + 0xA)  // R: the scale in use
+#define TRX_MR_MAGIC_VAL   0x48
+#define TRX_MR_REFUSED     0x80
+
 // IRQ_EN / IRQ_CAUSE (write 1 to clear)
 #define TRX_IRQ_STOP       0x01
 #define TRX_IRQ_CAPTURE    0x08
@@ -78,6 +95,10 @@ uint8_t trx_io_caps3(void);
 // The SID of this bitstream is the 8-SID reDIP (reSID8): the app names it so and uses its filter control.
 // False on Gideon's bitstreams (UltiSID) and on ours without that engine.
 bool trx_io_resid8(void);
+
+// The bitstream takes HDMI mode requests and the picture's scale (TRX_MR_*, U16): the IO block is there and mode_req.v answers
+// with its magic and version 1. Read once, then cached.
+bool trx_io_hdmi_modes(void);
 
 // Programs the filter control of engine u (0 or 1): source (TRX_RS8_SRC_*), Auto bits, 6581 curve base and offset.
 void trx_io_resid8_filter(int u, uint8_t src, uint8_t auto_bits, int base, int offset);

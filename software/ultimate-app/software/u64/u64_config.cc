@@ -36,6 +36,7 @@ extern "C" {
 #include "resid8_filter.h"
 #if U64 == 2
 #include "trx_io.h"
+#include "trx_hdmi.h"
 #endif
 #include "sid_device_fpgasid.h"
 #include "sid_device_swinsid.h"
@@ -196,6 +197,7 @@ static SemaphoreHandle_t resetSemaphore;
 #define CFG_HDMI_TX_SWING     0xAB
 #define CFG_HDMI_RESOLUTION   0xAC
 #define CFG_MODEL             0xAD
+#define CFG_HDMI_SCALE        0xAE // U16: the picture's scale on the TRX64 Ultimate bitstream
 
 uint8_t C64_EMUSID1_BASE_BAK;
 uint8_t C64_EMUSID2_BASE_BAK;
@@ -274,6 +276,9 @@ const char *scan_modes[] = {
     "PC 1024 x 768",
     "PC 1280 x 1024",
 };
+
+// U16 (TRX64-Ultimate docs/specs/U16-hdmi-modes.md D3): the order is mode_req.v's 0x4F01 value
+static const char *hdmi_scales[] = { "Integer", "Fit", "Fill" };
 
 const char *stereo_addr[] = { "Off", "A5", "A6", "A7", "A8", "A9" };
 const char *sid_split[] = { "Off", "1/2 (A5)", "1/2 (A6)", "1/2 (A7)", "1/2 (A8)", "1/4 (A5,A6)", "1/4 (A5,A8)", "1/4 (A7,A8)" };
@@ -388,7 +393,10 @@ struct t_cfg_definition u64_cfg[] = {
     { CFG_SYSTEM_MODE,          CFG_TYPE_ENUM, "System Mode",                  "%s", color_sel,    0,  5, 0 },
     { CFG_MODEL,                CFG_TYPE_ENUM, "C64U Model",                   "%s", models,       0,  2, 1 },
 #if U64 == 2
-    { CFG_HDMI_RESOLUTION,      CFG_TYPE_ENUM, "HDMI Scan Resolution",         "%s", scan_modes,   0,  5, 0 },
+    // TRX64 Ultimate (U16 D5): FullHD, the mode the bitstream starts in; Gideon's default is SD. A settings file that holds
+    // SD keeps it: every item is stored with its value, so the new default reaches only a machine without a stored value.
+    { CFG_HDMI_RESOLUTION,      CFG_TYPE_ENUM, "HDMI Scan Resolution",         "%s", scan_modes,   0,  5, 2 },
+    { CFG_HDMI_SCALE,           CFG_TYPE_ENUM, "HDMI Picture Scale",           "%s", hdmi_scales,  0,  2, 1 },
     { CFG_JOYSWAP,              CFG_TYPE_ENUM, "Joystick Swapper",             "%s", joyswaps,     0,  3, 0 },
 #else
     { CFG_JOYSWAP,              CFG_TYPE_ENUM, "Joystick Swapper",             "%s", joyswaps,     0,  1, 0 },
@@ -1117,6 +1125,85 @@ void U64Config :: U64SidAddressing :: effectuate_settings()
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 
+#if U64 == 2
+////////////////////////////////////////////////////////////////////////////////////////
+// U16 (TRX64-Ultimate docs/specs/U16-hdmi-modes.md D5): on a bitstream with the HDMI mode request (trx_io_hdmi_modes(),
+// designs/c64_basic/mode_req.v) "HDMI Scan Resolution" is asked for at 0x4F00 and "HDMI Picture Scale" written to 0x4F01, at
+// start and on every change. On every other bitstream nothing here touches the hardware.
+////////////////////////////////////////////////////////////////////////////////////////
+static int hdmi_scale_written = -1;
+
+// mode_ctl.v takes the family from C64_VIDEOFORMAT: 65 cycles a line is the 60 Hz family (NTSC, PAL-60 and its /L).
+static bool system_mode_v60(int mode)
+{
+    return (color_timings[mode]->mode_bits & VIDEO_FMT_CYCLES_65) != 0;
+}
+
+// The HDMI mode that runs for a setting: on a bitstream with the request, the row asked for (the PC modes the family does
+// not have are taken as its 800 x 600 or 576p, trx_hdmi_request()); elsewhere the setting itself.
+static t_hdmi_mode hdmi_mode_shown(int system_mode, t_hdmi_mode setting)
+{
+    if (!trx_io_hdmi_modes()) {
+        return setting;
+    }
+    return (t_hdmi_mode)trx_hdmi_request((int)setting, system_mode_v60(system_mode));
+}
+
+static void trx_hdmi_write_scale(int scale)
+{
+    if (!trx_io_hdmi_modes() || scale < 0 || scale > 2 || scale == hdmi_scale_written) {
+        return;
+    }
+    ioWrite8(TRX_MR_SCALE, uint8_t(scale));
+    hdmi_scale_written = scale;
+    printf("[TRX] HDMI picture scale: %s\n", hdmi_scales[scale]);
+}
+
+static int setHdmiScale(ConfigItem *it)
+{
+    trx_hdmi_write_scale(it->getValue());
+    return 0;
+}
+
+// Asks for the row of this System Mode and setting. A System Mode switch (mode_ctl.v, started by C64_VIDEOFORMAT just before)
+// moves the running row into the new family by itself once the clocks are reprogrammed, and a request is checked against the
+// family that runs when it arrives, so this waits for the switch first. An accepted request restarts the synthesizer, the
+// transmitters and the pixel clock even for the row that runs, so nothing is written when that row runs already (power-up is
+// 1080p; a switch may have moved the row where it should be).
+static void trx_hdmi_request_row(int system_mode, int setting)
+{
+    if (!trx_io_hdmi_modes()) {
+        return;
+    }
+    bool v60 = system_mode_v60(system_mode);
+    int req = trx_hdmi_request(setting, v60);
+    int row = (v60 ? 6 : 0) + req;
+    int now = ioRead8(TRX_MR_ROW) & 15;
+    for (int t = 0; t < 200 && ((now >= 6) != v60); t++) { // up to 2 s
+        vTaskDelay(pdMS_TO_TICKS(10));
+        now = ioRead8(TRX_MR_ROW) & 15;
+    }
+    if (now == row) {
+        printf("[TRX] HDMI: row %d runs already\n", row);
+        return;
+    }
+    uint8_t n = uint8_t(ioRead8(TRX_MR_WRITES) + 1);
+    ioWrite8(TRX_MR_REQ, uint8_t(req));
+    for (int t = 0; t < 20 && ioRead8(TRX_MR_DONE) != n; t++) {
+        vTaskDelay(1);
+    }
+    if (ioRead8(TRX_MR_FLAGS) & TRX_MR_REFUSED) {
+        printf("[TRX] HDMI: request %d refused, row %d runs\n", req, now);
+        return;
+    }
+    // the row is the timing's once the synthesizer, the transmitters and the pixel clock are through their restart
+    for (int t = 0; t < 100 && (ioRead8(TRX_MR_ROW) & 15) != row; t++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    printf("[TRX] HDMI: row %d asked for, row %d runs\n", row, ioRead8(TRX_MR_ROW) & 15);
+}
+#endif
+
 U64Config :: U64Config() : SubSystem(SUBSYSID_U64)
 {
     systemMode = e_NOT_SET;
@@ -1156,6 +1243,10 @@ U64Config :: U64Config() : SubSystem(SUBSYSID_U64)
 #if U64 == 2
         cfg->set_change_hook(CFG_POWERON_MODE, U64Config::setPowerOnMode);
         cfg->set_change_hook(CFG_WAKE_ON_WIFI, U64Config::setWakeOnWifi);
+        cfg->set_change_hook(CFG_HDMI_SCALE, setHdmiScale);
+        if (!trx_io_hdmi_modes()) {
+            cfg->disable(CFG_HDMI_SCALE); // only the TRX64 Ultimate bitstream since U16 scales the picture
+        }
 #endif
 
         if (!isEliteBoard()) {
@@ -1404,16 +1495,21 @@ void U64Config :: effectuate_settings()
         SetVideoPll(systemMode, cfg->get_value(CFG_COLOR_CLOCK_ADJ));
         // Now configure the HDMI plls based on the final scan resolution
         C64_VIDEOFORMAT = ct->mode_bits | format;
+        // Gideon's bitstream: its timing and scaler registers and PLLs. The TRX64 Ultimate bitstream reads none of them (its
+        // I2C master does not reach the synthesizer, app_i2c.v; the registers at 0x4000 of the overlay window are not decoded,
+        // overlay.v) and takes the mode from the request below; the menu's character size is set for the mode that runs.
         SetVideoMode1080p(systemMode, hdmiMode);
-        DetermineOverlaySettings(systemMode, hdmiMode);
+        DetermineOverlaySettings(systemMode, hdmi_mode_shown(systemMode, hdmiMode));
         if (overlay) {
             overlay->update_settings(overlaySettings);
         }
         ResetHdmiPll();
         SetResampleFilter(systemMode);
+        trx_hdmi_request_row(systemMode, hdmiMode);
     } else {
         C64_VIDEOFORMAT = ct->mode_bits | format;
     }
+    trx_hdmi_write_scale(cfg->get_value(CFG_HDMI_SCALE));
 #else
     if (doPll) {
         C64_VIDEOFORMAT = ct->mode_bits | format;
@@ -3195,6 +3291,7 @@ void U64Config :: setup_config_menu(void)
     grp->append(cfg->find_item(CFG_SYSTEM_MODE));
 #if U64 == 2
     grp->append(cfg->find_item(CFG_HDMI_RESOLUTION));
+    grp->append(cfg->find_item(CFG_HDMI_SCALE));
 #endif
     grp->append(cfg->find_item(CFG_SCANLINES));
     grp->append(cfg->find_item(CFG_PALETTE));

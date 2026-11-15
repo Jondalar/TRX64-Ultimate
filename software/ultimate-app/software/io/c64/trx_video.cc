@@ -28,11 +28,20 @@
 // Only a bitstream with CAPS b7 (RGB565 layer) is used; on an older one (ARGB8888)
 // the freeze stays the CPU-only pause with the menu on the VIC.
 //
-// Picture: the scaler shows a 400 x 270 VIC window (raster x 96.., line 16..) at
-// 4x as 1600 x 1080 from output x 160; the text area is centred in it (window
-// x 40, y 35). The layer is that window at 2 x 2 per VIC pixel: 800 x 540 RGB565
-// at scale 2 from output (160, 0). It covers only the C64 window, not the bars:
-// 864,000 bytes per buffer instead of 1,036,800 for the full 960 x 540.
+// Picture: the scaler shows a 400 x 270 VIC window (raster x 96.., line 16..; the
+// 60 Hz System Modes 400 x 240 from line 31) in the HDMI row and at the scale the
+// bitstream runs (U16: mode_req.v reads them back at 0x4F07 / 0x4F0A; a bitstream
+// before U16 runs 1080p at the scale now called Fit). Where the window lies and
+// which VIC pixel each output pixel shows is the generated table trx_hdmi_modes.h
+// (tools/hdmi_modes.py, the numbers of the gateware's hm_geom); trx_hdmi.h turns
+// it into the layer's plan: the window at scale 1 where it is at most 960 output
+// pixels wide, else at scale 2 at half its size, from the window's first output
+// pixel, and every layer pixel the VIC pixel the scaler shows at its first output
+// pixel. 1080p at Fit is 800 x 540 at scale 2 from (160, 0), as before U16. The
+// layer covers only the C64 window, not the bars: at most 960 x 540 (1080p Fill,
+// 1,036,800 bytes) per buffer. The geometry is taken when the freeze starts and
+// again whenever the running row or scale changes while it is up (the menu's
+// "HDMI Scan Resolution" and "HDMI Picture Scale"); the buffers only grow.
 // Every pixel is opaque: the still mixed with the menu's background colour
 // ($D021), out = still * t + background * (1 - t) per channel, t from the
 // "Overlay Transparency" setting (0, 25, 50, 75 %; trx_video_set_look()), and on
@@ -41,8 +50,8 @@
 // overlay box. No border band (T12 open question 4).
 // The colour key stays off: the still is in the same buffer, so "background
 // colour = key" would show the live scaler picture below instead of the frozen
-// frame, and outside the 800 x 540 the layer is not drawn at all (the picture
-// below passes there without a key). With the key off no palette colour, dimmed
+// frame, and outside the window the layer is not drawn at all (the picture below
+// passes there without a key). With the key off no palette colour, dimmed
 // or not, can turn transparent by accident.
 //
 // The text: on a bitstream with the C64 text layer (TX_CTRL reads 1 or 2 in b31:24)
@@ -101,6 +110,7 @@
 
 #include "trx_video.h"
 #include "trx_io.h"
+#include "trx_hdmi.h"
 #include "trx_lv_port.h"
 #include "c64.h"
 #include "u64.h"
@@ -136,25 +146,18 @@
 #define PX_STATUS      (TRX_IO_BASE + 0x60A4)
 #define PX_VBLANK      0x02
 #define PX_CTRL_OFF    0x22 // RGB565, scale 2, disabled
-#define PX_CTRL_ON     0x23
+#define PX_CTRL_FMT    0x02 // b3:1 = 1: RGB565; b5:4 the scale, b0 enable (px_ctrl_on())
 #define TX_CTRL        (TRX_IO_BASE + 0x60C0)
 #define TX_SHOW        0x01
 
-// The scaler's window (vic_scaler.v X0 = 96, Y0 = 16, 4x from output x 160).
-#define WIN_W          400
+// The scaler's window (vic_scaler.v X0 = 96, Y0 = 16; 60 Hz Y0 = 31)
+#define WIN_W          TRX_HDMI_WIN_W
 #define WIN_H          270
-#define TEXT_X         40
-#define TEXT_Y         35
-#define LAYER_W        (2 * WIN_W)
-#define LAYER_H        (2 * WIN_H)
-#define LAYER_STRIDE   (LAYER_W * 2)
-#define LAYER_BYTES    (LAYER_STRIDE * LAYER_H)
-#define LAYER_X0       160
-#define LAYER_Y0       0
+#define TEXT_COLS      40
 
 #define STILL_SLOT     0x10000
 #define STILL_FRAME    (WIN_W * WIN_H / 2)
-#define WIN_H_60       240  // the 60 Hz scaler window (x4.5): 240 rows on the 540-row layer
+#define WIN_H_60       240  // the 60 Hz window: 240 rows
 #define STILL_FRAME_60 (WIN_W * WIN_H_60 / 2)
 #define STILL_BYTES    (STILL_SLOT + STILL_FRAME)
 
@@ -173,8 +176,8 @@ static uint32_t c_palette[16] = {
 // u64_config.cc; weak because the updater application links this file without it
 extern void u64_get_palette_rgb(uint8_t rgb[16][3]) __attribute__((weak));
 static uint16_t pal[16];      // RGB565
-static uint32_t dimcc[16];    // the mixed still colours, RGB565 twice (one VIC pixel, 2 wide)
-static int dim_bg = -1;       // the background and weight dimcc was made for
+static uint16_t dim[16];      // the mixed still colours, RGB565
+static int dim_bg = -1;       // the background and weight dim was made for
 static int dim_t = -1;
 static volatile int look_t = 1;   // Overlay Transparency: still weight t / 4
 static volatile int look_bg = 6;  // the menu's background colour, as last set
@@ -193,7 +196,8 @@ typedef struct {             // no padding: compared with memcmp
 } vic_sig_t;
 
 typedef struct {
-    uint16_t *px;
+    uint16_t *px;           // 16-byte aligned, in raw
+    uint8_t *raw;           // as malloc gave it
     uint32_t bg_gen;        // still_gen of the still drawn, 0 none
     vic_sig_t sig;
     uint32_t chars_gen;
@@ -239,6 +243,17 @@ static void refresh_palette(void)
 }
 static layer_buf_t bufs[2];
 static int nbufs;           // 0: not allocated (yet), 1 or 2
+static int buf_bytes;       // the size of each, enough for the plan
+
+// The picture's place (trx_hdmi.h): the row and scale it was taken for, the layer's plan, and per layer column / line the
+// VIC pixel / line of the window (lut_vx, lut_vy: in the still's rows) and the C64 text pixel / line (lut_tx, lut_ty, -1
+// outside the text area); tx_first / ty_first: the first layer column / line of every text column / line, [320] / [200]
+// the first after the text area.
+static int geom_row = -1, geom_scale = -1;
+static const trx_hdmi_geom_t *geom;
+static trx_layer_plan_t plan;
+static int16_t *lut_vx, *lut_tx, *lut_vy, *lut_ty, *tx_first, *ty_first;
+#define LUT_ENTRIES    (2 * TRX_LAYER_MAX_W + 2 * TRX_LAYER_MAX_H + (TRX_HDMI_TEXT_W + 1) + (TRX_HDMI_TEXT_H + 1))
 static int front;
 static bool layer_on;
 static volatile bool active;
@@ -343,13 +358,82 @@ static bool read_screen(void)
 
 // ---- drawing --------------------------------------------------------------------
 
-// One VIC pixel as 2 x 2: two 32-bit stores (2x is even, so they are aligned).
-static inline void put(uint16_t *px, int x, int y, uint16_t c)
+// The row and scale the picture runs in: mode_req.v's read-back (U16), or, on a bitstream before U16, 1080p at the scale it
+// always had (Fit) in the family of the still.
+static void read_mode(int *row, int *scale)
 {
-    uint32_t *p = (uint32_t *)(px + (2 * y) * LAYER_W + 2 * x);
-    uint32_t cc = c | (uint32_t(c) << 16);
-    p[0] = cc;
-    p[LAYER_W / 2] = cc;
+    if (trx_io_hdmi_modes()) {
+        *row = ioRead8(TRX_MR_ROW) & 15;
+        *scale = ioRead8(TRX_MR_SCALE_USED) & 3;
+    } else {
+        *row = still_60 ? 8 : 2;
+        *scale = 1;
+    }
+}
+
+// The first index of v (n entries) from `from` on whose value is at least t: the values ascend inside the text area and are
+// -1 outside it, and every text column / line has a layer column / line (the host test, software/test/trx_hdmi).
+static int first_at_least(const int16_t *v, int from, int n, int t)
+{
+    while (from < n && v[from] < t) {
+        from++;
+    }
+    return from;
+}
+
+// Takes the place of the picture for this row and scale: the plan and the lookup tables. A pair the table does not have
+// (it cannot come from mode_req.v) takes 1080p at Fit.
+static void set_geometry(int row, int scale)
+{
+    const trx_hdmi_geom_t *g = trx_hdmi_geom(row, scale);
+    if (!g) {
+        g = trx_hdmi_geom(still_60 ? 8 : 2, 1);
+    }
+    geom = g;
+    geom_row = row;
+    geom_scale = scale;
+    plan = trx_hdmi_plan(g);
+    int rows = still_60 ? WIN_H_60 : WIN_H; // the still may be of the other family while a System Mode switch settles
+    for (int i = 0; i < plan.w; i++) {
+        lut_vx[i] = trx_hdmi_vic_x(g, &plan, i);
+        lut_tx[i] = trx_hdmi_text_x(g, &plan, i);
+    }
+    for (int j = 0; j < plan.h; j++) {
+        int v = trx_hdmi_vic_y(g, &plan, j);
+        lut_vy[j] = (v < rows) ? v : rows - 1;
+        lut_ty[j] = trx_hdmi_text_y(g, &plan, j);
+    }
+    int i = first_at_least(lut_tx, 0, plan.w, 0);
+    for (int t = 0; t < TRX_HDMI_TEXT_W; t++) {
+        i = first_at_least(lut_tx, i, plan.w, t);
+        tx_first[t] = i;
+    }
+    while (i < plan.w && lut_tx[i] >= 0) {
+        i++;
+    }
+    tx_first[TRX_HDMI_TEXT_W] = i;
+    int j = first_at_least(lut_ty, 0, plan.h, 0);
+    for (int t = 0; t < TRX_HDMI_TEXT_H; t++) {
+        j = first_at_least(lut_ty, j, plan.h, t);
+        ty_first[t] = j;
+    }
+    while (j < plan.h && lut_ty[j] >= 0) {
+        j++;
+    }
+    ty_first[TRX_HDMI_TEXT_H] = j;
+}
+
+static inline uint32_t px_ctrl_on(void)
+{
+    return PX_CTRL_FMT | (uint32_t(plan.s) << 4) | 1;
+}
+
+// The rvlite core has no data cache, but its stores are posted: a load from the
+// last address written waits for them before the register write that follows.
+static inline void buf_done(layer_buf_t *b)
+{
+    __asm__ volatile ("fence" ::: "memory");
+    (void)*(volatile uint32_t *)(b->px + (plan.stride / 2) * plan.h - 2);
 }
 
 // The still's colours: each palette colour mixed with the background bg,
@@ -363,8 +447,7 @@ static void make_dim(int bg, int t)
             uint32_t sc = (s >> sh) & 255, bc = (b >> sh) & 255;
             c |= ((sc * t + bc * (4 - t)) / 4) << sh;
         }
-        uint16_t c565 = rgb565(c);
-        dimcc[i] = c565 | (uint32_t(c565) << 16);
+        dim[i] = rgb565(c);
     }
     dim_bg = bg & 15;
     dim_t = t;
@@ -391,58 +474,44 @@ static void grab_still(void)
     }
 }
 
-// The still row under layer row l: 50 Hz two layer rows per row, 60 Hz 9 per 4
-// rows (2, 2, 2, 3; the scaler shows 4.5 output lines per row, 2.25 layer rows).
-static inline int still_row(int l)
+// The still's colour index under layer pixel (i, j): the VIC pixel the scaler shows there (lut_vx, lut_vy); two VIC
+// pixels per still byte, the first in the low nibble.
+static inline int still_index(int i, int j)
 {
-    return still_60 ? (l * 4) / 9 : l / 2;
-}
-
-static inline uint16_t still_px(int x, int y)
-{
-    if (!still_ok) {
-        return uint16_t(dimcc[0]);
-    }
-    uint32_t k = WIN_W * still_row(2 * y) + x;
+    uint32_t k = WIN_W * lut_vy[j] + lut_vx[i];
     uint8_t b = still_copy[k >> 1];
-    return uint16_t(dimcc[(k & 1) ? (b >> 4) : (b & 15)]);
+    return (k & 1) ? (b >> 4) : (b & 15);
 }
 
-// Two VIC pixels per still byte, the first in the low nibble.
+static inline uint16_t still_px(int i, int j)
+{
+    return still_ok ? dim[still_index(i, j)] : dim[0];
+}
+
+// The whole layer; a line that shows the same VIC line as the one above is a copy of it.
 static void draw_still(uint16_t *px)
 {
-    if (still_60 && still_ok) {
-        int last = -1;
-        for (int l = 0; l < LAYER_H; l++) {
-            uint32_t *p = (uint32_t *)(px + l * LAYER_W);
-            int s = still_row(l);
-            if (s == last) {
-                memcpy(p, p - LAYER_W / 2, LAYER_W * 2);
-                continue;
-            }
-            last = s;
-            const uint8_t *row = still_copy + (WIN_W / 2) * s;
-            for (int x = 0; x < WIN_W / 2; x++) {
-                uint8_t v = row[x];
-                p[2 * x] = dimcc[v & 15];
-                p[2 * x + 1] = dimcc[v >> 4];
-            }
+    const int sw = plan.stride / 2;
+    int last = -1;
+    for (int j = 0; j < plan.h; j++) {
+        uint16_t *p = px + j * sw;
+        int s = still_ok ? lut_vy[j] : 0;
+        if (s == last) {
+            memcpy(p, p - sw, plan.w * 2);
+            continue;
         }
-        return;
-    }
-    for (int y = 0; y < WIN_H; y++) {
-        uint32_t *p = (uint32_t *)(px + (2 * y) * LAYER_W);
-        uint32_t *q = p + LAYER_W / 2;
-        const uint8_t *row = still_copy + (WIN_W / 2) * y;
-        for (int x = 0; x < WIN_W / 2; x++) {
-            uint32_t a = dimcc[0], b = dimcc[0];
-            if (still_ok) {
-                uint8_t v = row[x];
-                a = dimcc[v & 15];
-                b = dimcc[v >> 4];
+        last = s;
+        if (!still_ok) {
+            for (int i = 0; i < plan.w; i++) {
+                p[i] = dim[0];
             }
-            p[2 * x] = a; p[2 * x + 1] = b;
-            q[2 * x] = a; q[2 * x + 1] = b;
+            continue;
+        }
+        const uint8_t *row = still_copy + (WIN_W / 2) * s;
+        for (int i = 0; i < plan.w; i++) {
+            int x = lut_vx[i];
+            uint8_t v = row[x >> 1];
+            p[i] = dim[(x & 1) ? (v >> 4) : (v & 15)];
         }
     }
 }
@@ -460,11 +529,12 @@ static bool wait_frame_start(void)
 
 // One cell, by the rules of TRX64 render.rs (standard, multicolour and ECM
 // text; other modes show the still). Colour -1 = background 0: the still.
+// The cell's pixels are where c64_text.v draws them (lut_tx, lut_ty).
 static void draw_cell(uint16_t *px, int cell)
 {
     const vic_sig_t &v = cur_sig;
-    int cx = TEXT_X + 8 * (cell % 40);
-    int cy = TEXT_Y + 8 * (cell / 40);
+    int cx = 8 * (cell % TEXT_COLS);
+    int cy = 8 * (cell / TEXT_COLS);
     uint8_t code = cur_scr[cell];
     uint8_t col = cur_col[cell];
     bool ecm = v.d011 & 0x40, bmm = v.d011 & 0x20, mcm = v.d016 & 0x10;
@@ -484,27 +554,26 @@ static void draw_cell(uint16_t *px, int cell)
     } else {
         mode = 0;
     }
-    for (int j = 0; j < 8; j++) {
-        uint8_t bits = (mode == 2) ? 0 : chars[code * 8 + j];
-        int y = cy + j;
-        if (mode == 1) {
-            for (int i = 0; i < 8; i += 2) {
-                int c;
-                switch ((bits >> (6 - i)) & 3) {
+    const int sw = plan.stride / 2;
+    const int i0 = tx_first[cx], i1 = tx_first[cx + 8];
+    const int j0 = ty_first[cy], j1 = ty_first[cy + 8];
+    for (int j = j0; j < j1; j++) {
+        uint8_t bits = (mode == 2) ? 0 : chars[code * 8 + (lut_ty[j] - cy)];
+        uint16_t *p = px + j * sw;
+        for (int i = i0; i < i1; i++) {
+            int b = lut_tx[i] - cx; // 0..7
+            int c;
+            if (mode == 1) {
+                switch ((bits >> (6 - (b & 6))) & 3) {
                 case 1:  c = v.d022; break;
                 case 2:  c = v.d023; break;
                 case 3:  c = col & 7; break;
                 default: c = -1; break;
                 }
-                for (int k = 0; k < 2; k++) {
-                    put(px, cx + i + k, y, (c < 0) ? still_px(cx + i + k, y) : pal[c]);
-                }
+            } else {
+                c = (bits & (0x80 >> b)) ? col : bg;
             }
-        } else {
-            for (int i = 0; i < 8; i++) {
-                int c = (bits & (0x80 >> i)) ? col : bg;
-                put(px, cx + i, y, (c < 0) ? still_px(cx + i, y) : pal[c]);
-            }
+            p[i] = (c < 0) ? still_px(i, j) : pal[c];
         }
     }
 }
@@ -537,23 +606,20 @@ static bool draw(layer_buf_t *b)
     memcpy(&b->sig, &cur_sig, sizeof(cur_sig));
     b->chars_gen = chars_gen;
     b->cells_valid = true;
-    // The rvlite core has no data cache, but its stores are posted: a load from
-    // the last address written waits for them before the register write below.
-    __asm__ volatile ("fence" ::: "memory");
-    (void)*(volatile uint32_t *)(b->px + LAYER_W * LAYER_H - 2);
+    buf_done(b);
     return any || all;
 }
 
 static void show_first(layer_buf_t *b)
 {
     trx_io_write32(PX_CTRL, PX_CTRL_OFF);
-    trx_io_write32(PX_SIZE, (uint32_t(LAYER_H) << 16) | LAYER_W);
-    trx_io_write32(PX_STRIDE, LAYER_STRIDE);
-    trx_io_write32(PX_POS, (uint32_t(LAYER_Y0) << 16) | LAYER_X0);
+    trx_io_write32(PX_SIZE, (uint32_t(plan.h) << 16) | uint32_t(plan.w));
+    trx_io_write32(PX_STRIDE, uint32_t(plan.stride));
+    trx_io_write32(PX_POS, (uint32_t(plan.y0) << 16) | uint32_t(plan.x0)); // from the active origin (pix_layer.v)
     trx_io_write32(PX_GALPHA, 255);
     trx_io_write32(PX_KEY, 0); // key off: every pixel opaque (header)
     trx_io_write32(PX_FRONT, (uint32_t)b->px);
-    trx_io_write32(PX_CTRL, PX_CTRL_ON);
+    trx_io_write32(PX_CTRL, px_ctrl_on());
     layer_on = true;
 }
 
@@ -569,22 +635,39 @@ static void flip_to(int n)
 }
 
 // ---- Timewarp's bar (trx_video.h; TRX64-Ultimate docs/specs/T20-delta-ring.md §16.7)
-// Layer coordinates (2 x 2 per VIC pixel). The lower border is window lines
-// 235-269 (raster 251-285), layer y 470-539; the bar sits in it.
-#define TW_BAR_X       16
-#define TW_BAR_Y       476
-#define TW_BAR_W       768
-#define TW_BAR_H       48
+// In layer pixels, laid out for the 800 x 540 layer of 1080p (2 x 2 output pixels per VIC pixel: the lower border, window
+// lines 235-269, is layer lines 470-539, and the bar sits in it) and scaled to the layer's width and height for every other
+// row and scale (U16): the large text at 2 (16 pixels) on a layer at least 720 wide, else at 1.
 #define TW_BAR_RGB     0x101018
-#define TW_GLYPH_X     28
-#define TW_ROW_Y       484     // the large row: glyph and position, 16 px high
-#define TW_POS_X       52
-#define TW_INFO_X      188
-#define TW_SMALL_Y     488     // the small texts, centred on the large row
-#define TW_HINT_END    772
-#define TW_TRACK_X     28
-#define TW_TRACK_W     744
-#define TW_TRACK_Y     508
+
+typedef struct {
+    int big;                // the large text's scale
+    int x, y, w, h;         // the bar
+    int glyph_x, pos_x, info_x, hint_end;
+    int row_y, small_y;     // the large row (glyph, position) and the small texts, centred on it
+    int track_x, track_w, track_y;
+} tw_layout_t;
+
+static tw_layout_t tw_layout(void)
+{
+    tw_layout_t l;
+    const int w = plan.w, h = plan.h;
+    l.big = (w >= 720) ? 2 : 1;
+    l.h = 16 + 16 * l.big;              // 48 (1080p) / 32
+    l.x = 16 * w / 800;
+    l.w = w - 2 * l.x;                  // 768
+    l.y = h - l.h - 16 * h / 540;       // 476
+    l.row_y = l.y + 4 * l.big;          // 484
+    l.small_y = l.row_y + 4 * (l.big - 1); // 488
+    l.glyph_x = l.x + 12 * w / 800;     // 28
+    l.pos_x = l.x + 36 * w / 800;       // 52
+    l.info_x = l.x + 172 * w / 800;     // 188
+    l.hint_end = l.x + l.w - 12 * w / 800; // 772
+    l.track_x = l.glyph_x;
+    l.track_w = l.hint_end - l.glyph_x; // 744
+    l.track_y = l.y + 8 + 12 * l.big;   // 508
+    return l;
+}
 
 static uint16_t barmix[16];    // a palette colour under the bar: 1/4 still, 3/4 bar
 
@@ -600,7 +683,7 @@ static const uint8_t tw_glyphs[5][8] = {
 static void tw_fill(uint16_t *px, int x, int y, int w, int h, uint16_t c)
 {
     for (int r = 0; r < h; r++) {
-        uint16_t *p = px + (y + r) * LAYER_W + x;
+        uint16_t *p = px + (y + r) * (plan.stride / 2) + x;
         for (int k = 0; k < w; k++) {
             p[k] = c;
         }
@@ -633,10 +716,10 @@ static uint8_t tw_scode(char c)
     return c == '@' ? 0 : 32;
 }
 
-static int tw_text(uint16_t *px, int x, int y, const char *s, int scale, uint16_t c)
+static int tw_text(uint16_t *px, const tw_layout_t &l, int x, int y, const char *s, int scale, uint16_t c)
 {
     const uint8_t *font = _default_chars_bin_start + 0x800;
-    for (; s && *s && x + 8 * scale <= TW_BAR_X + TW_BAR_W; s++) {
+    for (; s && *s && x + 8 * scale <= l.x + l.w; s++) {
         tw_glyph(px, x, y, font + 8 * tw_scode(*s), scale, c);
         x += 8 * scale;
     }
@@ -645,35 +728,30 @@ static int tw_text(uint16_t *px, int x, int y, const char *s, int scale, uint16_
 
 static void tw_draw_bar(uint16_t *px, const trx_tw_bar_t *b)
 {
-    // the background: the still under it, mixed (two layer pixels per VIC pixel)
-    for (int y = TW_BAR_Y; y < TW_BAR_Y + TW_BAR_H; y++) {
-        uint16_t *p = px + y * LAYER_W;
-        for (int x = TW_BAR_X; x < TW_BAR_X + TW_BAR_W; x += 2) {
-            uint16_t c = barmix[0];
-            if (still_ok) {
-                uint32_t k = WIN_W * still_row(y) + x / 2;
-                uint8_t v = still_copy[k >> 1];
-                c = barmix[(k & 1) ? (v >> 4) : (v & 15)];
-            }
-            p[x] = c;
-            p[x + 1] = c;
+    const tw_layout_t l = tw_layout();
+    const int sw = plan.stride / 2;
+    // the background: the still under it, mixed
+    for (int y = l.y; y < l.y + l.h; y++) {
+        uint16_t *p = px + y * sw;
+        for (int x = l.x; x < l.x + l.w; x++) {
+            p[x] = still_ok ? barmix[still_index(x, y)] : barmix[0];
         }
     }
     int g = (b->glyph < 0 || b->glyph > 4) ? 0 : b->glyph;
-    tw_glyph(px, TW_GLYPH_X, TW_ROW_Y, tw_glyphs[g], 2, pal[14]);
-    tw_text(px, TW_POS_X, TW_ROW_Y, b->pos, 2, pal[1]);
-    tw_text(px, TW_INFO_X, TW_SMALL_Y, b->info, 1, b->warn ? pal[10] : pal[15]);
+    tw_glyph(px, l.glyph_x, l.row_y, tw_glyphs[g], l.big, pal[14]);
+    tw_text(px, l, l.pos_x, l.row_y, b->pos, l.big, pal[1]);
+    tw_text(px, l, l.info_x, l.small_y, b->info, 1, b->warn ? pal[10] : pal[15]);
     if (b->hint) {
         int w = 8 * strlen(b->hint);
-        tw_text(px, (w < TW_HINT_END - TW_INFO_X) ? TW_HINT_END - w : TW_INFO_X, TW_SMALL_Y, b->hint, 1, pal[15]);
+        tw_text(px, l, (w < l.hint_end - l.info_x) ? l.hint_end - w : l.info_x, l.small_y, b->hint, 1, pal[15]);
     }
     if (b->track_len > 0) {
         int len = b->track_len > 1 ? b->track_len - 1 : 1;
         int pos = b->track_pos < 0 ? 0 : (b->track_pos > len ? len : b->track_pos);
-        int cx = TW_TRACK_X + (pos * (TW_TRACK_W - 4)) / len;
-        tw_fill(px, TW_TRACK_X, TW_TRACK_Y, cx - TW_TRACK_X, 4, pal[12]);
-        tw_fill(px, cx, TW_TRACK_Y, TW_TRACK_X + TW_TRACK_W - cx, 4, pal[11]);
-        tw_fill(px, cx, TW_TRACK_Y - 3, 4, 10, pal[1]);
+        int cx = l.track_x + (pos * (l.track_w - 4)) / len;
+        tw_fill(px, l.track_x, l.track_y, cx - l.track_x, 4, pal[12]);
+        tw_fill(px, cx, l.track_y, l.track_x + l.track_w - cx, 4, pal[11]);
+        tw_fill(px, cx, l.track_y - 3, 4, 10, pal[1]);
     }
 }
 
@@ -729,7 +807,7 @@ void trx_video_tw_bar(const trx_tw_bar_t *bar)
         return;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    if (tw_on && nbufs) {
+    if (tw_on && nbufs && layer_on) {
         int n = (nbufs == 2) ? 1 - front : front;
         layer_buf_t *b = &bufs[n];
         if (b->bg_gen != still_gen) {
@@ -738,8 +816,7 @@ void trx_video_tw_bar(const trx_tw_bar_t *bar)
             b->cells_valid = false;
         }
         tw_draw_bar(b->px, bar);
-        __asm__ volatile ("fence" ::: "memory");
-        (void)*(volatile uint32_t *)(b->px + LAYER_W * LAYER_H - 2);
+        buf_done(b);
         if (nbufs == 2) {
             flip_to(n);
         }
@@ -781,6 +858,33 @@ static bool menu_up(void)
     return c64 && c64->keyboard_scan_allowed() && !c64->keyboard_scan_deferred();
 }
 
+// The running row or scale changed while the freeze is up (the menu's HDMI items, U16): the layer off, two frame starts so
+// that it reads the buffers no more, the geometry and, if the new place needs more, the buffers for it, the still drawn
+// again and shown. The text follows: the hardware's by itself, the task's cells and Timewarp's bar on their next pass.
+static bool alloc_layer(void);
+static void relayout(int row, int scale)
+{
+    trx_io_write32(PX_CTRL, PX_CTRL_OFF);
+    layer_on = false;
+    wait_frame_start();
+    wait_frame_start();
+    set_geometry(row, scale);
+    if (!alloc_layer()) {
+        return;
+    }
+    for (int i = 0; i < nbufs; i++) {
+        bufs[i].bg_gen = 0;
+        bufs[i].cells_valid = false;
+    }
+    int n = front;
+    draw_still(bufs[n].px);
+    bufs[n].bg_gen = still_gen;
+    buf_done(&bufs[n]);
+    show_first(&bufs[n]);
+    printf("[TRX] freeze still: row %d scale %d, %d x %d at scale %d from (%d, %d)\n", row, scale, plan.w, plan.h, plan.s,
+           plan.x0, plan.y0);
+}
+
 // One look, with the lock held.
 static void step(void)
 {
@@ -799,6 +903,16 @@ static void step(void)
         return;
     }
     seen_session = true;
+    if (layer_on && !wide_hw && nbufs) {
+        int row, scale;
+        read_mode(&row, &scale);
+        if (row != geom_row || scale != geom_scale) {
+            relayout(row, scale);
+        }
+    }
+    if (!nbufs) {
+        return; // no layer this freeze: a larger place found no memory (relayout)
+    }
     if (hw_text || tw_on || !menu_shown || !menu_up()) {
         return; // the hardware draws it, Timewarp hides it; or before the menu, or the restore after it
     }
@@ -859,22 +973,39 @@ static uint8_t video_irq(uint8_t act)
     return woken == pdTRUE;
 }
 
-// The two buffers, once (kept: a monitor step unfreezes and freezes again).
+// The two buffers, as large as the plan needs, kept (a monitor step unfreezes and freezes again); a place that needs more
+// (U16: another row or scale) replaces them, with the layer off. 1080p at Fit needs 864,000 bytes each, as before U16; the
+// largest, 1080p Fill, 1,036,800 (TRX_LAYER_MAX_BYTES).
 static bool alloc_layer(void)
 {
-    if (nbufs) {
+    int need = plan.stride * plan.h;
+    if (nbufs && buf_bytes >= need) {
         return true;
     }
+    for (int i = 0; i < nbufs; i++) {
+        free(bufs[i].raw);
+        bufs[i].raw = NULL;
+        bufs[i].px = NULL;
+    }
+    nbufs = 0;
+    buf_bytes = 0;
+    front = 0;
     for (int i = 0; i < 2; i++) {
-        bufs[i].px = (uint16_t *)alloc_aligned(LAYER_BYTES);
-        if (!bufs[i].px) {
+        uint8_t *raw = (uint8_t *)malloc(need + 15);
+        if (!raw) {
             break;
         }
+        bufs[i].raw = raw;
+        bufs[i].px = (uint16_t *)(((uint32_t)raw + 15) & ~15UL);
         bufs[i].bg_gen = 0;
         bufs[i].cells_valid = false;
         nbufs++;
     }
-    printf("[TRX] pixel layer: %d buffer(s) of %d bytes\n", nbufs, LAYER_BYTES);
+    if (nbufs) {
+        buf_bytes = need;
+    }
+    printf("[TRX] pixel layer: %d buffer(s) of %d bytes (%d x %d at scale %d), heap free %u\n", nbufs, need, plan.w, plan.h,
+           plan.s, (unsigned)xPortGetFreeHeapSize());
     return nbufs > 0;
 }
 
@@ -888,10 +1019,19 @@ static void init(void *, void *)
     // is paused, and capture runs whenever it is not.
     still = (uint8_t *)alloc_aligned(STILL_BYTES);
     still_copy = (uint8_t *)malloc(STILL_FRAME);
+    int16_t *luts = (int16_t *)malloc(LUT_ENTRIES * sizeof(int16_t));
     lock = xSemaphoreCreateMutex();
     flip_sem = xSemaphoreCreateBinary();
     vsync_sem = xSemaphoreCreateBinary();
-    if (!still || !still_copy || !lock || !flip_sem || !vsync_sem) {
+    if (luts) {
+        lut_vx = luts;
+        lut_tx = lut_vx + TRX_LAYER_MAX_W;
+        lut_vy = lut_tx + TRX_LAYER_MAX_W;
+        lut_ty = lut_vy + TRX_LAYER_MAX_H;
+        tx_first = lut_ty + TRX_LAYER_MAX_H;
+        ty_first = tx_first + TRX_HDMI_TEXT_W + 1;
+    }
+    if (!still || !still_copy || !luts || !lock || !flip_sem || !vsync_sem) {
         printf("[TRX] pixel layer: out of memory\n");
         return;
     }
@@ -940,10 +1080,18 @@ void trx_video_freeze_enter(void)
     if (!(U64_HDMI_REG & U64_HDMI_HPD_CURRENT)) {
         return; // nobody would see the layer: keep the menu on the VIC
     }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    // The picture before the stop (header): the still on the layer, from a
+    // frame start on, while the machine still runs, where the scaler shows it.
+    make_dim(look_bg, look_t);
+    grab_still();
+    int row, scale;
+    read_mode(&row, &scale);
+    set_geometry(row, scale);
     if (!alloc_layer()) {
+        xSemaphoreGive(lock);
         return;
     }
-    xSemaphoreTake(lock, portMAX_DELAY);
     seen_session = false;
     passes = 0;
     tw_on = false;
@@ -953,18 +1101,13 @@ void trx_video_freeze_enter(void)
         bufs[i].bg_gen = 0;
         bufs[i].cells_valid = false;
     }
-    // The picture before the stop (header): the still on the layer, from a
-    // frame start on, while the machine still runs.
-    make_dim(look_bg, look_t);
-    grab_still();
     if (++still_gen == 0) {
         still_gen = 1;
     }
     int n = (nbufs == 2) ? 1 - front : front;
     draw_still(bufs[n].px);
     bufs[n].bg_gen = still_gen;
-    __asm__ volatile ("fence" ::: "memory");
-    (void)*(volatile uint32_t *)(bufs[n].px + LAYER_W * LAYER_H - 2);
+    buf_done(&bufs[n]);
     wait_frame_start();          // switch on in the vertical blank
     show_first(&bufs[n]);
     front = n;
@@ -1018,7 +1161,7 @@ void trx_video_wide_end(void)
     if (wide_hw) {
         wide_hw = false;
         if (active && layer_on && menu_shown) {
-            trx_io_write32(PX_CTRL, PX_CTRL_ON);
+            trx_io_write32(PX_CTRL, px_ctrl_on());
             trx_io_write32(TX_CTRL, wide_tx);
         }
     }
@@ -1060,7 +1203,7 @@ void trx_video_menu_off(void)
     if (wide_hw) {
         wide_hw = false; // the freeze ends under the monitor: the pixel layer goes back, the text is off below
         if (active && layer_on) {
-            trx_io_write32(PX_CTRL, PX_CTRL_ON);
+            trx_io_write32(PX_CTRL, px_ctrl_on());
         }
     }
     if (hw_text) {

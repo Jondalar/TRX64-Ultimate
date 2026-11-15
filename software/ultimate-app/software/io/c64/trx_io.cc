@@ -77,6 +77,18 @@ void trx_io_resid8_bypass(int u, bool bypass)
     }
 }
 
+bool trx_io_hdmi_modes(void)
+{
+    static int modes = -1; // not looked yet
+    if (modes < 0) {
+        modes = trx_io_caps() && ioRead8(TRX_MR_MAGIC) == TRX_MR_MAGIC_VAL && ioRead8(TRX_MR_VERSION) == 1;
+        if (modes) {
+            printf("[TRX] HDMI mode request present, row %d, scale %d\n", ioRead8(TRX_MR_ROW), ioRead8(TRX_MR_SCALE_USED));
+        }
+    }
+    return modes != 0;
+}
+
 bool trx_io_slim(void)
 {
     static int slim = -1; // not looked yet

@@ -1,7 +1,8 @@
 // LVGL on the TRX64 Ultimate pixel layer (TRX64-Ultimate docs/specs/T24-lvgl-ui.md;
 // hardware: ARCH-lean-state-access.md §7.5, §15.3 page 6, pix_layer.v).
 //
-// One display, 960 x 540 RGB565 at scale 2 (the whole 1920 x 1080 output), two
+// One display, 960 x 540 RGB565 at scale 2 (the whole output at 1080p; the other
+// HDMI rows of TRX64-Ultimate U16 cut it, an open point of docs/specs/U16-hdmi-modes.md), two
 // full frame buffers in the app's heap, LVGL in direct mode: a flush hands the
 // finished buffer to PX_BACK and waits for the flip-done interrupt (IRQ_CAUSE b7).
 //
