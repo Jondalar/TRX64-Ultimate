@@ -285,3 +285,7 @@ Scenario: Nothing that worked stops working
   unchanged. Every CI bench passes, the new ones included (`mode_req`, `hdmi_timing`, `tmds_rep`, `text_geom`, `scaler`); the
   Simulations job now takes 34 min (was 9), the scaler bench runs alone as a long bench. Run 1929 (5a54a1d6, the app part): green, the
   app built, bitstream and benches from the cache. The splash commit (5e3c1c01) rides on the next run.
+- **2026-11-15, 576p's pixel shape for the C64 picture (Alex: "Erstmal den wenigsten Aufwand").** The scaler stays as built: at 576p
+  (720 x 576, AVI 4:3, pixels 16/15 wide) Fit and Fill do not correct the shape, so the C64 picture is 16/15 wider on the screen than
+  at 1080p. A corrected Fit would be 675 x 486: row 0's geometry in `tools/hdmi_modes.py` (the gateware's
+  `hdmi_modes.vh` and the app's `trx_hdmi_modes.h` are generated from it), then the benches again.
