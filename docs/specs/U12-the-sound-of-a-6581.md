@@ -3,7 +3,9 @@
 **Status:** DECIDED with Alex, 2026-11-14 (§5: Q1 the scope, Q2 (A), Q7 (a), Q8 the engine is reDIP). Built:
 D5 (`tb_wav`), the measuring instrument D1e (`filt_cmp`), shape (a) in the model (D1f), in `trx_sid_engine` (D1g,
 only in a `TRX_SID=1` build) and in reDIP, the release engine (D1i), all on the filter output (D1h); benches green,
-Vivado routed (D1i), the board open. Open: D4 in reDIP. The reply to the reviewer waits for a joint listening test (Q4).
+Vivado routed (D1i), in main since 2026-11-15 (with U16, Alex: "alles nach main"). First listening on the board
+2026-11-15 (Alex; *Meanwhile the Planet*, Mechanicus, F20, 6581 / 8580, filter on / off): no difference heard, parked
+("Lassen wir das mal jetzt"). Open: the board test, D4 in reDIP. The reply to the reviewer waits for a joint listening test (Q4).
 **Engine (Q8, Alex 2026-11-14: "B"):** the release bitstream runs reDIP with 8 SIDs (`build.tcl`: `TRX_SID`
 unset = `redip8`, menu "reSID8"); the T25.1 engine this spec was first written against, and the one the review
 read, is only in a `TRX_SID=1` build. U12 is therefore built into reDIP's `sid_filter.sv`, behind a parameter that

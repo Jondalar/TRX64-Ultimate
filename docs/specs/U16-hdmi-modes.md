@@ -297,3 +297,6 @@ Scenario: Nothing that worked stops working
   60 Hz rows (480p, 720p60, 1080p60, 800 x 600). Left open with the done (Alex's call): D7's contract line needs MultiCore's side;
   the app's host tests (`trxhdmitest`, the splash) are not in CI (`ci/app.sh` runs `app_space_test` and `openapi_check`, not `make host_tests`); the tier 2 benches (`statebus`,
   `ring_core`) run only on main or with `[sims]`, so they first run with the merge; 576p keeps the square-pixel Fit (entry above).
+- **2026-11-15, main (Alex: "alles nach main").** `u16` fast-forwarded into main, with what it carries from `u12`: U12's 6581
+  op-amp in reDIP (not yet accepted by ear), T25.6's status mask and U15's first trace. The app's `trx64/main` fast-forwarded to
+  `18af6de9`. MultiCore's pins (`main-8f1dc184`) move only with a new, reviewed pin on main's package.
