@@ -317,17 +317,18 @@ def ch(rows):
          "// row = family * 6 + hdmi as mode_req.v reads it back at 0x4F07, scale 0 Integer, 1 Fit, 2 Fill as at 0x4F0A; hact x vact the",
          "// active area. The scaler's window: ww x wh output pixels from (xw0, yw0) of the active area; its output pixel x / line y shows",
          "// VIC pixel floor(x hn / hd) / VIC line floor(y vn / vd) of the 400 x 270 window (rows 6-9, 60 Hz: 400 x 240). The text layer:",
-         "// tw x th output pixels from (xt0, yt0), C64 text pixel floor(x hn / hd), line floor(y tvn / tvd).",
+         "// tw x th output pixels from (xt0, yt0), C64 text pixel floor(x hn / hd), line floor(y tvn / tvd). asp: the picture aspect the",
+         "// row's AVI InfoFrame names (hm_aspect: 0 none, a PC row, square pixels; 1 4:3; 2 16:9).",
          "#ifndef TRX_HDMI_MODES_H", "#define TRX_HDMI_MODES_H", "", "#include <stdint.h>", "",
-         "typedef struct {", "    uint8_t  row, scale;", "    uint16_t hact, vact;", "    uint8_t  hn, hd, vn, vd, tvn, tvd;",
+         "typedef struct {", "    uint8_t  row, scale, asp;", "    uint16_t hact, vact;", "    uint8_t  hn, hd, vn, vd, tvn, tvd;",
          "    uint16_t ww, wh, xw0, yw0, tw, th, xt0, yt0;", "} trx_hdmi_geom_t;", "",
          "#define TRX_HDMI_N_GEOM %d" % (3 * len(rows)), "",
          "static const trx_hdmi_geom_t trx_hdmi_geoms[TRX_HDMI_N_GEOM] = {"]
     for sc in range(3):
         for r in rows:
             g = r["gs"][sc]
-            L.append("    { %2d, %d, %4d, %4d, %2d, %2d, %2d, %2d, %2d, %2d, %4d, %4d, %3d, %3d, %4d, %4d, %3d, %3d },  // %s %s" %
-                     (r["idx"], sc, r["ha"], r["va"], g["hn"], g["hd"], g["vn"], g["vd"], g["tvn"], g["tvd"], g["ww"], g["wh"],
+            L.append("    { %2d, %d, %d, %4d, %4d, %2d, %2d, %2d, %2d, %2d, %2d, %4d, %4d, %3d, %3d, %4d, %4d, %3d, %3d },  // %s %s" %
+                     (r["idx"], sc, r["asp"], r["ha"], r["va"], g["hn"], g["hd"], g["vn"], g["vd"], g["tvn"], g["tvd"], g["ww"], g["wh"],
                       g["xw0"], g["yw0"], g["tw"], g["th"], g["xt0"], g["yt0"], nm(r), SCALES[sc]))
     L.extend(["};", "", "#endif", ""])
     return "\n".join(L)

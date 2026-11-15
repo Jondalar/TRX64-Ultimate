@@ -8,9 +8,10 @@ inside Gideon's app are void: the generic core app replaces the app
 page 6 (`pix_layer.v`). **Shares with:** T12 (one owner of the layer at a time, §7), T26
 (the host firmware uses the same port, §10).
 
-**One sentence:** LVGL v9 runs in the Ultimate app on the RISC-V, draws RGB565 into two full
-960 x 540 frame buffers in the app's memory, and shows them through the pixel layer's page
-flip; phase 1 is a boot splash that covers the C64 while it starts and fades out.
+**One sentence:** LVGL v9 runs in the Ultimate app on the RISC-V, draws RGB565 into two
+frame buffers in the app's memory (a canvas over the active area of the running HDMI row,
+960 x 540 at 1080p; U16), and shows them through the pixel layer's page flip; phase 1 is a
+boot splash that covers the C64 while it starts and fades out.
 
 ---
 
@@ -19,10 +20,10 @@ flip; phase 1 is a boot splash that covers the C64 while it starts and fades out
 | Item | As built |
 |---|---|
 | Format | RGB565 only, little endian, R 15:11 G 10:5 B 4:0 (`PX_CTRL` b3:1 = 1); widened to 888 by bit replication |
-| Size | `PX_SIZE` {h, w}, w ≤ 960; scale 1-3 (`PX_CTRL` b5:4). Full screen: 960 x 540 at 2x = 1920 x 1080 |
+| Size | `PX_SIZE` {h, w}, w ≤ 960; scale 1-3 (`PX_CTRL` b5:4); `PX_POS` from the active origin (U16). Full screen: 960 x 540 at 2x = 1920 x 1080; in the other U16 rows 640 x 360 at 2x (720p) or the active area at 1x (576p, 480p, 800 x 600) |
 | Buffers | any 16-byte aligned DDR2 address the app can reach (its own 64 MB); `PX_STRIDE` multiple of 16 |
 | Flip | `PX_FRONT` is read at frame start; a write to `PX_BACK` swaps at the next frame start, then `IRQ_CAUSE` b7 (flip done) |
-| Vsync | `IRQ_CAUSE` b6 at frame start (45 lines before the first visible line) |
+| Vsync | `IRQ_CAUSE` b6 at frame start (the mode's vertical blanking before the first visible line: 45 lines at 1080p) |
 | Blend | colour key `PX_KEY` (b16 on, one RGB565 value transparent), global alpha `PX_GALPHA` (`out = bg + a·(fg − bg)/256`, exact at 0 and 255); no per-pixel alpha |
 | Interrupt | one ITU line, `irq_high(2)` (since T28), dispatched by cause in `software/io/c64/trx_io.cc` (`trx_irq_attach`, up to four handlers; every handler registered for a cause is called) |
 | Detection | `ID` = "TRX2" at 0x101A0000, `CAPS` b6 video, b7 RGB565 layer; Gideon's bitstreams read 0 |
@@ -95,7 +96,7 @@ Only options that differ from LVGL's defaults, plus every widget, theme and font
 | `LV_DRAW_SW_COMPLEX` | 0 in phase 1 | radius, shadow, arc, line masks; on in phase 2 (a menu needs rounded rectangles) |
 | `LV_USE_SVG`, `LV_USE_LODEPNG`, `_LIBPNG`, `_BMP`, `_TJPGD`, `_GIF`, `LV_USE_FS_*` | 0 | images are converted at build time (§8.2), never decoded at run time |
 | `LV_USE_THEME_*`, `LV_USE_FLEX`, `LV_USE_GRID` | 0 in phase 1 | styles set by hand; phase 2 decides on a theme |
-| Fonts | `LV_FONT_MONTSERRAT_48` only, `LV_FONT_DEFAULT` = it | the splash's placeholder text; phase 2 adds the menu sizes |
+| Fonts | `LV_FONT_UNSCII_8` only, `LV_FONT_DEFAULT` = it (Montserrat 48 is off) | the version line, a pixel font at its own size on every canvas; phase 2 adds the menu sizes |
 | Widgets | `LV_USE_LABEL`, `LV_USE_IMAGE` only | phase 1 |
 | `LV_DEF_REFR_PERIOD` | 20 ms | 50 Hz output: at most one flip per frame |
 | `LV_USE_LOG`, monitors, profiler | 0 | size |
@@ -103,16 +104,23 @@ Only options that differ from LVGL's defaults, plus every widget, theme and font
 
 ## 5. Display driver (`software/lvgl_port/trx_lv_port.cc`)
 
-- One `lv_display` of 960 x 540, `LV_DISPLAY_RENDER_MODE_DIRECT`, **two full buffers**
-  (`lv_display_set_buffers(disp, buf0, buf1, 1036800, DIRECT)`), each 16-byte aligned, from
-  `malloc`. In direct mode LVGL draws only the invalidated areas into the back buffer at their
-  screen position and itself copies the areas of the last frame over from the front buffer,
-  so a change costs its area, not the screen.
+- One `lv_display` the size of the canvas its caller gives (`trx_lv_open(canvas)`,
+  `trx_layer_plan_t`: size, scale, stride, `PX_POS`; the splash's is the running HDMI row's
+  active area, `trx_splash.h`, U16): 960 x 540 at 1080p. `LV_DISPLAY_RENDER_MODE_DIRECT`,
+  **two full buffers** of 1,036,800 bytes (the 1080p canvas, the largest;
+  `lv_display_set_buffers_with_stride(disp, buf0, buf1, 1036800, stride, DIRECT)`), each 16-byte
+  aligned, from `malloc`. In direct mode LVGL draws only the invalidated areas into the back
+  buffer at their screen position and itself copies the areas of the last frame over from the
+  front buffer, so a change costs its area, not the screen.
+- `trx_lv_resize(canvas)` moves the display to another canvas (the row changed): layer off,
+  two frame starts (`PX_STATUS` b31:16), the new resolution and stride, the screen invalid; the
+  caller paints the backdrop again and the next flush shows the layer at the new place.
 - `flush_cb`: on every call, `fence` and a load of the last pixel of the area (the rvlite
   has no data cache but posted stores; the load waits for them, same rule as
   `trx_video.cc`). Only on the last area of a refresh (`lv_display_flush_is_last`):
-  - first frame: `PX_CTRL` off, `PX_SIZE` 540/960, `PX_STRIDE` 1920, `PX_POS` 0, `PX_GALPHA`
-    255, `PX_KEY` off, `PX_FRONT` = the buffer, `PX_CTRL` = 0x23 (RGB565, 2x, on);
+  - first frame (after open or resize): `PX_CTRL` off, the canvas's `PX_SIZE`, `PX_STRIDE` and
+    `PX_POS` (540/960, 1920, 0 at 1080p), `PX_GALPHA` 255, `PX_KEY` off, `PX_FRONT` = the buffer,
+    `PX_CTRL` = RGB565, the canvas's scale, on (0x23 at 1080p);
   - afterwards: clear `IRQ_CAUSE` b7, write `PX_BACK`, wait for the flip-done interrupt
     (binary semaphore given by the port's `trx_irq_attach(TRX_IRQ_FLIP)` handler; 100 ms
     timeout, logged), then `lv_display_flush_ready`. The flip lands at a frame start, so
@@ -184,10 +192,17 @@ and redraws in full (its buffers were not touched, but `PX_*` were). This needs 
    `ultimate_main`): only if `ID` = "TRX2" and `CAPS` b6 + b7 (`trx_lv_available`); on stock
    hardware nothing happens. Creates the UI task.
 2. The UI task (priority 1, so it runs at once): `trx_lv_open` (lv_init, tick, buffers,
-   display), builds the splash: screen background black and opaque, a label "TRX64-Ultimate"
-   in Montserrat 48, white, centred (placeholder for the logo); with a logo (§8.2) the image
-   above the text and the pair centred. The first `lv_timer_handler` renders and switches
-   the layer on: opaque over the whole 1920 x 1080 (global alpha 255, key off).
+   display), builds the splash: the picture (`assets/trx_splash.c`, `tools/splash_rle.py`)
+   decoded into both buffers, the screen transparent over it, the version line (unscii 8, grey)
+   in the bottom right corner. Without the picture: black and opaque, a label "TRX64-Ultimate"
+   centred; with a logo (§8.2) the image above the text and the pair centred. The first
+   `lv_timer_handler` renders and switches the layer on: opaque over the whole active area of
+   the running HDMI row (global alpha 255, key off; 1920 x 1080 on a bitstream without the
+   U16 mode request). The splash picture is drawn at the largest size with its 1080p shape,
+   centred, shrunk while it is decoded (`trx_splash.h`; U16 §5). The row asked for at boot
+   already runs (U64Config's first effectuate, init function 1, waits for it); a row change
+   while the splash shows (a System Mode switch) is followed: the wait loop reads 0x4F07 and
+   moves the splash (`trx_lv_resize`); during the fade a change ends the splash.
 3. The C64 starts behind it (`c64->start()` after the remaining init functions).
 4. Wait until **(2 s since the splash appeared and the C64 at BASIC READY) or 4 s**. READY
    comes from the state bus (ARCH §15.3): the UI sets `CAP_CTRL` to a capture every 5 frames
@@ -203,9 +218,10 @@ and redraws in full (its buffers were not touched, but `PX_*` were). This needs 
 A freeze at any point (menu button during the splash): §7, the splash disappears at once
 and the freeze menu shows as usual.
 
-Log lines (`printf`): `[TRX UI] LVGL 9.6.0 on the pixel layer: buffers at …`,
+Log lines (`printf`): `[TRX UI] LVGL 9.6.0 on the pixel layer: w x h at scale s, buffers at …`,
+`[TRX UI] splash up: row r, canvas …, picture …` (`moved` after a row change),
 `[TRX UI] C64 at READY after n ms of splash`, `[TRX UI] splash done; UI parked` (or `ended by
-a freeze`).
+a freeze`, `ended by an HDMI row change`).
 
 ### 8.2 The logo
 
@@ -214,8 +230,10 @@ a freeze`).
   `sips` if a width is given. Then LVGL's `LVGLImage.py` (from the pinned copy) converts it
   to `software/lvgl_port/assets/trx_logo.c` (`const lv_image_dsc_t trx_logo`). Needs
   `pip3 install pypng lz4` (LVGLImage.py imports both).
-- Size on screen: the layer is 960 x 540 shown at 2x; a 480-pixel-wide logo is half the
-  screen width. The script refuses anything larger than 960 x 540.
+- Size on screen: at 1080p the layer is 960 x 540 shown at 2x; a 480-pixel-wide logo is half the
+  screen width. The script refuses anything larger than 960 x 540. On the other U16 rows the logo
+  and title are centred on the smaller canvas but not shrunk (only the splash picture is, §8.1;
+  this path is built only without `trx_splash.c`).
 - Format: RGB565 with transparent parts blended onto black (`--background 0x000000`), 2
   bytes per pixel in the binary (480 x 200 = 192,000 bytes); `LOGO_CF=RGB565A8` keeps the
   alpha (3 bytes per pixel) for a non-black background.
@@ -364,6 +382,15 @@ T24: Own LVGL UI and boot
 Milestone M2, status ⏸. Open (one line, as in the TODO table): Not built (UI drafts in docs/lvgl_ui_project, docs/lvgl_ui_terminal)
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
+
+- **2026-11-15: the splash follows the HDMI row (U16).** Before, the display was a fixed
+  960 x 540 at scale 2 from `PX_POS` 0, exactly 1080p, and every other U16 row cut it. Alex chose
+  "a": the canvas covers the running row's active area (960 x 540 at 2 at 1080p, 640 x 360 at 2 at
+  720p, the active area at 1 at 576p, 480p, 800 x 600) and the picture is shrunk while it is
+  decoded to the largest size with its 1080p shape, centred (576p's 16/15-wide pixels taken into
+  account: 720 x 432). A row change while the splash shows moves it. 1080p and every bitstream
+  without the mode request: pixel for pixel as before. Details, tests and the ordering:
+  [U16 §5](U16-hdmi-modes.md); app commit `18af6de9`.
 
 - **2026-11-04: the splash logo is at its own resolution again.** Alex, on the boot picture: *"der ist
   "verkleinert" und sieht dadurch nicht so gut aus ... Also sollte er lieber wieder normale aufgelöst sein

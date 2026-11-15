@@ -1,8 +1,8 @@
 # U16 — More HDMI modes (576p, 480p, 720p and 800 x 600 beside 1080p) and the picture's scale (Integer / Fit / Fill)
 
-**Status:** IN PROGRESS (2026-11-15). Gateware and the `trx64g` application part built: every bench and the app's host test pass,
-the app compiles and runs in ue2emu; not yet run: Vivado (CI) and the board.
-Next: CI, then the board (§4). Open for Alex: the LVGL boot splash outside 1080p (§5, 2026-11-15, the application).
+**Status:** IN PROGRESS (2026-11-15). Gateware and the `trx64g` application part built, the boot splash in every row included (§5):
+every bench and the app's host test pass, the app compiles and runs in ue2emu; not yet run: Vivado (CI) and the board.
+Next: CI, then the board (§4).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -105,7 +105,8 @@ origin; `vic_scaler`, `overlay.v`, `c64_text.v` and `pix_layer.v` take them inst
 the menu box centred on the active area with the largest character scale that fits, the freeze text in the scaled
 picture's window, the pixel layer's positions relative to the active area. The freeze still the app draws on the pixel layer
 (`trx_video.cc`) is placed and sized from the running mode and scale (0x4F07, 0x4F0A), so it lies under the picture in every row and
-scale (Claude, 2026-11-14).
+scale (Claude, 2026-11-14). The boot splash (`trx_ui.cc`, T24 §8) covers the running row's active area, its picture shrunk while it
+is decoded to the largest size with its 1080p shape, centred (Alex, 2026-11-15, "a"; §5).
 
 **D8 — The encoder is MultiCore's fork** (Claude, 2026-11-14). `hdmi_enc/` (pixel enable, the frame at run time). Two behaviour changes
 against the vendor encoder this design used, accepted: the AVI InfoFrame's picture aspect at 1080p is 16:9 instead of "no data"
@@ -145,7 +146,8 @@ Scenario: Nothing that worked stops working
   overtaken.
 - iverilog: `mode_req` (refusal, family replacement, restart sequence), from MultiCore's bench if it has one.
 - Vivado: the c64u build routes and meets timing (it stands at 81 % LUT, 99.89 % slices).
-- Board (Alex): each mode on a TV and on the projector; the menu, the freeze text and a pixel-layer picture in each.
+- Board (Alex): each mode on a TV and on the projector; the boot splash, the menu, the freeze text and a pixel-layer picture in each;
+  a System Mode switch (API) while the splash shows.
 
 ## 5. Status and history
 
@@ -242,3 +244,39 @@ Scenario: Nothing that worked stops working
   (they need the board).
   **Open for Alex (not in this spec):** the LVGL boot splash (`trx_ui.cc`, `trx_lv_port.h`) and the apps' LVGL UI draw a 960 x 540
   canvas at scale 2, the whole 1080p frame; in every other row it is cut (720p shows its top left 640 x 360 of 960 x 540).
+  (Answered and built, next entry; the splash is the port's only caller in the app.)
+- **2026-11-15, the boot splash in every row (Alex, "a"; agent).** Alex's answer: the splash picture is shrunk while it is decoded to
+  fit the active area and centred, following the row as the freeze still does (D6). App `u16` `18af6de9`. `trx_splash.h` (new, pure):
+  the canvas is the running row's active area at the smallest layer scale whose width fits (`trx_layer_scale`, now shared with the
+  freeze still's plan) from the active origin: 960 x 540 at 2 (1080p, as before), 640 x 360 at 2 (720p), 720 x 576, 640 x 480 and
+  800 x 600 at 1. The picture's 960 x 540 frame (`trx_splash.c`) is drawn at the largest size with its 1080p shape on the screen,
+  centred on black. The shape of an output pixel is the row's AVI aspect over its active area, now in the app's table (`asp`,
+  `tools/hdmi_modes.py` `ch()`; `hdmi_modes.vh` unchanged): only 576p (720 x 576 named 4:3) has pixels 16/15 wide, so it gets
+  720 x 432 at (0, 72); 480p 640 x 360 at (0, 60), 800 x 600 800 x 450 at (0, 75), 720p 640 x 360, 1080p the frame itself. Found while
+  reading: the scaler's Fit does not correct this for the C64 picture (`steps()` keeps 1600 : 1080 in output pixels), so at 576p the
+  C64 picture is 16/15 wider on the screen than at 1080p; not changed. Each canvas pixel shows the frame pixel at its centre: the
+  colours, every stripe and gap (3 pixels and more) kept; single-pixel tips of the rounded bar ends drop out (9 at 720p and 480p, 8 at
+  800 x 600, none at 576p). No new asset. The version line keeps unscii 8 (now set on the label) at its own size, 8 x 9 output pixels
+  at scale 1, 16 x 18 at 2; its longest form (47 characters) fits the narrowest canvas (640) and lies on black in every row. The port
+  (`trx_lv_port`) takes the display size, stride, scale and PX_POS from the canvas at run time; its two buffers stay 1,036,800 bytes
+  each, which the 1080p canvas fills exactly (800 x 600: 960,000, 576p 829,440, 480p 614,400, 720p 460,800; the rest of a buffer is
+  unused while the splash shows, all of it is freed when it ends). `trx_lv_resize` moves the display: layer off, two frame starts
+  (PX_STATUS count, at most 100 ms), the new size and stride, painted again, shown by the next flush.
+  **Ordering (from the code).** The row asked for at boot runs before the splash exists: "U64 Config" (init function 1) constructs
+  U64Config, whose first `effectuate_settings` writes 0x4F00 and waits for the family (up to 2 s) and for the row (up to 1 s) in the
+  init task; "TRX UI" (91) creates the splash task, which reads 0x4F07 then. A row can still change while the splash shows: a System
+  Mode switch from the API or a state (`u64_set_system_mode`, any task), or a boot request slower than those waits. So the task reads
+  0x4F07 in its wait loop (every 20-50 ms) and moves the splash when its canvas changes (720p and 1080p keep theirs across the
+  families); during the 300 ms fade a change ends the splash at once. A freeze takes the layer as before (`trx_lv_yield_layer`).
+  **Tests.** Host test (`make host_tests`): 489 checks; per row the canvas and picture against numbers worked out by hand from the
+  active area and the CEA / VESA aspect, the layout rules (pix_layer.v's limits, exactly the active area, centred, one side full, the
+  16:9 shape to half a pixel, the longest version line inside), the paint against a plain model pixel for pixel (the asset, four
+  made-up pictures, every row and two odd places, one drawn larger), only the palette's colours, every stripe and gap kept, the
+  version line on black, 1080p pixel for pixel the splash before U16. Controls in the test, all caught: the 960 x 540 canvas of before
+  in the 5 other rows, 576p with square pixels, a picture 2 lines low, a canvas a pixel short, a stride of 1608, one pixel changed, a
+  quarter-size shrink that loses stripes; 7 mutations of the header caught. Build (`u64-build-env`): no warning; `app_space.py
+  measure` 1645.6 KiB on 50T (of 1920) and 100T (of 1792), +4,344 bytes against the same commit before; 175.8 KiB above the image (gate
+  128); `app_space_test`, `openapi_check` pass. ue2emu 0.7.3 (`--board c64u --trx-io`, no mode request in its C64 core: the fallback):
+  "splash up: row 2, canvas 960 x 540 at scale 2, picture 960 x 540 at (0, 0)", heap free 2,756,032 at boot as before, the screen pixel
+  for pixel the base build's except the version line (that build had no git hash). Not run: the splash in the other rows and its move
+  (the emulator models the mode request only for MultiCore's host, with that host's layer); they need the board.

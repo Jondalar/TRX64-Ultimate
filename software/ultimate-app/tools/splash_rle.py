@@ -2,13 +2,15 @@
 """Converts the boot splash picture into C (TRX64-Ultimate docs/specs/T24-lvgl-ui.md):
 software/lvgl_port/assets/trx_splash.c, which the u64ii application build picks
 up by itself (target/u64ii/riscv/ultimate/Makefile, TRX_HAVE_SPLASH). The splash
-(software/io/c64/trx_ui.cc) decodes it straight into the pixel layer's RGB565
-frame buffers; LVGL then draws the version line on top.
+(software/io/c64/trx_ui.cc) decodes it into the pixel layer's RGB565 frame
+buffers, shrunk on the way where the HDMI row's canvas is smaller than the 1080p
+one (software/io/c64/trx_splash.h); LVGL then draws the version line on top.
 
     tools/splash_rle.py <splash.png> [out.c]
 
-The picture: at most 16 colours, at most 960 x 540 (the layer; shown at 2x),
-centred on black when smaller. Alpha is dropped (blended onto black first).
+The picture: at most 16 colours, at most 960 x 540 (the canvas at 1080p, shown
+at 2x there; the frame every other row's splash is drawn from), centred on black
+when smaller. Alpha is dropped (blended onto black first).
 
 Format: the pixels row by row, top to bottom, as runs of one colour index:
     byte = index << 4 | n     n = 1..15: a run of n pixels

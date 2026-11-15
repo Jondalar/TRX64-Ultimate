@@ -10,10 +10,24 @@
 // (trx_video.cc). A freeze in the meantime takes the layer at once
 // (trx_lv_yield_layer() from trx_video_freeze_enter()).
 //
+// The HDMI row (TRX64-Ultimate U16): the splash covers the active area of the
+// row that runs (0x4F07; 1080p on a bitstream without the mode request), its
+// canvas and the picture's size and place from trx_splash.h. The row asked for
+// at boot runs before this task exists: U64Config's first effectuate (init
+// function 1) writes the request and waits until the row runs (and before
+// that, after a System Mode switch, until the family has moved), all in the
+// init task; this one is created at 91. A row that changes while the splash
+// is up (a System Mode switch from the API or a state, a request that came
+// later than those waits) is followed: the wait loop reads the row every
+// 20-50 ms and moves the splash to the new canvas (trx_lv_resize, the picture
+// painted again). During the fade it is not moved: the splash ends at once.
+//
 // The picture: software/lvgl_port/assets/trx_splash.c (tools/splash_rle.py),
-// decoded straight into both frame buffers; LVGL draws the version line over it
-// in the bottom right corner. Without it: a title (under a tools/lvgl_logo.sh
-// logo, if there is one) on black.
+// decoded into both frame buffers, shrunk on the way where the canvas is
+// smaller than the 1080p one (trx_splash_paint); LVGL draws the version line
+// over it in the bottom right corner. Without it: a title (under a
+// tools/lvgl_logo.sh logo, if there is one) on black, centred on the canvas
+// (the logo is not shrunk).
 //
 // READY: the 6510's PC from the state bus (chip 1 word 1, ARCH §15.3), loaded by
 // a frame capture every CAP_EVERY frames while the splash waits; the KERNAL's
@@ -27,6 +41,7 @@
 
 #include "trx_lv_port.h"
 #include "trx_io.h"
+#include "trx_splash.h"
 #include "lvgl.h"
 #include "init_function.h"
 #include "FreeRTOS.h"
@@ -62,13 +77,14 @@ extern "C" const lv_image_dsc_t trx_logo; // software/lvgl_port/assets/trx_logo.
 #define FADE_MS        300
 #define FADE_STEPS     15
 #define LOGO_GAP       24               // pixels between logo and text
-#define VERSION_MARGIN 6                // version line from the bottom right corner
 
 #define UI_STACK       (2 * configMINIMAL_STACK_SIZE)
 #define UI_PRIO        (tskIDLE_PRIORITY + 1) // above the init task (0): the splash comes up first
 
 static bool have_pc;
 static uint8_t cap_saved;
+static int splash_row;                  // the HDMI row the splash is laid out for
+static trx_splash_plan_t splash;        // its canvas and the picture's place there
 
 static uint32_t now_ms(void)
 {
@@ -92,42 +108,69 @@ static bool c64_at_ready(void)
     return pc >= READY_LOOP_LO && pc <= READY_LOOP_HI;
 }
 
+// The row the HDMI timing runs (mode_req.v, U16), or 1080p on a bitstream without the request.
+static int running_row(void)
+{
+    return trx_io_hdmi_modes() ? (ioRead8(TRX_MR_ROW) & 15) : 2;
+}
+
+// The splash's place in a row. The active area and the aspect are the row's, every scale's entry has them; a row the
+// table does not have (mode_req.v runs none) takes 1080p's.
+static trx_splash_plan_t plan_for(int row)
+{
+    const trx_hdmi_geom_t *g = trx_hdmi_geom(row, 1);
+    return trx_splash_plan(g ? g : trx_hdmi_geom(2, 1));
+}
+
+// True when the row that runs now puts the splash elsewhere; p is then its place. 720p and 1080p have the same canvas in
+// both families.
+static bool canvas_moved(trx_splash_plan_t *p)
+{
+    int row = running_row();
+    if (row == splash_row) {
+        return false;
+    }
+    splash_row = row;
+    *p = plan_for(row);
+    return !trx_splash_same(p, &splash);
+}
+
+static void log_place(const char *what)
+{
+    printf("[TRX UI] splash %s: row %d, canvas %d x %d at scale %d, picture %d x %d at (%d, %d)\n", what, splash_row,
+           splash.c.w, splash.c.h, splash.c.s, splash.pw, splash.ph, splash.px, splash.py);
+}
+
 #ifdef TRX_HAVE_SPLASH
-// Decodes the splash runs into a frame buffer; the rest of it stays black.
+// The splash runs decoded into a frame buffer, at the picture's place on the canvas; the rest of it black.
 static void paint_splash(uint16_t *fb)
 {
-    memset(fb, 0, TRX_LV_W * TRX_LV_H * 2);
-    uint16_t *row = fb + trx_splash_y * TRX_LV_W + trx_splash_x;
-    uint32_t x = 0, y = 0;
-    for (uint32_t k = 0; k < trx_splash_len && y < trx_splash_h;) {
-        uint8_t b = trx_splash_rle[k++];
-        uint32_t run = b & 15;
-        if (!run) {
-            if (k >= trx_splash_len) {
-                break;
-            }
-            run = trx_splash_rle[k++] + 16;
-        }
-        uint16_t c = trx_splash_pal[b >> 4];
-        while (run && y < trx_splash_h) {
-            uint32_t n = trx_splash_w - x;
-            if (n > run) {
-                n = run;
-            }
-            for (uint32_t i = 0; i < n; i++) {
-                row[x + i] = c;
-            }
-            run -= n;
-            x += n;
-            if (x == trx_splash_w) {
-                x = 0;
-                y++;
-                row += TRX_LV_W;
-            }
-        }
-    }
+    trx_splash_pic_t pic;
+    pic.w = trx_splash_w;
+    pic.h = trx_splash_h;
+    pic.x0 = trx_splash_x;
+    pic.y0 = trx_splash_y;
+    pic.pal = trx_splash_pal;
+    pic.rle = trx_splash_rle;
+    pic.len = trx_splash_len;
+    trx_splash_paint(fb, &splash, &pic);
 }
 #endif
+
+// The row moved the canvas: the display follows, the picture is painted again for it. False when the layer was taken
+// away meanwhile.
+static bool move_splash(const trx_splash_plan_t *p)
+{
+    splash = *p;
+    if (!trx_lv_resize(&splash.c)) {
+        return false;
+    }
+#ifdef TRX_HAVE_SPLASH
+    trx_lv_backdrop(paint_splash);
+#endif
+    log_place("moved");
+    return true;
+}
 
 static void build_splash(void)
 {
@@ -154,31 +197,43 @@ static void build_splash(void)
     lv_obj_center(title);
 #endif
 #endif
-    // Version line, bottom right: the application version and, when the build
-    // had git, its commit.
-    static char version[48];
+    // Version line, bottom right of the canvas: the application version and,
+    // when the build had git, its commit. Its font and length are what the host
+    // test checks against the smallest canvas (trx_splash.h).
+    static char version[TRX_SPLASH_VERSION_MAX + 1];
     const char *hash = APP_VERSION_HASH;
     snprintf(version, sizeof(version), hash[0] ? "V%s %s" : "V%s", APPL_VERSION_ASCII, hash);
     lv_obj_t *ver = lv_label_create(scr);
     lv_label_set_text_static(ver, version);
+    lv_obj_set_style_text_font(ver, &lv_font_unscii_8, 0);
     lv_obj_set_style_text_color(ver, lv_color_hex(0x7B7B7B), 0);
-    lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -VERSION_MARGIN, -VERSION_MARGIN);
+    lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -TRX_SPLASH_VERSION_MARGIN, -TRX_SPLASH_VERSION_MARGIN);
 }
 
 static void ui_task(void *)
 {
-    if (!trx_lv_open()) {
+    splash_row = running_row();
+    splash = plan_for(splash_row);
+    if (!trx_lv_open(&splash.c)) {
         vTaskDelete(NULL);
         return;
     }
     build_splash();
+    log_place("up");
     bool gone = trx_lv_handler() < 0; // renders and shows the splash
+    const char *end = gone ? "ended by a freeze" : "done";
     uint32_t t0 = now_ms();
     if (have_pc) {
         pc_watch(true);
     }
     bool ready = false;
+    trx_splash_plan_t p;
     while (!gone) {
+        if (canvas_moved(&p) && !move_splash(&p)) {
+            gone = true;
+            end = "ended by a freeze";
+            break;
+        }
         uint32_t t = now_ms() - t0;
         if (!ready && have_pc) {
             ready = c64_at_ready();
@@ -193,6 +248,7 @@ static void ui_task(void *)
         int ms = trx_lv_handler();
         if (ms < 0) {
             gone = true;
+            end = "ended by a freeze";
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(ms < 20 ? 20 : ms));
@@ -201,13 +257,18 @@ static void ui_task(void *)
         pc_watch(false);
     }
     for (int i = FADE_STEPS - 1; i >= 0 && !gone; i--) {
+        if (canvas_moved(&p)) {
+            end = "ended by an HDMI row change";
+            break; // the last 300 ms are not worth a move: off now (trx_lv_close)
+        }
         if (!trx_lv_set_alpha(uint8_t(255 * i / FADE_STEPS))) {
             gone = true;
+            end = "ended by a freeze";
         }
         vTaskDelay(pdMS_TO_TICKS(FADE_MS / FADE_STEPS));
     }
     trx_lv_close();
-    printf("[TRX UI] splash %s; UI parked\n", gone ? "ended by a freeze" : "done");
+    printf("[TRX UI] splash %s; UI parked\n", end);
     vTaskDelete(NULL);
 }
 

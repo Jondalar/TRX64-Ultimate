@@ -1,7 +1,7 @@
 // U16 (TRX64-Ultimate docs/specs/U16-hdmi-modes.md D5, D6): the HDMI mode the application asks the TRX64 Ultimate
 // bitstream for, and where the freeze still goes on the pixel layer so that it lies under the scaler's picture in every
 // row and scale. Pure functions over the generated table (trx_hdmi_modes.h, tools/hdmi_modes.py), checked on the host
-// by software/test/trx_hdmi (target/pc/linux/trxhdmitest).
+// by software/test/trx_hdmi (target/pc/linux/trxhdmitest). The boot splash's place in every row: trx_splash.h.
 #ifndef TRX_HDMI_H
 #define TRX_HDMI_H
 
@@ -48,8 +48,9 @@ static inline int trx_hdmi_win_h(const trx_hdmi_geom_t *g)
 // multiple of 16 bytes, the position relative to the active origin. The still covers the scaler's window: S is the smallest
 // factor whose width fits (1 up to 960 output pixels, 2 above), the size rounded up so that no window pixel is left out.
 #define TRX_LAYER_MAX_W 960
-// The largest layer any row and scale of the table needs (the host test proves both): 800 x 600 at scale 1 (lines), 960 x 540
-// RGB565 at scale 2 (1080p Fill, bytes).
+// The largest layer any row and scale of the table needs, the freeze still's and the boot splash's (trx_splash.h; the host test
+// proves both): 800 x 600 at scale 1 (lines; the splash at 800 x 600), 960 x 540 RGB565 at scale 2 (bytes; 1080p Fill, the splash
+// at 1080p).
 #define TRX_LAYER_MAX_H     600
 #define TRX_LAYER_MAX_BYTES (960 * 540 * 2)
 
@@ -57,16 +58,23 @@ typedef struct {
     int s;          // output pixels per layer pixel, both axes
     int w, h;       // layer pixels
     int stride;     // bytes from line to line (RGB565)
-    int x0, y0;     // PX_POS: the window's first output pixel / line in the active area
+    int x0, y0;     // PX_POS: the first output pixel / line in the active area (the still: the window's)
 } trx_layer_plan_t;
+
+// The smallest S at which out_w output pixels take at most TRX_LAYER_MAX_W layer pixels.
+static inline int trx_layer_scale(int out_w)
+{
+    int s = 1;
+    while ((out_w + s - 1) / s > TRX_LAYER_MAX_W) {
+        s++;
+    }
+    return s;
+}
 
 static inline trx_layer_plan_t trx_hdmi_plan(const trx_hdmi_geom_t *g)
 {
     trx_layer_plan_t p;
-    p.s = 1;
-    while ((g->ww + p.s - 1) / p.s > TRX_LAYER_MAX_W) {
-        p.s++;
-    }
+    p.s = trx_layer_scale(g->ww);
     p.w = (g->ww + p.s - 1) / p.s;
     p.h = (g->wh + p.s - 1) / p.s;
     p.stride = (p.w * 2 + 15) & ~15;
