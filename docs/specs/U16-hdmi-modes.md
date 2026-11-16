@@ -2,7 +2,7 @@
 
 **Status:** DONE (2026-11-15, Alex). Gateware, the `trx64g` application part and the boot splash in every row built; every bench
 and the app's host tests pass; CI (Vivado, the tier 1 benches, the app) green; the board test passed on a monitor at 50 Hz (§5).
-Not tested: the 60 Hz rows and a projector. Left open with the done: D7's contract line, the CI gaps and the 576p shape (§5).
+Not tested: the 60 Hz rows and a projector. Left open with the done: the CI gaps and the 576p shape; D7's contract line is in since 2026-11-16 (§5).
 **Repo:** TRX64-Ultimate (gateware `designs/c64_basic/`, application `software/ultimate-app` for `trx64g`).
 **Number:** U16 (registry: the TODO table in `TODO.md`).
 **Milestone:** none ([ADR-0066](../adr/0066-milestones-end-with-the-multicore-split.md)).
@@ -300,3 +300,6 @@ Scenario: Nothing that worked stops working
 - **2026-11-15, main (Alex: "alles nach main").** `u16` fast-forwarded into main, with what it carries from `u12`: U12's 6581
   op-amp in reDIP (not yet accepted by ear), T25.6's status mask and U15's first trace. The app's `trx64/main` fast-forwarded to
   `18af6de9`. MultiCore's pins (`main-8f1dc184`) move only with a new, reviewed pin on main's package.
+- **2026-11-16, D7 closed (contract, MultiCore T230).** The contract's §8 ("What the bitstream offers an application") now lists
+  the mode request and scale (0x4F00 / 0x4F01, read-back 0x4F04-0x4F0A) and the pixel layer counting from the row's active area,
+  agreed by both sides and Alex (contract v4, MultiCore 91f6f3cf6, the same bytes here).
