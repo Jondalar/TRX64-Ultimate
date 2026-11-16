@@ -37,7 +37,8 @@ when it is gone.
 | Digital Video Mode | Auto, HDMI, DVI | Auto | **No effect**: always HDMI |
 
 A settings file from a version before `main-31e69921` that holds SD keeps 576p (480p at 60 Hz) until you choose
-another mode.
+another mode. At 576p the C64 picture is 16/15 wider on the screen than at 1080p: 576p's pixels are not square,
+and the scale does not correct that yet.
 
 ### Audio Mixer
 
