@@ -60,12 +60,17 @@ does not hold, reopen the issue and report only that. Anything new from a retest
 
 ## Pull requests
 
-**This repository is an export.** The work happens on our own Gitea in the LAN: the branches, the history,
-the task list and the specifications are there. GitHub carries the releases and the tree each release was
-built from, without commit history. A pull request here is therefore a patch, not something we can merge —
-a merge on GitHub is undone by the next export, which writes the tree as it stands on Gitea, and nothing
-warns you. What we do instead: we take the patch, apply it on Gitea with your name on the commit, run it
-through our CI and ship it in a release. The pull request is then closed, naming the build that carries it.
+**This repository is an export.** The work happens on our own Gitea in the LAN, with its branches and its CI.
+GitHub gets `main` from there: every commit since release 0.2.0 is an export commit here, with its message,
+author and date, and with the tree as it stands on Gitea, less Commodore's ROMs, Gideon's pin constraints for
+the C64 Ultimate and four third-party files. The specifications (`docs/specs`), the decisions (`docs/adr`) and
+the task list (`TODO.md`) come along. The export is pushed with each release and now and then in between; the
+history before 0.2.0 stays on Gitea, because it carries the ROMs.
+
+A pull request here is therefore a patch, not something we can merge — a merge on GitHub is overwritten by the
+next export, which writes the tree as it stands on Gitea, and nothing warns you. What we do instead: we take the
+patch, apply it on Gitea with your name on the commit, run it through our CI and ship it in a release; the
+export then brings your commit here. The pull request is closed, naming the build that carries it.
 **Closed does not mean refused.** A refusal says so in words, with the reason.
 
 Three things follow from the export for the diff itself:
@@ -73,11 +78,13 @@ Three things follow from the export for the diff itself:
 - `software/ultimate-app/` is a plain folder here and a submodule of its own repository with us, so a change
   that spans it and the rest of the tree is two commits on our side. Keep the two apart in one PR, or send
   two.
-- A handful of files exist here alone (the notes under `roms/` and `constraints/`) or read a little
-  differently here than they do with us (`BUILD.md`, `ci/lib.sh`, `.gitea/workflows/pipeline.yml`). A patch
-  that touches those lines cannot be applied as it stands; say what you meant and we carry it over by hand.
-- The specifications are not here, so a PR cannot bring one. Describe the behaviour you want in the PR; we
-  write the spec.
+- A few files exist here alone: the notes that stand in for what is left out (`roms/README.md`,
+  `constraints/c64u.xdc.md`, `software/ultimate-app/roms/README.md` and a `.md` beside each of the four
+  third-party files), and a `README.md` in each empty submodule folder of `software/ultimate-app` naming its
+  repository and commit. A patch to them cannot be applied; say what you meant and we carry it over by hand.
+  Every other file reads here as it does with us.
+- The specifications are written on Gitea, with the code they describe. Point the PR at the spec it touches
+  and describe the behaviour you want; we change the spec.
 
 The rules for the patch itself:
 
