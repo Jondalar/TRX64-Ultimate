@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Carries docs/manual into the GitHub wiki (docs/todo/T68.md).
+"""Carries docs/manual and docs/wiki into the GitHub wiki (docs/todo/T68.md).
 
 The wiki pages are the manual's files with the links rewritten: a chapter link
 becomes a wiki page name, a link that leaves docs/manual becomes a URL into the
@@ -11,9 +11,12 @@ touched, so the wiki and `docs/manual` stay the same text.
     tools/gh_wiki.py -m "..."           # convert, check, commit in the clone
     tools/gh_wiki.py -m "..." --push    # and push
 
-Pages the wiki has of its own (Home, Architecture, Capabilities, Resources) are
-left alone: they are written there, not here. The commits carry
-gh_export.PUBLIC_EMAIL, as the export's do.
+The wiki's own pages (Home, Architecture, Capabilities, Resources) and their
+picture are written in docs/wiki since 2026-11-16 (Alex: "unser NAS hier ist die
+Quelle"): their links to each other and into docs/manual become page names, and
+the wiki gets them as they are here. An edit made in the wiki's web editor is
+overwritten by the next run unless it was brought into docs/wiki first. The
+commits carry gh_export.PUBLIC_EMAIL, as the export's do.
 """
 
 import argparse
@@ -27,6 +30,7 @@ import gh_export  # the public address of the commits (PUBLIC_EMAIL); tools/ is 
 
 HOST_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANUAL = os.path.join(HOST_REPO, "docs", "manual")
+WIKI_SRC = os.path.join(HOST_REPO, "docs", "wiki")
 DEFAULT_CLONE = os.path.expanduser("~/Development/TRX64-Ultimate-gh-wiki")
 WIKI_URL = "https://github.com/Jondalar/TRX64-Ultimate.wiki.git"
 BLOB = "https://github.com/Jondalar/TRX64-Ultimate/blob/main"
@@ -47,7 +51,16 @@ PAGES = {
     "10-differences.md": "Manual-10-Differences",
 }
 
-# The pages this script owns besides User-Manual; any other name stays (Home, Architecture, ... are the wiki's own).
+# docs/wiki file -> wiki page, and the files beside them that go to the wiki's top level as they are.
+OWN_PAGES = {
+    "Home.md": "Home",
+    "Architecture.md": "Architecture",
+    "Capabilities.md": "Capabilities",
+    "Resources.md": "Resources",
+}
+OWN_FILES = ("architecture.png",)
+
+# The chapter pages this script owns; a page under such a name that PAGES no longer has is removed.
 CHAPTER_PAGE = re.compile(r"^Manual-\d+-[A-Za-z-]+\.md$")
 
 LINK = re.compile(r"\]\(\s*(?!https?:|mailto:|#)([^)\s]+)\s*\)")
@@ -93,6 +106,33 @@ def convert(text, errors, page):
     return LINK.sub(sub, text)
 
 
+def convert_own(text, errors, page):
+    """The links of a page of docs/wiki as the wiki needs them: to another page of docs/wiki or of the manual by
+    its page name, to a file of OWN_FILES as it is, anywhere else in the repository as a URL."""
+
+    def sub(m):
+        target = m.group(1)
+        path, _, anchor = target.partition("#")
+        anchor = ("#" + anchor) if anchor else ""
+        if not path:
+            return m.group(0)
+        if path in OWN_PAGES:
+            return "](%s%s)" % (OWN_PAGES[path], anchor)
+        if path in OWN_FILES:
+            if not os.path.exists(os.path.join(WIKI_SRC, path)):
+                errors.append("%s: %s is not in docs/wiki" % (page, path))
+            return m.group(0)
+        repo_rel = os.path.normpath(os.path.join("docs/wiki", path))
+        if repo_rel.startswith("docs/manual/") and os.path.basename(repo_rel) in PAGES:
+            return "](%s%s)" % (PAGES[os.path.basename(repo_rel)], anchor)
+        if repo_rel.startswith("..") or not os.path.exists(os.path.join(HOST_REPO, repo_rel)):
+            errors.append("%s: cannot place the link %s" % (page, target))
+            return m.group(0)
+        return "](%s/%s%s)" % (BLOB, repo_rel, anchor)
+
+    return LINK.sub(sub, text)
+
+
 def ensure_clone(clone_dir):
     if os.path.isdir(os.path.join(clone_dir, ".git")):
         run(["git", "-C", clone_dir, "fetch", "--quiet", "origin"])
@@ -131,6 +171,16 @@ def main():
         with open(p) as fh:
             pages[page + ".md"] = convert(fh.read(), errors, src)
 
+    for src, page in sorted(OWN_PAGES.items()):
+        p = os.path.join(WIKI_SRC, src)
+        if not os.path.exists(p):
+            errors.append("OWN_PAGES names %s, which is not in docs/wiki" % src)
+            continue
+        with open(p) as fh:
+            pages[page + ".md"] = convert_own(fh.read(), errors, "docs/wiki/" + src)
+    for f in sorted(set(os.listdir(WIKI_SRC)) - set(OWN_PAGES) - set(OWN_FILES)):
+        errors.append("docs/wiki/%s is in neither OWN_PAGES nor OWN_FILES" % f)
+
     if errors:
         print("the manual does not fit the wiki yet:")
         for e in errors:
@@ -148,6 +198,8 @@ def main():
     for name in os.listdir(clone_dir):          # a chapter page under a name PAGES no longer has
         if CHAPTER_PAGE.match(name) and name not in pages:
             os.remove(os.path.join(clone_dir, name))
+    for name in OWN_FILES:
+        shutil.copy2(os.path.join(WIKI_SRC, name), os.path.join(clone_dir, name))
     img_dst = os.path.join(clone_dir, "img")
     os.makedirs(img_dst, exist_ok=True)
     src_img = os.path.join(MANUAL, "img")
