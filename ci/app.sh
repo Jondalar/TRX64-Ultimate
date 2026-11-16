@@ -87,6 +87,12 @@ RAMGATE
   mv "$cache.tmp.$$" "$cache"
 fi
 printf '%s\n' "$sha" > "$out/app_commit"
+# The application's version x.y.z (APPL_VERSION_NUMBER of this commit, bumped by hand per release):
+# ci/package.sh puts it into manifest.json as "version", which MultiCore's boot menu shows (its T230,
+# contract docs/contracts/trx64u-firmware-handover.md). A package between releases repeats the last one.
+ver="$(sed -n 's/^#define APPL_VERSION_NUMBER "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"$/\1/p' "$app/software/application/versions.h")"
+[ -n "$ver" ] || { echo "versions.h: no APPL_VERSION_NUMBER of the form x.y.z" >&2; exit 1; }
+printf '%s\n' "$ver" > "$out/app_version"
 ls -l "$out"
 sha256sum "$out/ultimate.app"
 : > "$out/DONE"

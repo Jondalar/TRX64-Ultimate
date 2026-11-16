@@ -25,9 +25,9 @@ cp "$c64u/wns.txt" "$out/wns.c64u.txt"
 cp "$app/ultimate.app" "$app/ultimate.elf" "$app"/space_*.txt "$out/"
 
 sha="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
-BITDIR="$c64u" python3 - "$out" "$sha" "$(git -C "$ROOT" rev-parse HEAD)" "$(cat "$app/app_commit")" "$(branch_slug)" <<'PY'
+BITDIR="$c64u" python3 - "$out" "$sha" "$(git -C "$ROOT" rev-parse HEAD)" "$(cat "$app/app_commit")" "$(branch_slug)" "$(cat "$app/app_version")" <<'PY'
 import hashlib, json, os, sys
-out, short, full, app, branch = sys.argv[1:]
+out, short, full, app, branch, version = sys.argv[1:]
 def wns(name):
     p = os.path.join(out, name)
     return dict(l.split() for l in open(p)) if os.path.exists(p) else {}
@@ -37,7 +37,7 @@ for f in sorted(os.listdir(out)):
         continue
     data = open(os.path.join(out, f), "rb").read()
     files[f] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
-json.dump({"trx64_commit": full, "app_commit": app, "branch": branch,
+json.dump({"version": version, "trx64_commit": full, "app_commit": app, "branch": branch,
            "gateware_key": open(os.path.join(os.environ["BITDIR"], "key")).read().strip(),
            "bitstream_from": open(os.path.join(os.environ["BITDIR"], "from")).read().strip(),
            "wns_ns": wns("wns.c64u.txt"),
