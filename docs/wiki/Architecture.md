@@ -73,6 +73,7 @@ at once) and the Timewarp ring.
 ## Software
 
 The Ultimate application runs on the RISC-V. Functions beyond Gideon's come as loadable apps
-(`.u2a`) where possible: `trex_crt` (cartridge tool), `unzip`, `softboot`. 
+(`.u2a`) where possible: `trex_crt` (cartridge tool), `c64re` (the machine as a `.c64re` snapshot for C64RE),
+`softboot`, `unzip`.
 The application's updater installs bitstream and application together and
 writes a restore bundle first.
