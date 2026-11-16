@@ -18,3 +18,13 @@ TRX64 Ultimate stands on the work of others:
 - **The VICE team, Groepaz above all**, for the many tools, the test programs and the inspiration
   ([VICE](https://vice-emu.sourceforge.io/)).
 - **My TREX crew**, for the support.
+- **The Lemon64 community**, for the discussions, the questions and the hints
+  ([Lemon64 forum](https://www.lemon64.com/forum/)).
+- **The testers**, for running the releases on their machines and reporting back:
+  [BalboaSoftware](https://github.com/BalboaSoftware), [chrisgleissner](https://github.com/chrisgleissner),
+  [dabbler77](https://github.com/dabbler77), [Elrondo46](https://github.com/Elrondo46),
+  [JM-Internet](https://github.com/JM-Internet), [Kugelblitz360](https://github.com/Kugelblitz360),
+  [LDX-40](https://github.com/LDX-40), [mrr19121970](https://github.com/mrr19121970),
+  [OldMan2525](https://github.com/OldMan2525), [omnicron-c64](https://github.com/omnicron-c64),
+  [rittwage](https://github.com/rittwage), [tbybell](https://github.com/tbybell),
+  [zdooder](https://github.com/zdooder).
