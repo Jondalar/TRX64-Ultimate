@@ -9,7 +9,8 @@ Commodore's ROMs and the third-party test files. Up to 0.2.0 it was one commit
 and also kept back the working documents and the other project's name; since
 then (Alex, 2026-11-13) everything else goes out and each host commit is an
 export commit of its own (--replay). This script does that, checks the result
-and commits it; it pushes only when told to.
+and commits it; it pushes only when told to. Its commits carry PUBLIC_EMAIL in
+place of the maintainer's own address (Alex, 2026-11-16).
 
     tools/gh_export.py --check                 # stage and check, touch nothing
     tools/gh_export.py -m "U5: ..."            # stage, check, sync, commit
@@ -137,13 +138,39 @@ class Fail(Exception):
     pass
 
 
-def run(args, cwd=None, capture=True):
-    r = subprocess.run(args, cwd=cwd, check=False,
+def run(args, cwd=None, capture=True, env=None):
+    r = subprocess.run(args, cwd=cwd, check=False, env=env,
                        stdout=subprocess.PIPE if capture else None,
                        stderr=subprocess.PIPE, text=True)
     if r.returncode != 0:
         raise Fail("%s failed: %s" % (" ".join(args), (r.stderr or "").strip()))
     return (r.stdout or "").strip()
+
+
+# ------------------------------------------------------------------ the address
+
+# The address the export commits carry (Alex, 2026-11-16, before GitHub goes public). The maintainer's host commits
+# carry his own address, which stays on Gitea: an author or committer with the host repository's address
+# (`git config user.email`) goes out as PUBLIC_EMAIL under the same name. Any other address (a contributor's, from a
+# pull request applied on Gitea) goes out as it is. gh_wiki.py commits under PUBLIC_EMAIL as well.
+PUBLIC_EMAIL = "dkl@trx64.org"
+
+
+def own_email():
+    """The host repository's own address (git config user.email), "" when none is set."""
+    r = subprocess.run(["git", "-C", HOST_REPO, "config", "user.email"], check=False,
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return r.stdout.strip()
+
+
+def public_email(email, own):
+    """The address a commit by `email` carries on GitHub, `own` being the host repository's address."""
+    return PUBLIC_EMAIL if own and email.strip().lower() == own.strip().lower() else email
+
+
+def public_env():
+    """The environment of a commit the maintainer makes in a clone: PUBLIC_EMAIL as author and committer."""
+    return dict(os.environ, GIT_AUTHOR_EMAIL=PUBLIC_EMAIL, GIT_COMMITTER_EMAIL=PUBLIC_EMAIL)
 
 
 # ----------------------------------------------------------------------- staging
@@ -433,7 +460,7 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes
 # One export commit per host commit (Alex, 2026-11-13: "jetzt duerfen die Commits mit", from 0.2.0 on),
 # instead of one commit for the whole tree. The host repository's own history still never goes out: it
 # carries what EXCLUDE keeps back. So every host commit is exported through the same rules and committed
-# with its own message, author and dates:
+# with its own message, author and dates (the maintainer's address replaced by PUBLIC_EMAIL):
 #   - first the export of SINCE itself, when it differs from the commit the replay builds on (the files
 #     the export kept back before the rules changed);
 #   - a commit whose export changes nothing (one that touches only what EXCLUDE keeps back) makes no
@@ -469,11 +496,14 @@ def export_message(parts, hosts, app_commit):
 
 
 def commit_export(clone_dir, body, sha):
-    """Commit the synced clone with the author, committer and dates of host commit `sha`."""
+    """Commit the synced clone with the author, committer and dates of host commit `sha`, the maintainer's
+    address replaced by PUBLIC_EMAIL."""
     who = run(["git", "-C", HOST_REPO, "log", "-1",
                "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
-    env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=who[1], GIT_AUTHOR_DATE=who[2],
-               GIT_COMMITTER_NAME=who[3], GIT_COMMITTER_EMAIL=who[4], GIT_COMMITTER_DATE=who[5])
+    own = own_email()
+    env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=public_email(who[1], own),
+               GIT_AUTHOR_DATE=who[2], GIT_COMMITTER_NAME=who[3],
+               GIT_COMMITTER_EMAIL=public_email(who[4], own), GIT_COMMITTER_DATE=who[5])
     run(["git", "-C", clone_dir, "add", "-A"])
     r = subprocess.run(["git", "-C", clone_dir, "commit", "-q", "-F", "-"], input=body, env=env,
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
@@ -604,7 +634,7 @@ def main():
         run(["git", "-C", clone_dir, "add", "-A"])
         body = "%s\n\nExport of TRX64 Ultimate %s (application %s).\n" % (
             args.message, host_rev, app_commit[:8])
-        run(["git", "-C", clone_dir, "commit", "-q", "-m", body])
+        run(["git", "-C", clone_dir, "commit", "-q", "-m", body], env=public_env())
         print("\ncommitted in %s: %s" % (clone_dir,
                                          run(["git", "-C", clone_dir, "log", "--oneline", "-1"])))
         if args.push:

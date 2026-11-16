@@ -279,5 +279,20 @@ class Replay(unittest.TestCase):
         with self.assertRaises(gx.Fail):
             gx.export_message(["", "  "], ["8f4761e"], "fb3a7821")
 
+
+class PublicAddress(unittest.TestCase):
+    def test_the_own_address_goes_out_as_the_public_one(self):
+        self.assertEqual(gx.public_email("Me@Example.org", "me@example.org "), gx.PUBLIC_EMAIL)
+
+    def test_another_address_goes_out_as_it_is(self):
+        self.assertEqual(gx.public_email("pr@example.net", "me@example.org"), "pr@example.net")
+
+    def test_without_an_own_address_nothing_is_replaced(self):
+        self.assertEqual(gx.public_email("me@example.org", ""), "me@example.org")
+
+    def test_a_commit_in_a_clone_carries_the_public_address(self):
+        env = gx.public_env()
+        self.assertEqual((env["GIT_AUTHOR_EMAIL"], env["GIT_COMMITTER_EMAIL"]), (gx.PUBLIC_EMAIL,) * 2)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

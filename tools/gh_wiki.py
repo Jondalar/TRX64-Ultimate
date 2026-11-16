@@ -12,7 +12,8 @@ touched, so the wiki and `docs/manual` stay the same text.
     tools/gh_wiki.py -m "..." --push    # and push
 
 Pages the wiki has of its own (Home, Architecture, Capabilities, Resources) are
-left alone: they are written there, not here.
+left alone: they are written there, not here. The commits carry
+gh_export.PUBLIC_EMAIL, as the export's do.
 """
 
 import argparse
@@ -21,6 +22,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+import gh_export  # the public address of the commits (PUBLIC_EMAIL); tools/ is the script's own directory
 
 HOST_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANUAL = os.path.join(HOST_REPO, "docs", "manual")
@@ -50,8 +53,8 @@ class Fail(Exception):
     pass
 
 
-def run(args, cwd=None, capture=True):
-    r = subprocess.run(args, cwd=cwd, check=False,
+def run(args, cwd=None, capture=True, env=None):
+    r = subprocess.run(args, cwd=cwd, check=False, env=env,
                        stdout=subprocess.PIPE if capture else None,
                        stderr=subprocess.PIPE, text=True)
     if r.returncode != 0:
@@ -153,7 +156,7 @@ def main():
         return 0
     print("\n" + status)
     run(["git", "-C", clone_dir, "add", "-A"])
-    run(["git", "-C", clone_dir, "commit", "-q", "-m", args.message])
+    run(["git", "-C", clone_dir, "commit", "-q", "-m", args.message], env=gh_export.public_env())
     print("\ncommitted: %s" % run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
     if args.push:
         run(["git", "-C", clone_dir, "push", "origin", "HEAD"], capture=False)
