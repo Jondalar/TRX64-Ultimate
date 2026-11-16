@@ -80,7 +80,7 @@ Where we are (2026-10-09; older entries in [docs/todo/overview-history.md](docs/
 | T57 | ✅ | trex_crt (dump / write / inspect) 100 % on both cores | – | [T57-trex-crt-both-cores](docs/specs/T57-trex-crt-both-cores.md#status-and-history) |
 | T72 | ✅ | Quick fix: REU, Ultimate Audio and UCI off while a cartridge runs (physical or .crt) ([ADR-0053](docs/adr/0053-no-internal-io-devices-while-a-cart-is-active.md)) | – | [T72](docs/todo/T72.md) |
 | T74 | ✅ | Unmapped I/O reads return the VIC's phi1 byte (open bus as on a real C64) | – | [T74](docs/todo/T74.md) |
-| T31 | ✅ | Multi-stage CI (Gitea job graph) | `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw; `release.yml` input `ref` collides with the dispatch form's branch field | [T31-ci-pipeline](docs/specs/T31-ci-pipeline.md#status-and-history) |
+| T31 | ✅ | Multi-stage CI (Gitea job graph) | `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw; `release.yml` input `ref` collides with the dispatch form's branch field; tier 2 moves out of the push into a nightly as at MultiCore (Alex 2026-11-16, not built) | [T31-ci-pipeline](docs/specs/T31-ci-pipeline.md#status-and-history) |
 
 ## The monolith: the open work
 

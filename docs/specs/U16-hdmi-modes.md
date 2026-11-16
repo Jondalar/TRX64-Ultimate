@@ -303,3 +303,7 @@ Scenario: Nothing that worked stops working
 - **2026-11-16, D7 closed (contract, MultiCore T230).** The contract's §8 ("What the bitstream offers an application") now lists
   the mode request and scale (0x4F00 / 0x4F01, read-back 0x4F04-0x4F0A) and the pixel layer counting from the row's active area,
   agreed by both sides and Alex (contract v4, MultiCore 91f6f3cf6, the same bytes here).
+- **2026-11-16, on main and released (`main-31e69921`, release `0.3.0`, T68).** In main's first run (2322) `statebus` passed; the
+  tier 2 was cancelled on Alex's word before `ring_core` finished (T31 history), so `ring_core` has not run on this tree. The user
+  manual describes the modes, the 50/60 Hz families and HDMI Picture Scale (chapters 4 and 10); its Video Configuration picture is
+  still the one without the new item.

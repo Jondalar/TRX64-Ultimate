@@ -28,12 +28,16 @@ when it is gone.
 
 | Item | Values | Default | Effect |
 |---|---|---|---|
-| System Mode | PAL, NTSC, PAL-60, NTSC-50, PAL-60/L, NTSC-50/L | PAL | Video timing of the C64. CTRL+P / CTRL+N at power-on choose PAL / NTSC once |
-| HDMI Scan Resolution | SD, HD, FullHD, PC 800x600, 1024x768, 1280x1024 | SD | **No effect**: the HDMI output is always 1080p |
+| System Mode | PAL, NTSC, PAL-60, NTSC-50, PAL-60/L, NTSC-50/L | PAL | Video timing of the C64. CTRL+P / CTRL+N at power-on choose PAL / NTSC once. It also sets the HDMI frame rate: PAL, NTSC-50 and NTSC-50/L run at 50 Hz; NTSC, PAL-60 and PAL-60/L at 60 Hz |
+| HDMI Scan Resolution | SD (480p/576p), HD (720p), FullHD (1080p), PC 800 x 600, PC 1024 x 768, PC 1280 x 1024 | FullHD (1080p) | The HDMI mode. SD is 576p at 50 Hz and 480p at 60 Hz. The PC modes exist only at 60 Hz, and all three give 800 x 600; at 50 Hz they give 576p |
+| HDMI Picture Scale | Integer, Fit, Fill | Fit | How the C64 picture fills the screen. Fit: as large as it fits, in the shape of the 1080p picture. Integer: whole steps, the same on both axes (in SD the same as Fit). Fill: stretched to the whole screen |
 | HDMI Scan lines | Disabled, Enabled | Enabled | Darkens every other line |
 | Palette Definition | a `.vpl` file, empty = built-in | empty | The C64 colours |
 | Analog Video Mode | CVBS + SVideo, RGB | CVBS + SVideo | **No effect**: no analog video out |
 | Digital Video Mode | Auto, HDMI, DVI | Auto | **No effect**: always HDMI |
+
+A settings file from a version before `main-31e69921` that holds SD keeps 576p (480p at 60 Hz) until you choose
+another mode. The picture above was taken before HDMI Picture Scale was added.
 
 ### Audio Mixer
 

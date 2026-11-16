@@ -14,7 +14,7 @@ These parts of the stock firmware are not here.
 | Modem (SwiftLink/ACIA) | MODEMS opens nothing |
 | Built-in Machine Code Monitor | Replaced by the monitor in the firmware ([6.](06-monitor.md)); C= O opens it |
 | UltiSID filter tables | Replaced by the reSID8 engines and their curves |
-| Analog video out, HDMI modes other than 1080p, DVI | The output is always 1080p HDMI |
+| Analog video out, DVI, PC 1024 x 768 and 1280 x 1024 | No analog output; HDMI only; the two PC modes give 800 x 600 (576p at 50 Hz) |
 | LED strip and keyboard light effects | The settings stay; only SHIFT LOCK lights |
 | Drive and tape sound | The mixer items stay without effect |
 | Debug and IEC streams | Only the video and audio streams |
@@ -25,7 +25,7 @@ These parts of the stock firmware are not here.
 
 ## Settings without effect
 
-HDMI Scan Resolution, Analog Video Mode, Digital Video Mode, Vol/Pan Drive and Tape, Case Lights,
+Analog Video Mode, Digital Video Mode, Vol/Pan Drive and Tape, Case Lights,
 Keyboard Lights, Bus Operation Mode, Burst Mode Patch, Parallel Cable to Drive A, Serial Bus Mode,
 Stream Debug to, Debug Stream Mode, Ulticopy Uses disk name.
 
@@ -33,4 +33,4 @@ Stream Debug to, Debug Stream Mode, Ulticopy Uses disk name.
 
 The monitor `trxmon`, part of the firmware, with the C64RE connection, Timewarp, reSID8 (up to 8 SIDs), the turbo up to
 64 MHz, writing changed cartridge images back to their files, the cartridge tool for real
-cartridges, and the Freeze menu over the still picture.
+cartridges, the Freeze menu over the still picture, and HDMI Picture Scale (Integer, Fit, Fill).

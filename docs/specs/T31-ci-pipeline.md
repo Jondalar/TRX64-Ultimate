@@ -313,12 +313,19 @@ The TODO.md table is an overview only; the row detail lives here (convention at 
 
 T31: Multi-stage CI (Gitea job graph)
 
-Milestone M1, status ✅. Open (one line, as in the TODO table): `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw; `release.yml` input `ref` collides with the dispatch form's branch field
+Milestone M1, status ✅. Open (one line, as in the TODO table): `ULTSYS_NEGATIVE=1` self-check prints PASS; lorenz/sid/turbo builds still use --public-flat-rw; `release.yml` input `ref` collides with the dispatch form's branch field; tier 2 moves out of the push into a nightly as at MultiCore (Alex 2026-11-16, not built)
 
 Decisions: [ADR-0028 One integration branch integ-m1](../adr/0028-d10-one-integration-branch.md).
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-16, tier 2 leaves the push (Alex).** Run 2322, the first on `main` with U16 and U12: lint, app, bitstream (cache),
+  package and update files green within minutes, then the tier-2 benches held the queue and the builder's heavy lock: 9 short
+  benches and `slot` (1862 s) passed, `ring_core` was running with three long ones still to come. Alex had the cancel done
+  (*"Ich warte jetzt nicht noch 3 Stunden für was, was ich am Board angeschaut habe gestern"*); the run shows "cancelled", the
+  package `main-31e69921` was complete and released (T68). Decided: tier 2 goes out of the push pipeline into a nightly on
+  `main`, as MultiCore's `nightly.yml` (T100 D7 there, 2026-10-30); this replaces the rule of 2026-10-06 "tier 2 before main,
+  not after" (`ci/select.sh`). Not built yet.
 - **2026-11-16, the package carries the firmware's version (MultiCore T230 FW-1; Alex: go).** The `app` stage writes
   `app_version`, `APPL_VERSION_NUMBER` of the packed app commit (`software/application/versions.h`, x.y.z, bumped by hand per
   release; the stage fails without one), and `package` writes it into `manifest.json` as `"version"`. MultiCore copies it into its
