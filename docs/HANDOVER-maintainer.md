@@ -44,7 +44,7 @@ aufs Board." (Compile locally, test with the emulator until a complete app is th
   `trx64/main` and has an untracked `u64ii/`.
 - Worktrees beside it: `TRX64-Ultimate-wt-integ` (integ-m1), `TRX64-Ultimate-wt-t37` (t37-sockets); not from the last session.
 - Remotes: `origin` = Gitea `TREX/TRX64-Ultimate`, `mc` = Gitea MultiCore. GitHub `Jondalar/TRX64-Ultimate` (private) holds
-  exports of the tree plus the wiki (pages User-Manual, Manual-1..10); never push to GitHub without asking Alex. The export is
+  exports of the tree plus the wiki (pages User-Manual, Manual-01..10); never push to GitHub without asking Alex. The export is
   `tools/gh_export.py` (rules and checks in T68): since 2026-11-13 everything goes out except Commodore's ROMs, Gideon's
   C64U constraints and the third-party test files, and each host commit is an export commit of its own
   (`--replay SINCE`); `--check` first, push only when Alex said so.

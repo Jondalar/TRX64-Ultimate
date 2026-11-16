@@ -31,20 +31,24 @@ DEFAULT_CLONE = os.path.expanduser("~/Development/TRX64-Ultimate-gh-wiki")
 WIKI_URL = "https://github.com/Jondalar/TRX64-Ultimate.wiki.git"
 BLOB = "https://github.com/Jondalar/TRX64-Ultimate/blob/main"
 
-# docs/manual file -> wiki page. The wiki links by page name, without .md.
+# docs/manual file -> wiki page. The wiki links by page name, without .md. Two digits, so that the wiki's page
+# list sorts the chapters 01 ... 10 (Alex, 2026-11-16); before, Manual-1 ... Manual-10 sorted 1, 10, 2, 3.
 PAGES = {
     "README.md": "User-Manual",
-    "01-basics.md": "Manual-1-Basics",
-    "02-file-browser.md": "Manual-2-File-Browser",
-    "03-action-menu.md": "Manual-3-Action-Menu",
-    "04-settings.md": "Manual-4-Settings",
-    "05-cartridges.md": "Manual-5-Cartridges",
-    "06-monitor.md": "Manual-6-Monitor",
-    "07-timewarp.md": "Manual-7-Timewarp",
-    "08-apps.md": "Manual-8-Apps",
-    "09-network.md": "Manual-9-Network",
+    "01-basics.md": "Manual-01-Basics",
+    "02-file-browser.md": "Manual-02-File-Browser",
+    "03-action-menu.md": "Manual-03-Action-Menu",
+    "04-settings.md": "Manual-04-Settings",
+    "05-cartridges.md": "Manual-05-Cartridges",
+    "06-monitor.md": "Manual-06-Monitor",
+    "07-timewarp.md": "Manual-07-Timewarp",
+    "08-apps.md": "Manual-08-Apps",
+    "09-network.md": "Manual-09-Network",
     "10-differences.md": "Manual-10-Differences",
 }
+
+# The pages this script owns besides User-Manual; any other name stays (Home, Architecture, ... are the wiki's own).
+CHAPTER_PAGE = re.compile(r"^Manual-\d+-[A-Za-z-]+\.md$")
 
 LINK = re.compile(r"\]\(\s*(?!https?:|mailto:|#)([^)\s]+)\s*\)")
 
@@ -141,6 +145,9 @@ def main():
     for name, text in pages.items():
         with open(os.path.join(clone_dir, name), "w") as fh:
             fh.write(text)
+    for name in os.listdir(clone_dir):          # a chapter page under a name PAGES no longer has
+        if CHAPTER_PAGE.match(name) and name not in pages:
+            os.remove(os.path.join(clone_dir, name))
     img_dst = os.path.join(clone_dir, "img")
     os.makedirs(img_dst, exist_ok=True)
     src_img = os.path.join(MANUAL, "img")
