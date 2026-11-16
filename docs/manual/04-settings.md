@@ -37,7 +37,7 @@ when it is gone.
 | Digital Video Mode | Auto, HDMI, DVI | Auto | **No effect**: always HDMI |
 
 A settings file from a version before `main-31e69921` that holds SD keeps 576p (480p at 60 Hz) until you choose
-another mode. The picture above was taken before HDMI Picture Scale was added.
+another mode.
 
 ### Audio Mixer
 
