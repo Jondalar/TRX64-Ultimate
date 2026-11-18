@@ -957,6 +957,8 @@ Milestone M1, status ✅. Open (one line, as in the TODO table): –
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-18, the README no longer claims shadow mode (Alex: "korrigier die Doku"):** README.md said real cartridges "run in shadow mode (dumped on insert, run from DDR2, writes journaled and written back)". Neither the firmware nor `designs/c64_basic/slot_port.v` has it: a real cartridge runs live on the port (pass-through, M1), and a dump to `.crt` is the trex_crt app's, started by the user (T57). Shadow mode and the write journal (§10, P7) are still only the sketch; building or dropping them has not been decided with Alex.
+
 - **2026-10-10 evening, T16 closed for M1 (Alex); R21 to M2 as T76** ("das R21 Ding nach M2 ... Der Reset button am EF3 funktioniert nämlich richtig gut"): the EF3 reset button resets our C64 through the P20 sense; R21 stays undriven (§13.8 already listed it as not M1).
 - **2026-10-10 evening, EF3 passed (T51 §7 steps 1-2, T57 B11):** whole-EF3 dump four times identical (/Temp twice, /SD, /USB1 with staging; sha256 4ca6f007...), slot dumps as EF1 images, slot 3 write + dump equal. Left in T16: the R21 measurement.
 - **2026-10-10 evening, USB dropouts during whole-EF3 dumps are port load, not our core (Alex: "Bei Gideon das selbe. Ist Last auf dem Port."):** the EF3 reading draws enough to drop the USB stick on Gideon's core as well. The dumper's staging (cart read first, file write after) is the answer; no RTL item.

@@ -22,8 +22,9 @@ in C64 projects: the real machine, with the inside view a reverse engineer needs
   It is part of the firmware: its RPC server (WebSocket JSON-RPC, TCP 4312) answers from boot, with no
   application loaded, and breakpoints stay armed while anything else runs.
 - **App loader**: further functions come as loadable apps (`.u2a`) instead of being built into the firmware.
-- **Cartridge abstraction**: a generic cartridge decoder driven by a mapping descriptor; real cartridges
-  in the expansion port run in shadow mode (dumped on insert, run from DDR2, writes journaled and written back).
+- **Cartridge abstraction**: a generic cartridge decoder driven by a mapping descriptor runs `.crt` images.
+  A real cartridge in the expansion port runs live on the port, as on a C64; the `trex_crt` app dumps it
+  to a `.crt` when you ask it to.
 - **Turbo**: the 6510 at up to 63 cycles per C64 cycle.
 - **8 SIDs** on Dag Lem's reDIP SID, with our own mixer and our own sampler, compatible with the Ultimate Audio interface.
 
