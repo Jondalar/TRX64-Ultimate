@@ -37,10 +37,11 @@ Where TRX64 Ultimate aims for the behaviour of Gideon Zweijtzer's Ultimate firmw
   Ethernet (REST, FTP, telnet), the freeze menu on HDMI, audio and debug streams over UDP;
 - booting from flash, the keyboard, joysticks, the case and keyboard LEDs.
 
-Where it is deliberately not on par:
+Where it deliberately differs:
 
 - **Video**: HDMI only, no analog video out.
-- **Sound**: reDIP SID instead of UltiSID.
+- **Sound**: Dag Lem's reDIP SID instead of UltiSID. In many places it is closer to the real
+  6581 and 8580 than UltiSID, so the sound differs from the original firmware's.
 - **Lighting**: no LED strip or lighting effects (keyboard and case LEDs stay).
 - **Cartridge I/O**: no internal I/O devices (UCI, REU, Ultimate Audio) in `$DE00-$DFFF` while a
   cartridge is active.

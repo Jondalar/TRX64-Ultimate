@@ -13,6 +13,9 @@ TRX64 Ultimate stands on the work of others:
   ([1541ultimate-tools](https://github.com/chrisgleissner/1541ultimate-tools)).
 - **Dag Lem**, for reDIP SID and reDIP CIA ([reDIP-SID](https://github.com/daglem/reDIP-SID),
   [reDIP-CIA](https://github.com/daglem/reDIP-CIA)).
+- **Randy Rossi**, for VIC-II Kawari, the VIC-II of this machine
+  ([vicii-kawari](https://github.com/randyrossi/vicii-kawari)).
+- **Sameer Puri**, for the HDMI encoder ([hdl-util/hdmi](https://github.com/hdl-util/hdmi)).
 - **Mateusz Nalewajski (m1nl)**, for icepi-zero-c64 ([icepi-zero-c64](https://github.com/m1nl/icepi-zero-c64)),
   the C64 core this one grew from.
 - **The VICE team, Groepaz above all**, for the many tools, the test programs and the inspiration
