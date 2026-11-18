@@ -102,7 +102,7 @@ Keys that work in the file browser and in every list:
 | Letters | Jump to the first name that starts with them (`?` is a wildcard); with WASD cursors hold SHIFT |
 | RUN/STOP, left arrow | Back; at the top closes the menu |
 | C= L | Show the debug log |
-| C= J | Swap the joystick ports |
+| C= J | Swap the joystick ports: **no effect in this version** ([10.](10-differences.md)) |
 | C= I | Swap Freeze and Overlay (Ultimate look) |
 | C= O | Open the monitor `trxmon` ([6.](06-monitor.md)) |
 

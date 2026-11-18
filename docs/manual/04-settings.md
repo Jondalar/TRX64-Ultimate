@@ -28,7 +28,7 @@ when it is gone.
 
 | Item | Values | Default | Effect |
 |---|---|---|---|
-| System Mode | PAL, NTSC, PAL-60, NTSC-50, PAL-60/L, NTSC-50/L | PAL | Video timing of the C64. CTRL+P / CTRL+N at power-on choose PAL / NTSC once. It also sets the HDMI frame rate: PAL, NTSC-50 and NTSC-50/L run at 50 Hz; NTSC, PAL-60 and PAL-60/L at 60 Hz |
+| System Mode | PAL, NTSC, PAL-60, NTSC-50, PAL-60/L, NTSC-50/L | PAL | Video timing of the C64. CTRL+P / CTRL+N at power-on choose PAL / NTSC once. It also sets the HDMI frame rate: PAL, NTSC-50 and NTSC-50/L run at 50 Hz; NTSC, PAL-60 and PAL-60/L at 60 Hz. In this version PAL-60/L and NTSC-50/L run exactly as PAL-60 and NTSC-50 |
 | HDMI Scan Resolution | SD (480p/576p), HD (720p), FullHD (1080p), PC 800 x 600, PC 1024 x 768, PC 1280 x 1024 | FullHD (1080p) | The HDMI mode. SD is 576p at 50 Hz and 480p at 60 Hz. The PC modes exist only at 60 Hz, and all three give 800 x 600; at 50 Hz they give 576p |
 | HDMI Picture Scale | Integer, Fit, Fill | Fit | How the C64 picture fills the screen. Fit: as large as it fits, in the shape of the 1080p picture. Integer: whole steps, the same on both axes (in SD the same as Fit). Fill: stretched to the whole screen |
 | HDMI Scan lines | Disabled, Enabled | Enabled | Darkens every other line |
@@ -66,7 +66,9 @@ A source that is on is never rounded down to silence; OFF and a fully panned-awa
 
 The built-in speaker. **Speaker Enable** (default Enabled) switches it; Disabled greys the rest.
 Per-source volumes like the Audio Mixer: SIDs, sockets and sampler default OFF, drive -15 dB,
-tape -36 dB (drive and tape: **no effect**).
+tape -36 dB (drive and tape: **no effect**). In this version only Vol reSID8 1 and Vol Socket 1 act, and
+not per source: the larger of the two sets one volume for the whole speaker. The other volumes have
+**no effect**.
 
 ### LED Lighting
 
@@ -85,7 +87,7 @@ tape -36 dB (drive and tape: **no effect**).
 | Kernal ROM, BASIC ROM, Character ROM | a file from the ROM folder | kernal.bin, basic.bin, chars.bin | The C64's ROMs |
 | Cartridge | a `.crt`, empty = none | empty | Cartridge image loaded at start and reset |
 | Save Changed Cartridge | Off, Ask, Auto | Ask | Writes flash and EEPROM changes of a cartridge image back to its file ([5.](05-cartridges.md)) |
-| RAM Expansion Unit | Disabled, Enabled, GeoRAM Mode | Disabled | The REU. **While the REU is on, the Timewarp ring is off** |
+| RAM Expansion Unit | Disabled, Enabled, GeoRAM Mode | Disabled | The REU. **While the REU is on, the Timewarp ring is off**. GeoRAM Mode: **no effect in this version** (no GeoRAM, the REU stays off) |
 | Size | 128 KB ... 16 MB | 2 MB | REU size |
 | Command Interface | Disabled, Enabled | Disabled | The Ultimate Command Interface at $DF1C |
 | Ultimate Audio | Disabled, Enabled | Disabled | The sampler at $DF20-$DFFF |
@@ -99,7 +101,7 @@ The same items as above plus:
 |---|---|---|---|
 | Cartridge Preference | Auto, Internal, External, Manual | Auto | Auto: a cartridge in the port wins over the internal one. External: the port only. Internal: the internal one only (a real cartridge stays switched off). Manual: per resource with the four Bus Sharing items |
 | Bus Operation Mode | Quiet, Writes, Dynamic, Dyn. & Writes, Compatibility | Quiet | **No effect**: our port drives the bus whenever a cartridge needs it |
-| Bus Sharing - ROMs / I/O1 / I/O2 / Interrupts | Internal, External, Both | Both | Only with Cartridge Preference Manual |
+| Bus Sharing - ROMs / I/O1 / I/O2 / Interrupts | Internal, External, Both | Both | Only with Cartridge Preference Manual. In this version Both acts as Internal for the ROMs, and for the interrupts External and Both are the same |
 | GAME/EXROM | On, Off | On | Off hides a real cartridge completely |
 | Fast Reset | Disabled, Enabled | Disabled | Skips the KERNAL RAM test |
 | REU Preload, REU Preload Image, REU Preload Offset | | Disabled, /Usb0/preload.reu, 0 KB | Loads an image into the REU at start (refused while a cartridge image is loaded: it uses the REU memory) |
@@ -172,9 +174,9 @@ A detected chip with its own options (FPGASID, SwinSID, ARMSID, PDsid, SIDKick) 
 |---|---|---|---|
 | SID Socket 1 / 2 Address | Unmapped, $D400-$D7E0, $DE00-$DFE0 | $D400 | Address of each real SID |
 | Ext DualSID Range Split | Off, A5 ... A9 | Off | Address bit that splits a dual SID |
-| reSID8 1 / 2 Address | as above | $D400 | Base address of each of the two reSID8 engines |
+| reSID8 1 / 2 Address | as above | $D400 | Base address of each of the two reSID8 engines. In this version they answer in $D400-$D7FF only: **$DE00-$DFE0 have no effect** |
 | reSID8 Range Split | Off, 1/2 (A5) ... 1/4 (A7,A8) | Off | Splits an engine's range into 2 or 4 SIDs: with both engines up to 8 SIDs |
-| Paddle Override | Disabled, Enabled | Enabled | Paddle lines (also in Joystick Settings) |
+| Paddle Override | Disabled, Enabled | Enabled | Paddle lines (also in Joystick Settings): **no effect in this version** |
 | Auto Address Mirroring | Disabled, Enabled | Enabled | Fills unused mirrors |
 | Visual SID Address Editor | | | An editor for all addresses at once |
 
@@ -223,10 +225,10 @@ the list). Each item exists for engine 1 and engine 2.
 
 | Item | Values | Default | Effect |
 |---|---|---|---|
-| Joystick Input | Normal, Swapped, WASD Port 2, WASD Port 1 | Normal | Port swap, or the keyboard as a joystick (hold CTRL to type W, A, S, D, RETURN) |
-| Paddle Override | Disabled, Enabled | Enabled | |
-| Mouse Mode | Cursor, Mouse, Mouse + Cursor, Mouse + Wheel | Mouse | How a USB mouse appears to the C64 |
-| Mouse Sensitivity, Mouse Acceleration | 1 ... 16, Off/Adaptive | 8, Off | |
+| Joystick Input | Normal, Swapped, WASD Port 2, WASD Port 1 | Normal | Port swap, or the keyboard as a joystick: **no effect in this version**, the ports stay as they are (C= J too) |
+| Paddle Override | Disabled, Enabled | Enabled | **No effect in this version** |
+| Mouse Mode | Cursor, Mouse, Mouse + Cursor, Mouse + Wheel | Mouse | How a USB mouse appears to the C64. In this version only the cursor keys and the wheel reach the C64: the 1351 mouse of Mouse, Mouse + Cursor and Mouse + Wheel has **no effect** (the C64 reads $FF on both paddle lines) |
+| Mouse Sensitivity, Mouse Acceleration | 1 ... 16, Off/Adaptive | 8, Off | In this version only in Cursor |
 | Menu Mouse Navigation | Disabled, Enabled | Enabled | The mouse moves the menu selection |
 | Mouse Wheel Sensitivity, Mouse Wheel Direction | 1 ... 16, Normal/Reversed | 8, Normal | |
 | USB Mouse, USB Keyboard (+ HID Mode) | (read only) | | Detected devices |

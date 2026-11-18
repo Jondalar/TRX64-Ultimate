@@ -27,7 +27,13 @@ These parts of the stock firmware are not here.
 
 Analog Video Mode, Digital Video Mode, Vol/Pan Drive and Tape, Case Lights,
 Keyboard Lights, Bus Operation Mode, Burst Mode Patch, Parallel Cable to Drive A, Serial Bus Mode,
-Stream Debug to, Debug Stream Mode, Ulticopy Uses disk name.
+Stream Debug to, Debug Stream Mode, Ulticopy Uses disk name, Joystick Input (Swapped and the WASD values) and C= J,
+Paddle Override, the 1351 mouse in Mouse Mode, RAM Expansion Unit = GeoRAM Mode, the Speaker Mixer volumes except
+reSID8 1 and Socket 1.
+
+Settings with values that have no effect: reSID8 1 / 2 Address $DE00-$DFE0; System Mode PAL-60/L and NTSC-50/L
+(they run as PAL-60 and NTSC-50); Bus Sharing - ROMs Both (acts as Internal), Bus Sharing - Interrupts External
+(the same as Both).
 
 ## Only here
 
