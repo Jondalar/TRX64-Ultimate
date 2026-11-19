@@ -3,7 +3,8 @@
 TRX64 Ultimate is an alternative firmware for the **Commodore 64 Ultimate** and the
 **Ultimate 64 Elite II**: its own FPGA bitstream for the Artix-7 XC7A50T plus a modified
 Ultimate application (3.15) on top of it. Both machines use the same mainboard; one build
-installs on both. Machines with the XC7A100T are not supported.
+installs on both. The new C64C Ultimate and the C77, with the XC7A100T, are not supported for
+now; we are working on it.
 
 It is built as a hardware runtime for [C64RE](https://github.com/Jondalar/C64ReverseEngineeringMCP):
 the real C64, with the inside view a reverse engineer otherwise only gets from an emulator
@@ -12,7 +13,7 @@ With those you can enhance the functionality of the Firmware. My examples are in
 a cartridge tool for EF, EF3, GMOD2 and PTV Megabyter. You can dump and write cartridges within 1-2 minutes with the tool.
 
 So the focus of this is absolutely *not to use it to play games*, please use the original firmwares for this. I also recommend
-you use our (upcoming) MultiCore project if you want to tinker around with the capabilities of this firmware. This way
+you use our [MultiCore project](https://github.com/Jondalar/TRX64U-MultiCore) if you want to tinker around with the capabilities of this firmware. This way
 you will be able to easily switch between different versions. 
 
 ## Pages

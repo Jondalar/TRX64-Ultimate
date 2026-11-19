@@ -3,7 +3,9 @@
 A free, alternative firmware for the Ultimate 64 Elite II board and the Commodore 64 Ultimate
 (Artix-7 XC7A50T): its own FPGA bitstream plus the Ultimate application on top of it.
 
-This is *only* the firmware, *not* my MultiCore project. You can flash this to your C64U / UE2 board
+**Not supported for now:** the new C64C Ultimate and the C77, with the Artix-7 XC7A100T. We are working on it.
+
+This is *only* the firmware, *not* my [MultiCore project](https://github.com/Jondalar/TRX64U-MultiCore). You can flash this to your C64U / UE2 board
 and use it instead of the original firmware. MultiCore will offer this as a guest core also.
 
 Please be aware *DOING SO YOU ARE LEAVING THE WARRANTY SPACE OF COMMODORE & Gideon* !!! This is a choice you make.

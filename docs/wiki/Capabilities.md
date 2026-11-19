@@ -46,7 +46,7 @@ State of `main`. "Untested" means built, but not yet confirmed on the board.
 
 ## Not supported
 
-- Machines with the XC7A100T
+- Machines with the XC7A100T (the new C64C Ultimate, the C77), for now; we are working on it
 - Analog video out; HDMI resolutions other than 1080p
 - UltiSID, Copper, LED strip and lighting effects
 - Drive B, 1571, 1581
