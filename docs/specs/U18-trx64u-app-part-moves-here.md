@@ -1,7 +1,7 @@
 # U18 — trx64u's application part moves here: a library on MultiCore's app core
 
-**Status:** ACCEPTED (2026-11-20, D1-D5; every question answered). Nothing built; the requests to MultiCore in §3 are
-not sent.
+**Status:** ACCEPTED (2026-11-20, D1-D5). Under discussion: the trx64u tests leave MultiCore's pipeline (§3). Nothing
+built; the requests to MultiCore in §3 are not sent.
 **Repo:** TRX64-Ultimate (the trx64u library, its menu, its tests, the `.cor`); TREX/TRX64U-MultiCore (app core, SDK).
 **Number:** U18 (registry: the TODO table in `TODO.md`).
 **Milestone:** MultiCore T239 step B (T239.3), after their steps A (GitHub home, T239.1) and D (platform checkpoint,
@@ -71,6 +71,7 @@ and test here; P5 the documents (contract, ADR, U3).
 | S3 | P3 | One trxmon source: our firmware's trxmon and the trx64u library build from the same files | build of both; no copy left in MultiCore |
 | S4 | P4 | Our CI runs the trx64u menu and ops tests (golden ops, menu simulator) without a board | CI stage |
 | S5 | P5 | Contract, ADR-0057 and U3 say the same as T239 | `diff` of the two contract copies; review by Alex |
+| S6 | P4 | Lint, apptests and emu tests of trx64u run here as three stages of their own; MultiCore's pipeline runs none of them again | our CI; MultiCore's `ci/lint.sh`, `tests/coreapp` and `tests/coreapp/emu` hold no trx64u unit |
 
 ## §3 Decision
 
@@ -107,6 +108,28 @@ sub-apps load on demand), D2, D5.
   our firmware (D2). Price: the call tables between our own libraries (ring to monitor) are versioned by us; the loader
   carries the dependency (`needs`, at most 4) and the exports (`SvcLib find(name, min_version)`).
 
+### Under discussion: the trx64u tests leave MultiCore's pipeline (Alex, 2026-11-20)
+
+Alex (translated): "Lint, apptests and emu tests must then also run separately in the pipeline, *out* of MultiCore's big
+monolithic pipeline and over to you. MultiCore then does not have to do all of that again."
+
+What MultiCore's push pipeline runs for trx64u today (`ci/children.txt`, read in `main` 7213212a2):
+
+| Stage | Where | The trx64u part |
+|---|---|---|
+| Lint | `ci/lint.sh`, a step of the parent pipeline | "TRX64U menu record" (`tools/gen_menu_rec.py --check`, :80), "TRX64U menu against the UX concept" (`tools/check_menu_concept.py` on `tests/coreapp/golden/menu_c64.txt`, :84), the import `.cor` pack test (`tools/test_pack_import_cor.sh`, :75) |
+| Apptests | child `apptests` (`apptests.yml`, `ci/apptests.sh`, `tests/coreapp/run.sh`) | 18 test sources under `tests/coreapp` name trx64u. `tests/coreapp/cores.txt` has no trx64u group (its groups are files of `coreapp/cores/`; `trx64u_ops.cc` is in `coreapp/src`), so these units fall into the shared suite or `cross`: a trx64u change reruns MultiCore's shared core-app suite |
+| Emu | child `emu` (`emu.yml`, needs `images`), suite `coreapp_emu` | `tests/coreapp/emu/run.sh` and `library_n.sh` on `coreapp_trx64u.app` (T228 R25) in ue2emu with `--trx-io on`, job image `u64-build-env:emu-v0.7.0` |
+
+The wish: three stages of our own here (lint, apptests, emu), each keyed on our files; MultiCore's pipeline drops the
+trx64u units and does not run them again. Open:
+
+- Which of the 18 sources test trx64u itself (they move here) and which test the app core through trx64u (they stay with
+  MultiCore, against another core or a stub library).
+- What MultiCore still checks of the `.cor` we deliver (D1): that it loads (T239.3 S8), or nothing.
+- What we need from MultiCore for it: the test rig of `tests/coreapp` (stubs, fakes, rigs), the two menu tools, the
+  ue2emu image with TRX I/O, versioned with the SDK (R9).
+
 ### Open questions for Alex (one at a time)
 
 1. ~~What does our package deliver?~~ Answered: D1.
@@ -127,6 +150,9 @@ sub-apps load on demand), D2, D5.
 - **R6** The golden ops file, `descrec.py` and the menu simulator are in the SDK, so that our CI tests the menu.
 - **R7** An ABI major change is announced before release, so that trx64u is rebuilt before a package ships it.
 - **R8** Contract §1, §8 and §10 are rewritten together with this move; ADR-0057 point 6 is replaced.
+- **R9** (follows the discussion above) The test rig of `tests/coreapp`, `gen_menu_rec.py`, `check_menu_concept.py` and
+  the ue2emu job image with TRX I/O ship with the SDK; MultiCore's lint, apptests and emu drop the trx64u units once ours
+  run.
 
 ## §4 Out
 
@@ -144,3 +170,5 @@ Nothing decided yet.
 - **2026-11-20: D1-D5 answered** (Alex, one at a time): the complete `.cor` from here, U3 stands, our libraries implement
   the TRX service tables, one trxmon source here, three libraries (base, ring, monitor) and trex_crt as a sub-app. R4
   and R5 follow D3 and D5.
+- **2026-11-20: tests put under discussion** (Alex): lint, apptests and emu tests of trx64u leave MultiCore's pipeline
+  and run here as stages of their own. What MultiCore runs today is listed in §3; S6 and R9 added.
