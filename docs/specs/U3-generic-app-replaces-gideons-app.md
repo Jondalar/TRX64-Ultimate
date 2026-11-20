@@ -102,7 +102,8 @@ The full table with evidence (file:line in MultiCore) is the appendix.
 - **2026-11-20: where the code lives changes (MultiCore T239, T239.3).** trx64u's menu, its feature code, the monitor,
   the RPC server and the ring move from MultiCore's app core into a library built here against their SDK
   ([U18](U18-trx64u-app-part-moves-here.md)). The header's "Where the code lives" and ADR-0057 point 6 (we work in a
-  clone of MultiCore) describe the old split; whether this spec's goal stands is U18 question 2.
+  clone of MultiCore) describe the old split. The goal stands (U18 D2, Alex 2026-11-20): the standalone firmware becomes
+  the app core plus our libraries, Gideon's app stays only as `trx64g`.
 - **2026-11-04: the goal said plainly, and what it already costs** (Alex: *"Ich will langfristig auf MultiCore
   Only als App. Mit unseren eigene BDD tests e2e. Und bis dahin muss das möglichst störfrei und einfach bauen.
   Bistream+Gideon App."*). Nothing is built here yet; the decision it did produce is

@@ -1,7 +1,7 @@
 # U18 — trx64u's application part moves here: a library on MultiCore's app core
 
-**Status:** PROPOSED (2026-11-20). Nothing built; the questions in §3 are open, the requests to MultiCore in §3 are not
-sent.
+**Status:** ACCEPTED (2026-11-20, D1-D5; every question answered). Nothing built; the requests to MultiCore in §3 are
+not sent.
 **Repo:** TRX64-Ultimate (the trx64u library, its menu, its tests, the `.cor`); TREX/TRX64U-MultiCore (app core, SDK).
 **Number:** U18 (registry: the TODO table in `TODO.md`).
 **Milestone:** MultiCore T239 step B (T239.3), after their steps A (GitHub home, T239.1) and D (platform checkpoint,
@@ -66,7 +66,7 @@ and test here; P5 the documents (contract, ADR, U3).
 
 | # | Part | Scenario | Proof |
 |---|---|---|---|
-| S1 | P2 | `trx64u.u2a` builds here from the SDK alone, within the loader's limits, and the app core image built for the other cores holds no trx64u symbol | our CI; MultiCore T239.3 S8 |
+| S1 | P2 | The three libraries of D5 build here from the SDK alone, each within the loader's limits, and the app core image built for the other cores holds no trx64u symbol | our CI; MultiCore T239.3 S8 |
 | S2 | P2 | On the board trx64u starts, lists its menu, answers RPC on TCP 4312 from the start, runs a TREX CRT dump, a drive mount and Timewarp scrub | board step with Alex (the T228 §5 checklist plus RPC and Timewarp) |
 | S3 | P3 | One trxmon source: our firmware's trxmon and the trx64u library build from the same files | build of both; no copy left in MultiCore |
 | S4 | P4 | Our CI runs the trx64u menu and ops tests (golden ops, menu simulator) without a board | CI stage |
@@ -74,21 +74,46 @@ and test here; P5 the documents (contract, ADR, U3).
 
 ## §3 Decision
 
-Nothing decided here yet. Applies from MultiCore: T239 D9, D10, D13; T239.3 D1 (libraries declare their budget and load
-with the app core; sub-apps load on demand), D2, D5.
+Applies from MultiCore: T239 D9, D10, D13; T239.3 D1 (libraries declare their budget and load with the app core;
+sub-apps load on demand), D2, D5.
+
+- **D1 (Alex, 2026-11-20): our package delivers the complete `trx64u.cor`** until the registry exists. It is built here:
+  our bitstream, a pinned app core image, our libraries, the menu record and the files. MultiCore pins that one file.
+  Asked against "we deliver the pieces, MultiCore packs as today". Reason given with the question: it is already the
+  shape the registry needs (T239 D5, D9). Price: we pin MultiCore's app core version (R1).
+- **D2 (Alex, 2026-11-20): U3 and ADR-0057 stand.** The standalone TRX64 Ultimate firmware becomes the app core plus our
+  libraries; Gideon's app stays only as `trx64g`. Until then both UIs are kept here; the goal is one. Asked against
+  "the standalone firmware stays Gideon's app, trx64u is only the MultiCore core".
+- **D3 (Alex, 2026-11-20): our libraries implement `SvcTrx`, `SvcRing` and `SvcC64`** and export them through `SvcLib`;
+  MultiCore's app core keeps no TRX hardware code (D24). trex_crt and trxmon then find the tables through `lib->find`
+  instead of `api->trx` / `api->c64`. Both apps are ours. Asked against "the app core keeps them" (its price: a change of
+  our bitstream needs MultiCore again).
+- **D4 (Alex, 2026-11-20): one trxmon source, here.** Our firmware and the monitor library build from the same files;
+  the drift (`mon.h`, `ring.h`) is merged once, here, and MultiCore drops its copy with the move.
+- **D5 (Alex, 2026-11-20): one library per function, the cartridge tool stays a sub-app.** Alex asked: "Doesn't it make
+  sense to build one lib per function? One for the ring, one for the monitor, one for the cartridge tool?" (translated).
+  The cut:
+
+  | Part | Form | Holds |
+  |---|---|---|
+  | `trx64u` | library, the base | menu ops, settings (`u64cfg`), `SvcTrx`, `SvcC64` |
+  | ring | library | the ring code, `SvcRing` |
+  | monitor | library, needs ring | the trxmon engine, the monitor, the RPC server on TCP 4312 |
+  | trex_crt | sub-app | as today, loaded on demand |
+
+  The cartridge tool stays a sub-app, because T239.3 D1 loads sub-apps on demand into the free heap, so it costs memory
+  only while it runs. Ring and monitor are resident anyway: the ring records all the time, and the RPC server answers
+  from the start. The split saves no heap; it buys clear edges, every library well below 1 MiB, and the same pieces for
+  our firmware (D2). Price: the call tables between our own libraries (ring to monitor) are versioned by us; the loader
+  carries the dependency (`needs`, at most 4) and the exports (`SvcLib find(name, min_version)`).
 
 ### Open questions for Alex (one at a time)
 
-1. **Until the registry exists, what does our package deliver?** (a) the complete `trx64u.cor`, built here with a pinned
-   app core image, or (b) the pieces (`trx64u.u2a`, menu record, files), packed by MultiCore as today. Proposed: (a); it
-   is already the shape the registry needs (T239 D5, D9), and MultiCore pins one file.
-2. **Is trx64u the future firmware of TRX64 Ultimate itself (U3, ADR-0057), or only the MultiCore core?** If U3 stands,
-   our standalone firmware becomes app core + trx64u library, and Gideon's app stays only as `trx64g`. If not, we keep
-   two UIs here (Gideon's app and the trx64u menu) and every feature goes into both.
-3. **Who implements `SvcTrx`, `SvcRing` and `SvcC64` after the move?** (a) the trx64u library exports them
-   (`SvcLib`), (b) the app core keeps them. (a) follows D24, but it changes how trex_crt and trxmon find them.
-4. **One trxmon source here:** does MultiCore's copy go away, so that the two drifted headers are merged once, here?
-5. **One library or two** (trx64u and the monitor engine): decided after the size measurement (§5, prep 3).
+1. ~~What does our package deliver?~~ Answered: D1.
+2. ~~Is trx64u the future firmware of TRX64 Ultimate itself?~~ Answered: D2.
+3. ~~Who implements `SvcTrx`, `SvcRing` and `SvcC64`?~~ Answered: D3.
+4. ~~One trxmon source here?~~ Answered: D4.
+5. ~~One library or two?~~ Answered: D5 (three libraries and a sub-app).
 
 ### Requests to MultiCore for T239.3 (not sent; with Alex's go)
 
@@ -96,8 +121,9 @@ with the app core; sub-apps load on demand), D2, D5.
   outside (§1 item 5).
 - **R2** The library poll (T239.3 S3) is served before trx64u moves (P4); the RPC server needs it from the start.
 - **R3** The loader runs `.init_array`, or `lib.mk` refuses a library that has one (§1 item 3).
-- **R4** T239.3 P1 states who implements the TRX service tables after D2 (question 3).
-- **R5** The trx64u share of today's app image is measured against `U2A3_IMAGE_MAX` before P4 is cut.
+- **R4** T239.3 P1 records D3: the TRX service tables leave the app core and come from our libraries through `SvcLib`;
+  the base API keeps no `trx` / `c64` implementation for the monolith.
+- **R5** The trx64u share of today's app image is measured per library of D5 against `U2A3_IMAGE_MAX` before P4 is cut.
 - **R6** The golden ops file, `descrec.py` and the menu simulator are in the SDK, so that our CI tests the menu.
 - **R7** An ABI major change is announced before release, so that trx64u is rebuilt before a package ships it.
 - **R8** Contract §1, §8 and §10 are rewritten together with this move; ADR-0057 point 6 is replaced.
@@ -115,3 +141,6 @@ Nothing decided yet.
   3. the size of the trx64u parts in a map file of `coreapp`, built in a scratch copy;
   4. the build pieces missing here: SDK pin, app core image pin, `descrec.py`, `u2a_pack.py`, `cor_pack.py`, menu
      simulator, and the RISC-V `g++` that `lib.mk` expects.
+- **2026-11-20: D1-D5 answered** (Alex, one at a time): the complete `.cor` from here, U3 stands, our libraries implement
+  the TRX service tables, one trxmon source here, three libraries (base, ring, monitor) and trex_crt as a sub-app. R4
+  and R5 follow D3 and D5.
