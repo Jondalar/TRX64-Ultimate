@@ -319,6 +319,11 @@ Decisions: [ADR-0028 One integration branch integ-m1](../adr/0028-d10-one-integr
 
 Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newest first; undated text stays attached to the entry before it.
 
+- **2026-11-21, turbo's limit 2400 s -> 3600 s (Alex: "dann gleich 20 minuten mehr").** Run 2964 (`c392beed`, the I2C fix):
+  every stage green but Simulations, where `turbo` ended in its timeout after 2400 s with every check passing up to the cut
+  (in `upic`). It measured 2043 s alone on 2026-11-01 and 2235 s on 2026-11-13 (`8f1dc184`); since then U12 put the 6581's
+  mixing node and op-amp into reDIP, which the bench simulates. Run 2322 (2026-11-16) was cancelled inside `turbo`. Still
+  open: tier 2 into a nightly (2026-11-16).
 - **2026-11-16, tier 2 leaves the push (Alex).** Run 2322, the first on `main` with U16 and U12: lint, app, bitstream (cache),
   package and update files green within minutes, then the tier-2 benches held the queue and the builder's heavy lock: 9 short
   benches and `slot` (1862 s) passed, `ring_core` was running with three long ones still to come. Alex had the cancel done

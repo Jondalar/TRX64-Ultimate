@@ -43,7 +43,7 @@
 1|sock_audio|600|ci/sim_iv.sh tb_sock_audio.v
 2|steal|1800|cd designs/c64_basic/sim/steal && JOBS=3 sh build.sh && cd build/run && ../tb_steal run
 2|reu|1800|cd designs/c64_basic/sim/reu && JOBS=3 sh build.sh && cd build/run && ../tb_reu run
-2|turbo|2400|cd designs/c64_basic/sim/turbo && JOBS=3 sh build.sh && python3 run.py
+2|turbo|3600|cd designs/c64_basic/sim/turbo && JOBS=3 sh build.sh && python3 run.py
 2|slot|3600|cd designs/c64_basic/sim/slot && JOBS=3 sh build.sh && sh run.sh
 # ring_core: one entry for every tb_ring mode; two entries shared build/ and tb.state and raced (runs 567, 588)
 2|ring_core|3600|cd designs/c64_basic/sim/ring && JOBS=2 sh build.sh && cd build/run && ../tb_ring boot ../tb.state && ../tb_ring trace ../tb.state && ../tb_ring snap ../tb.state && ../tb_ring restore ../tb.state && ../tb_ring scrub ../tb.state
