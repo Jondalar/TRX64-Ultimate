@@ -11,7 +11,7 @@ type-3 FPGA, only when the flash bitstream's build stamp equals the running one)
 | Item | State | At Till's |
 |---|---|---|
 | Bitstream configures on a UE2, boots our app, REST (`trx64` block, caps) | built (CI, WNS +0.133 ns), **never on a board** | `sram`, `checks identity caps screen` |
-| Classic C64 keyboard on **P7** (T38 matrix) | built (`c64u_keyboard.v` scans a PCA9555 over I2C on all three buses, 0x21); P7 on a UE2 untested | `checks keyboard`: all 64 matrix keys, T+R+X chord bits, RUN/STOP+RESTORE |
+| Classic C64 keyboard on **P7** (T38 matrix) | built (`c64u_keyboard.v` scans a PCA9555 over I2C on the 1.8 V bus, 0x21 (on all three until MultiCore T253 D1, 2026-11-21)); P7 on a UE2 untested | `checks keyboard`: all 64 matrix keys, T+R+X chord bits, RUN/STOP+RESTORE |
 | **T50 unlock (T+R+X at power-on)** | **not built**: no `flash_unlock.v`, the T44 gate has no register 0x17. Its source (Bling UART) does not exist on a UE2; T50 Q5: a classic keyboard on P7 gets no unlock | cannot be tested. The keyboard check proves the three keys arrive as matrix bits 22/17/23, the precondition. A polled P7 matrix has no "keys held at power-on" problem (the Bling question E0 does not arise) |
 | T49 update package / on-device updater | not built | the flash is written from the Mac over JTAG (`flash`) |
 | **Datasette / tape port (T35)** | **not implemented**: `top.v` header "Tied off: tape"; `c64_core.v` leaves `tape_cass_sense_n`/`tape_cass_motor_n` open, `tape_play_toggle` 0, no tape data to CIA FLAG; the `C2N_*` pins exist only in `constraints/c64u.xdc` | `checks tape` measures that (PLAY sense, motor), expects "no". A real tape LOAD works only on **Gideon's stock firmware**: do it first (section 3, step 0) as the baseline |
