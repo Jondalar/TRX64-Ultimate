@@ -371,3 +371,12 @@ Nothing decided yet.
     resampler's 32-bit coefficients four bytes inside `sync.enter` / `leave`; the API TOML that declares them has no
     format yet (T213.1). `base_setting_changed` sets the paddle swap from "Joystick Input". `u64cfg_palette` now
     ignores a colour index of 16 or more (it overflowed `g_palette`). Image + bss 131,712 B.
+  - **Base round 3's points (MultiCore, by Alex's delegation; contract `e3bfcf2d`):** descrec takes `[[key]]` and
+    `[[window]]` with base 3.3, so our menu packs only after 3.3. Key rows: `value`, `status`, `status_ok`, `close`
+    confirmed, plus `do = "op" | "decline" | "swallow"` and `when = "<state>"` ("!" negates); the monitor's declines and
+    Timewarp's swallow (`codes = [32, 126]`) move to our table too, generic code keeps no KS_MONITOR / KS_TIMELINE row.
+    `[[window]]` (name, address, size) is compiled into the description record; the base refuses a window over a
+    register it drives (power, RESTORE, HDMI PLL reset, keyboard scan, I2C, MDIO, USB hub reset, case LED select), so
+    our u64 block is declared as the runs we write; the case LED select is set through `board.case_led_select(v)`; both
+    palettes are ours. `bus_wr` / `bus_rd` take the whole bus-side I/O block (0x00-0x2E). After start,
+    `base_setting_changed` runs once per base-owned setting with its own key: the swap is written on "Joystick Input".
