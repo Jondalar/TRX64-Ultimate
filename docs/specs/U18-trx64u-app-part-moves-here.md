@@ -319,3 +319,8 @@ Nothing decided yet.
     per library mapping all 106 pending calls) is copied to `software/trx64u/contract/`; `include/base33.h` gives one
     accessor per new `LibApi` group, undefined until an SDK carries 3.3. The engine starts in an operation `ring.start`
     called from our core hook `start`; `menu_closed` calls `monitor.release` and `ring.unfreeze`.
+  - **Monitor on the 3.3 names:** `pending_api.h` is gone; the link is open only on `b33_sync`, `b33_sys`, `b33_ctx`.
+    The F4 screen is the export "textgrid" (the menu node gets `grid = "textgrid"`); `monitor.release` is an operation;
+    `plat_media` reads `ctx.media_source` for the slots "Cartridge" and "Drive A" (MultiCore's `MountSlots`, their
+    c64.cc:619; no drive B) and cuts the spec to the path. S13: no permanent heap, peak 50,240 B (one RPC client while
+    gated); image 204,040 B, image + bss 675,504 B (64.4 % of 1 MiB).

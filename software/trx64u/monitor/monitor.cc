@@ -224,9 +224,11 @@ void mon_run(const char *line)
 // ---- the rows ---------------------------------------------------------------------------------------------------------------------------------------------------
 void mon_render(void)
 {
-    if (!g_open) {
+    if (!g_open) {                              // no session: no rows, and nothing of the last session's screen
         s_scr.cols = UI_WIDE_COLS;
         s_scr.rows = 0;
+        s_scr.blank_rows = 0;
+        s_scr.cursor_x = s_scr.cursor_y = 0;
         return;
     }
     ui_render(&s_ui, &s_scr);

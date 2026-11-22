@@ -24,11 +24,11 @@ void mon_serve(void);
 bool mon_claim(void);
 // Called each pass of the menu loop (monitor.tick): the stops that came, the run-tos that finished, the live log. True when the screen changed.
 bool mon_tick(void);
-// The menu closes (any way): the debugger's hold is given back, breakpoints and observers are disarmed, the next open starts a new session. MultiCore's
-// main loop called it; base 3.1 has no hook for it.
+// The menu closes (any way): the debugger's hold is given back, breakpoints and observers are disarmed, the next open starts a new session. The
+// operation monitor.release (lib_monitor.cc), which the base library's core hook menu_closed calls.
 void mon_release(void);
-// The window, read by the base's monitor screen (core hooks of 3.3; nothing in base 3.1 calls them): mon_render() builds the rows of the screen as ui.c has
-// them now; the accessors read them.
+// The window, the export "textgrid" (lib_monitor.cc) the base draws for a node with the layout "terminal": mon_render() builds the rows of the screen as
+// ui.c has them now; the accessors read them.
 void mon_render(void);
 int mon_cols(void);
 int mon_rows(void);

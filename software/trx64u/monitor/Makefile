@@ -1,6 +1,7 @@
 # The monitor library (U18 D5): trxmon's engine, the same files as the firmware's trxmon (D4, copied into trxmon/ by build.sh), and its platform:
-# lib_monitor.cc (the entry, the operations, the plat_* calls), monitor.cc (the session, trxmon's trx table, the F4 screen) and monsrv.cc (the srv_* calls,
-# the RPC server on TCP 4312). Built by ../build.sh, which passes SDK, APPSDK and APPLOADER.
+# lib_monitor.cc (the entry, the operations, the plat_* calls, the export "textgrid" of the F4 screen), monitor.cc (the session, trxmon's trx table, the
+# F4 screen's rows) and monsrv.cc (the srv_* calls, the RPC server on TCP 4312). Built by ../build.sh, which passes SDK, APPSDK, APPLOADER and TRX_INC
+# (include/ with base33.h, contract/: only lib_monitor.cc and monsrv.cc, which see the SDK, may include them).
 LIB_NAME = monitor
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.1 ring>=1

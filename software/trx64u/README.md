@@ -14,7 +14,8 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 ## State
 
 The three libraries compile against base 3.1 (SDK 0.1.0); each link is open only on the calls in its `pending_api.h`
-(base 3.2 / 3.3 calls and MultiCore's shared libraries; ring 47, monitor 3, base 59).
+(base 3.2 / 3.3 calls and MultiCore's shared libraries; ring 47, base 59). The monitor builds to MultiCore's 3.3
+contract (`contract/`): its link is open only on the accessors of `include/base33.h` (`b33_sync`, `b33_sys`, `b33_ctx`).
 
 The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
 (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from; `coreapp/src` and `coreapp/cores/trx64u/menu.toml`), and

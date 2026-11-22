@@ -1,12 +1,14 @@
-// The entry of the monitor library (U18 D5) and its platform. lib_register hands the base the monitor's operations, its state value and its poll; the
-// platform calls trxmon's engine makes (mach.h, rpc.h: what trxmon's main.c gives the firmware's trxmon) go to the base's tables (api->sys, api->mem,
-// api->fs, api->ops). PROVENANCE: monitor.cc of MultiCore's core application (TRX64U-MultiCore 3b8e2955, coreapp/src): its operations, monitor_register()
-// and the plat_* calls moved here.
+// The entry of the monitor library (U18 D5) and its platform. lib_register hands the base the monitor's operations, its state value, its poll and its
+// export "textgrid" (the F4 screen); the platform calls trxmon's engine makes (mach.h, rpc.h: what trxmon's main.c gives the firmware's trxmon) go to the
+// base's tables (api->sys, api->mem, api->fs, api->ops) and to the base 3.3 groups (base33.h: sync, ctx, the members appended to SvcSys).
+// PROVENANCE: monitor.cc of MultiCore's core application (TRX64U-MultiCore 3b8e2955, coreapp/src): its operations, monitor_register() and the plat_*
+// calls moved here.
 #include "libapi.h"
 #include "libfmt.h"
+#include "base33.h"
+#include "textgrid.h"
 #include "monitor.h"
 #include "monlib.h"
-#include "pending_api.h"
 
 extern "C" {
 #include "trxmon/mach.h"
@@ -57,7 +59,16 @@ void monlib_log(const char *text)
 // ---- what trxmon's main.c gave the engine (mach.h, rpc.h) ------------------------------------------------------------------------------------------------------
 extern "C" {
 uint32_t plat_ms(void) { return g_api->sys->ms(); }
-void plat_yield(void) { sys_yield(); }
+
+// sys.yield (base 3.3). A base without it gets nothing here: sleep_ms(0) sleeps a whole 5 ms tick, and the waits that yield (mach.c wait_status) sleep
+// one PLAT_SLEEP_MIN_MS every 20 ms of waiting on their own (breathe).
+void plat_yield(void)
+{
+    const SvcSysAdd *s = b33_sys();
+    if (s && s->yield) {
+        s->yield();
+    }
+}
 void plat_sleep(uint32_t ms) { g_api->sys->sleep_ms(ms < PLAT_SLEEP_MIN_MS ? PLAT_SLEEP_MIN_MS : ms); }
 
 // A file through the base's file table: reads and writes at the position the calls before left. "w" makes the file new and empty first: SvcFs opens only
@@ -194,25 +205,68 @@ int plat_config(const char *, const char *item, char *buf, int len)
     return b.len;
 }
 
-// The base has no call for these: no file behind a medium, no firmware version (as MultiCore's monitor.cc answered).
-int plat_media(int, char *, int) { return 0; }
-const char *plat_firmware_git(void) { return ""; }
-const char *plat_firmware_version(void) { return ""; }
+// The file behind a medium (rpc.h: role 0 cartridge, 1 drive A, 2 drive B; the full path and its length, 0 when the slot holds nothing). The base
+// answers by the slot's name in the core's descriptor (ctx.media_source). The names are the mount slots of MultiCore's C64 descriptor (c64.cc,
+// slot_names: "Drive A", "Cartridge", T239.3 boundary d6afb393); it has no drive B, so role 2 answers 0. media_source gives the engine's spec, which may
+// carry a word before the path ("ro /usb0/x.d64"): the path starts at the first '/'.
+static const char *const s_media_slot[] = { "Cartridge", "Drive A" };
+
+int plat_media(int role, char *buf, int len)
+{
+    const SvcCtx *c = b33_ctx();
+    if (role < 0 || role >= (int)(sizeof(s_media_slot) / sizeof(s_media_slot[0])) || !c || !c->media_source || len <= 0) {
+        return 0;
+    }
+    char spec[FS_PATH_MAX + 16];
+    if (!c->media_source(s_media_slot[role], spec, (int)sizeof(spec))) {
+        return 0;
+    }
+    const char *p = spec;
+    while (*p && *p != '/') {
+        p++;
+    }
+    int n = 0;
+    while (p[n] && n < len - 1) {
+        buf[n] = p[n];
+        n++;
+    }
+    buf[n] = 0;
+    return n;
+}
+
+// The application image's version and the short hash of its commit (sys.app_version, sys.app_git; base 3.3). "" on a base without them (rpc.h).
+const char *plat_firmware_git(void)
+{
+    const SvcSysAdd *s = b33_sys();
+    return s && s->app_git ? s->app_git() : "";
+}
+
+const char *plat_firmware_version(void)
+{
+    const SvcSysAdd *s = b33_sys();
+    return s && s->app_version ? s->app_version() : "";
+}
 }
 
 // ---- the engine, one task at a time -----------------------------------------------------------------------------------------------------------------------------
-// trxmon's state, the session and the RPC holder are used from two tasks: the library's poll (monitor.serve), which the base runs on a task of its own above
-// the menu's and under the core lock (run.cc), and the menu, which calls the monitor's operations on its own task without that lock (menukeytab.cc: KF_DIRECT
-// for monitor.key). The poll skips its pass while the menu has the engine; the menu sleeps until the poll's pass is over. sync_enter/sync_leave guard only
-// the flag.
+// trxmon's state, the session and the RPC holder are used from two tasks: the library's poll (monitor.serve), which the base runs on a task of its own
+// under the core lock, with the menu open too (when_frozen), and the menu's task, which calls the monitor's operations (monitor.key runs there without the
+// core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and draws the export "textgrid". The poll and the
+// textgrid's render skip their pass while another task has the engine; the operations sleep until it is free. sync.enter / sync.leave guard only the
+// flag; a base without the group (before 3.3) has no critical section to offer, and the flag is then tested and set unguarded.
 static volatile bool s_engine;
 
 static bool engine_try(void)
 {
-    sync_enter();
+    const SvcSync *s = b33_sync();
+    if (s) {
+        s->enter();
+    }
     bool got = !s_engine;
     s_engine = true;
-    sync_leave();
+    if (s) {
+        s->leave();
+    }
     return got;
 }
 
@@ -283,8 +337,20 @@ static int op_open(CoreCtx *, const OpArgs &, OpOut &o)
     return OPE_OK;
 }
 
-// The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass, one
-// tick apart while the menu is closed). The base runs a library's poll only while the machine is not frozen (run.cc passes when_frozen false).
+// The menu closed (any way): the base library's core hook menu_closed calls this, where MultiCore's run.cc called mon_release. It runs on the menu task
+// without the core lock while the poll (when_frozen) may be in a pass: it waits for the engine like the other operations.
+static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
+{
+    o.msg[0] = 0;
+    engine_take();
+    mon_release();
+    engine_give();
+    return OPE_OK;
+}
+
+// The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass).
+// It is declared when_frozen, so a base that honours the flag (3.3) runs it with the menu open too; the base of SDK 0.1.0 runs it only while the machine
+// is not frozen.
 static int op_serve(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
@@ -303,9 +369,26 @@ static const LibOpDecl s_ops[] = {
     { "monitor.open", 0, 0, op_open },
     { "monitor.tick", 0, 0, op_tick },
     { "monitor.serve", 0, 0, op_serve },
+    { "monitor.release", 0, 0, op_release },
 };
 static const LibStateDecl s_states[] = {
     { "monitor.wants_stop", st_wants_stop },
+};
+
+// ---- the export "textgrid" (major 1, textgrid.h): the F4 screen ----------------------------------------------------------------------------------------------
+// The base draws it on its UI task, the menu's: render builds the rows from the engine and the other calls read what it built (s_scr of monitor.cc, which
+// only render and monitor.tick write, both on that task). render must not block: while the poll has the engine it builds nothing, the rows and sig stay
+// those of the last build, and the next redraw tries again. The row attributes are trxmon's UA_* (ui.h), the same numbers as TG_*.
+static void tg_render(void)
+{
+    if (engine_try()) {
+        mon_render();
+        engine_give();
+    }
+}
+
+static const TextGrid s_grid = {
+    sizeof(TextGrid), tg_render, mon_cols, mon_rows, mon_line, mon_attr, mon_blank_rows, mon_cursor, mon_sig,
 };
 
 // lib.ld puts this section first, so the entry is at offset 0 of the image
@@ -326,6 +409,8 @@ extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
     out->nstates = (int)(sizeof(s_states) / sizeof(s_states[0]));
     out->poll.op = "monitor.serve";
     out->poll.period_ms = 5;
-    out->poll.when_frozen = true;                   // the RPC answers while the menu holds the machine (base 3.1 does not honour it yet: run.cc)
+    out->poll.when_frozen = true;                   // the RPC answers while the menu holds the machine (base 3.3)
+    out->exports = &s_grid;                         // base 3.1: one table per library, found by the library's name; 3.2 lists it as "textgrid", major 1
+    out->exports_size = sizeof(s_grid);
     return 0;
 }
