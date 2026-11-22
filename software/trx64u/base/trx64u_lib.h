@@ -136,7 +136,8 @@ static inline void c64u_win_wr(int w, uint32_t off, uint8_t v)
 // An operation of the registry by name (api->ops->call), its message copied to msg. Returns its OpErr (OPE_NOT_FOUND: no library has it).
 int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
 
-// ---- the exports of MultiCore's shared libraries (api->lib->find(name, 1, &size)): found at the first use and kept, looked for again while not found.
+// ---- the exports of MultiCore's shared libraries (api->lib->find(name, U2A3_VERSION(1, 0), &size), major 1): found at the first use and kept, looked
+// for again while not found.
 // x_table answers the table when its size covers the member at `off` and that member is set; else null. X_GET names the member.
 enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk"
 const void *x_table(int which, uint32_t off);

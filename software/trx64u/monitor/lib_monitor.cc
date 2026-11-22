@@ -40,10 +40,10 @@ int monlib_trx_video(void *v)
     return x && x->video ? x->video((u2p_video_t *)v) : OPE_UNSUPPORTED;
 }
 
-const void *monlib_ring(uint32_t *size)
+const void *monlib_find(const char *name, uint32_t major, uint32_t *size)
 {
     *size = 0;
-    return g_api->lib && g_api->lib->find ? g_api->lib->find("ring", 1, size) : 0;
+    return g_api->lib && g_api->lib->find ? g_api->lib->find(name, U2A3_VERSION(major, 0), size) : 0;
 }
 
 void monlib_log(const char *text)
@@ -336,7 +336,8 @@ static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
 
 // The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass),
 // and the steps of a ring file verb the screen queued. It is declared when_frozen, so a base that honours the flag (3.3) runs it with the menu open too;
-// the base of SDK 0.1.0 runs it only while the machine is not frozen, and a queued verb then waits until the menu closes, which drops it.
+// a base before 3.3 (SDK 0.2.0's 3.2 too) does not read the flag and runs it only while the machine is not frozen, and a queued verb then waits until the
+// menu closes, which drops it.
 static int op_serve(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
@@ -408,6 +409,12 @@ static const TextGrid s_grid = {
     sizeof(TextGrid), tg_render, mon_cols, mon_rows, mon_line, mon_attr, mon_blank_rows, mon_cursor, mon_sig, tg_enter, tg_tick,
 };
 
+// The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
+// library when lib_register does not return each of them.
+static const LibExportDecl s_exports[] = {
+    { "textgrid", 1, &s_grid, sizeof(s_grid) },
+};
+
 // lib.ld puts this section first, so the entry is at offset 0 of the image
 #ifdef __riscv
 #define LIB_ENTRY_ATTR __attribute__((visibility("default"), section(".text.lib_register")))
@@ -427,7 +434,7 @@ extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
     out->poll.op = "monitor.serve";
     out->poll.period_ms = 5;
     out->poll.when_frozen = true;                   // the RPC answers while the menu holds the machine (base 3.3)
-    out->exports = &s_grid;                         // base 3.1: one table per library, found by the library's name; 3.2 lists it as "textgrid", major 1
-    out->exports_size = sizeof(s_grid);
+    out->export_list = s_exports;
+    out->nexport_list = (int)(sizeof(s_exports) / sizeof(s_exports[0]));
     return 0;
 }

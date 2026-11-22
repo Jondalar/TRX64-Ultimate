@@ -1,7 +1,7 @@
 // The operations and states of the TRX64U menu (menu.toml) that are not the C64U's hardware registers (u64cfg.cc is those): the C64's cartridge port, REU and
 // ROM settings, the machine's own actions. The register sequences of the cartridge port are Gideon's (vendor/gideon/software/io/c64/c64.cc
 // ConfigureU64SystemBus and set_emulation_flags, GPL-3.0), the fast reset patch is his (c64.cc fastresetPatch).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read through the settings group
+// U18: built as the trx64u library against the TRX64 SDK (base 3.2 and the groups of base 3.3). The settings are read through the settings group
 // (setting.cc), the files through api->fs, the TRX block through api->trx, the C64's memory window through api->c64, the running core's state, the REU's
 // memory, the C64U's register blocks (offsets in c64u_regs.h) and the board through the 3.3 groups ctx, io and board (base33.h), the cartridge port,
 // drive A, the command interface, the SID file and the temp disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the

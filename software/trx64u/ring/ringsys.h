@@ -18,7 +18,7 @@
 // Set by lib_register (lib_ring.cc) before anything else runs.
 extern const LibApi *g_api;
 
-// ---- the exports of MultiCore's shared libraries (SvcLib::find(name, 1, &size)) -----------------------------------------------------------------------
+// ---- the exports of MultiCore's shared libraries (SvcLib::find(name, U2A3_VERSION(1, 0), &size), major 1) --------------------------------------------
 // Looked up at their first use and kept once found; while one is not loaded every use asks again.
 enum RExportId { RX_C64CART, RX_CBM1541, RX_UCI, RX_COUNT };
 // The table of export `id` when it is loaded, its size covers the member at `off` (`len` bytes) and that member is set; else null.

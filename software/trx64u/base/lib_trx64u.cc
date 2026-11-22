@@ -79,7 +79,7 @@ const void *x_table(int which, uint32_t off)
     }
     if (!g_x[which].t && g_api->lib) {
         uint32_t n = 0;
-        const void *t = g_api->lib->find(g_x[which].name, 1, &n);
+        const void *t = g_api->lib->find(g_x[which].name, U2A3_VERSION(1, 0), &n);
         if (t && n >= sizeof(uint32_t)) {
             uint32_t own = *(const uint32_t *)t;
             g_x[which].size = own < n ? own : n;
@@ -183,6 +183,12 @@ static void hook_base_setting_changed(const char *key)
 
 // init, release, warm_reset, cold_start, media_flush, media_pending come with c64.cc (the C64 descriptor's hooks), which moves into this library later.
 static const CoreHooks core_hooks = { sizeof(CoreHooks), 0, 0, 0, 0, 0, 0, hook_start, hook_menu_closed, hook_base_setting_changed };
+
+// The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
+// library when lib_register does not return each of them.
+static const LibExportDecl exports[] = {
+    { "corehooks", 1, &core_hooks, sizeof(core_hooks) },
+};
 
 // ---- the record -----------------------------------------------------------------------------------------------------------------------------------
 static const ArgSpec value_arg[] = { ARG_INT("value", -2000, 2000) };
@@ -313,7 +319,7 @@ static const LibStateDecl states[] = {
 #define LIB_ENTRY_ATTR
 #endif
 // The groups every handler uses (sys, mem, ops, fs) have to be there; api->trx, api->c64, the 3.3 groups and the exports are read at each use. The core
-// hooks are the library's export (one per library in 3.1; 3.2 gives it the name "corehooks").
+// hooks are the export "corehooks", major 1.
 extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
 {
     if (api->abi_major != U2A_ABI_MAJOR || !api->sys || !api->mem || !api->ops || !api->fs) {
@@ -324,7 +330,7 @@ extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
     out->nops = (int)(sizeof(ops) / sizeof(ops[0]));
     out->states = states;
     out->nstates = (int)(sizeof(states) / sizeof(states[0]));
-    out->exports = &core_hooks;
-    out->exports_size = sizeof(core_hooks);
+    out->export_list = exports;
+    out->nexport_list = (int)(sizeof(exports) / sizeof(exports[0]));
     return 0;
 }

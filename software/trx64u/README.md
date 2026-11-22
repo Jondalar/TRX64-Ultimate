@@ -13,7 +13,8 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 
 ## State
 
-The three libraries build to MultiCore's base 3.3 contract (`contract/`, their `t239.3-boundary` headers) on SDK 0.1.0;
+The three libraries build to MultiCore's base 3.3 contract (`contract/`, their `t239.3-boundary` headers) on SDK 0.2.0
+(base 3.2: named exports, budgets, the constructor check);
 every file compiles, and each link is open only on the accessors of `include/base33.h`, which an SDK with base 3.3
 will fill. Nothing has run yet.
 

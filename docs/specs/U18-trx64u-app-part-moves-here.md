@@ -425,3 +425,13 @@ Nothing decided yet.
     from a snapshot the poll refreshes (at most 5 ms old). One rule: register calls only under the lock, no exception
     list. RingSteps is its own named export "ringsteps" 1 (`LIB_EXPORTS = ring=1 ringsteps=1`); "ring" stays exactly
     the firmware's `u2p_ring_api_t`; a second table inside one export is not an append.
+  - **SDK 0.2.0 (base 3.2):** pinned to the tarball as it stands (sha256 `f7383921…`, built from MultiCore's `beee9b09`;
+    the `1bb8532d…` build named first was replaced minutes later and no longer exists). Named exports: base
+    `corehooks=1`, ring `ring=1 ringsteps=1` ("ring" exactly the firmware's `u2p_ring_api_t`), monitor `textgrid=1`;
+    every library needs `base>=3.2`; `find` asks for major 1 (3.2's `min_version` is `U2A3_VERSION(major, minor)`, our
+    `find(name, 1, ...)` asked for major 0). Budgets from S13: base keep 0 / peak 66,044, ring keep 1,486,893 / peak
+    5,836,429, monitor keep 0 / peak 50,240, image figures measured from the packs (exact: re-measure when 3.3 fills the
+    accessors). Our hidden.h workaround is gone (lib.mk includes it for C++ now). The constructor check passes; all three
+    pack with a stub of the 3.3 accessors (.u2a: base 80,976 B, ring 120,732 B, monitor 209,540 B). Open: a ring dump
+    or load run from the monitor (F4, RPC) is charged to the monitor's budget, since 3.2 charges a block to the library
+    whose operation runs on the task.

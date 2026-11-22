@@ -3,7 +3,7 @@
 // setCpuSpeed, setLedSelector, auto_mirror, SetResampleFilter, the palette programming; the register addresses are vendor/gideon/software/system/u64.h.
 // What is different: the values come from this application's settings (menu.toml groups video, audio, sid, input, expert) instead of a ConfigStore, and
 // the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read and written through the settings
+// U18: built as the trx64u library against the TRX64 SDK (base 3.2 and the groups of base 3.3). The settings are read and written through the settings
 // group (setting.cc), the SID chips through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx), the keys, the SID
 // sockets' supply, the video PLL, the picture layer, the case LEDs and the ESP32 through the 3.3 groups io and board (base33.h); the C64U's registers
 // through the io group's blocks and register windows (trx64u_lib.h), their offsets and window names in c64u_regs.h, the windows in desc.toml.

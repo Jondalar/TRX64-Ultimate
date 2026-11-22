@@ -1,5 +1,6 @@
 // The ring library's helpers over the base (ringsys.h).
 #include "ringsys.h"
+#include "libfmt.h"
 
 void *r_calloc(uint32_t n, uint32_t size)
 {
@@ -367,7 +368,7 @@ const void *r_export(RExportId id, uint32_t off, uint32_t len)
     }
     if (!rx_table[id] && g_api->lib) {
         uint32_t size = 0;
-        const void *t = g_api->lib->find(rx_name[id], 1, &size);
+        const void *t = g_api->lib->find(rx_name[id], U2A3_VERSION(1, 0), &size);
         if (t && size >= sizeof(uint32_t)) {
             rx_size[id] = size;
             rx_table[id] = t;

@@ -31,18 +31,20 @@ static u2p_trx_api_t s_trx;
 
 static int trx_video(u2p_video_t *v) { return monlib_trx_video(v); }
 
-// The ring library's dumps in steps (ring_steps.h), right after its ring table at the offset that table's size states, handed to trxmon (ring.h): the
-// screen's file verbs then run from the poll (mon_serve), one step per pass under the core lock. n: the bytes of the export.
+// The ring library's dumps in steps, its export "ringsteps" (ring_steps.h), handed to trxmon (ring.h): the screen's file verbs then run from the poll
+// (mon_serve), one step per pass under the core lock. Without the export, or with a table that does not reach `drop` (the size find reports and the
+// table's own size both have to) or lacks a member, trxmon gets none and runs every verb whole where it is typed.
 static ring_steps_t s_steps;
 
-static void steps_table(const u2p_ring_api_t *r, uint32_t n)
+static void steps_table(void)
 {
-    uint32_t at = r->size;
-    if ((at & 3) || n < at + sizeof(uint32_t)) {
+    uint32_t n = 0;
+    const RingSteps *x = (const RingSteps *)monlib_find(RING_STEPS_EXPORT, RING_STEPS_MAJOR, &n);
+    const uint32_t need = offsetof(RingSteps, drop) + sizeof(x->drop);
+    if (!x || n < need || x->size < need) {
         return;
     }
-    const RingSteps *x = (const RingSteps *)((const char *)r + at);
-    if (x->size < offsetof(RingSteps, drop) + sizeof(x->drop) || n - at < x->size) {
+    if (!x->begin || !x->step || !x->pct || !x->bytes || !x->entries || !x->drop) {
         return;
     }
     s_steps.begin = x->begin;
@@ -71,14 +73,14 @@ static void trx_table(void)
     s_trx.video = trx_video;
     // The ring as trxmon's hw_trx.c reads it: null without the engine. The table must reach `load`: hw_trx.c calls status ... load without asking for them.
     uint32_t n = 0;
-    const u2p_ring_api_t *r = (const u2p_ring_api_t *)monlib_ring(&n);
+    const u2p_ring_api_t *r = (const u2p_ring_api_t *)monlib_find("ring", 1, &n);
     if (r && n >= offsetof(u2p_ring_api_t, load) + sizeof(r->load) && U2P_HAS(r, load) && r->status) {
         u2p_ring_status_t st;
         memset(&st, 0, sizeof(st));
         r->status(&st);
         if (st.present) {
             s_trx.ring = r;
-            steps_table(r, n);
+            steps_table();
         }
     }
 }

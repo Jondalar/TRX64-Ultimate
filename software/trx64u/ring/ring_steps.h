@@ -1,12 +1,15 @@
-// The dumps in steps (trx_c64re.h trx_dump_*) as the ring library exports them after the firmware's ring table (U18). The export "ring" (major 1,
-// ring_api.cc) is the firmware's u2p_ring_api_t (app_api.h) as the firmware lays it out, and this table right after it: at the byte offset the ring
-// table's own first member `size` states, so a ring table that grows in a later app_api.h moves this one along and the firmware's layout stays the
-// firmware's. A reader takes it when the size SvcLib::find gives reaches past that offset by this table's `size`. `size` first, members only appended.
-// Read by the monitor library (monitor.cc), whose poll holds the core lock one step at a time; C and C++.
+// The dumps in steps (trx_c64re.h trx_dump_*) as the ring library exports them (U18): the export "ringsteps", major 1 (ring_api.cc, lib_ring.cc), a
+// table of its own beside the export "ring", which is the firmware's u2p_ring_api_t (app_api.h) and nothing else. A reader takes it with
+// api->lib->find(RING_STEPS_EXPORT, U2A3_VERSION(RING_STEPS_MAJOR, 0), &size) and uses a member only when both that size and the table's own `size`
+// cover it. `size` first, members only appended within the major. Read by the monitor library (monitor.cc), whose poll holds the core lock one step at a
+// time; C and C++.
 #ifndef RING_STEPS_H
 #define RING_STEPS_H
 
 #include <stdint.h>
+
+#define RING_STEPS_EXPORT "ringsteps"
+#define RING_STEPS_MAJOR 1
 
 #ifdef __cplusplus
 extern "C" {

@@ -23,9 +23,10 @@ bool monlib_trx(MonTrxBase *t);
 // api->trx->video into v, a u2p_video_t: svctab.h and app_api.h lay it out alike (20 bytes; lib_monitor.cc and monitor.cc both assert it). < 0: the base has
 // no such call.
 int monlib_trx_video(void *v);
-// The ring library's export, api->lib->find("ring", 1): the firmware's u2p_ring_api_t (app_api.h), then the dumps in steps (ring/ring_steps.h); *size
-// bytes in all. Null: no ring library.
-const void *monlib_ring(uint32_t *size);
+// A table a loaded library exports under `name` at `major` or a later major (api->lib->find(name, U2A3_VERSION(major, 0), size)); *size is the bytes
+// of the table. monitor.cc takes the ring library's two: "ring", the firmware's u2p_ring_api_t (app_api.h), and "ringsteps", the dumps in steps
+// (ring/ring_steps.h). Null: nothing exports that name.
+const void *monlib_find(const char *name, uint32_t major, uint32_t *size);
 // One line into the base's log, without a newline (the base prints "[lib] " before it and a newline after it).
 void monlib_log(const char *text);
 

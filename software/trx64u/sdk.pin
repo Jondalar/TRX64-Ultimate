@@ -1,10 +1,11 @@
 # The TRX64 SDK that software/trx64u builds against (U18). fetch_sdk.sh checks the tarball against this file and
 # unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore (T239.3).
-sdk_version=0.1.0
-sdk_tarball=trx64-sdk-0.1.0.tar.gz
-sdk_tarball_sha256=5a91e935227d25706ef66d9faae2598389882e93a83c6a0a1eec77f1e6d39aac
-source_branch=t239.3-sdk
-source_commit=3b8e2955
-base_api=3.1
+sdk_version=0.2.0
+sdk_tarball=trx64-sdk-0.2.0.tar.gz
+sdk_tarball_sha256=f7383921ddd682cfe90817e912743a4f75d15810a12e5c05f121f04ab38a9759
+source_branch=t239.3
+source_commit=beee9b09
+base_api=3.2
 abi_major=3
-coreapp_sha256=126b38d11654148351b30584ccd4228d8a4e09750a12051f87a6cc38356bbc36
+api_headers_sha256=da3811e51230c29e52fd338f2e8bbbee8db70746b5d37311a4da7f95de7fa25d
+coreapp_sha256=d533434b73aeef72a7757fdeb4828a5a1c1acc7af5557f5723e02936e89161cb

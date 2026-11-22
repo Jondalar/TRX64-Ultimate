@@ -5,15 +5,16 @@
 # setlists.h.
 LIB_NAME = trx64u
 LIB_VERSION = 1
-LIB_NEEDS = base>=3.1
+LIB_NEEDS = base>=3.2
 LIB_SRCS = lib_trx64u.cc trx64u_ops.cc u64cfg.cc setting.cc libc_extra.c
 LIB_LIBC = 1
 LIB_INC = $(TRX_INC)
+# The named exports of lib_register's export_list (lib_trx64u.cc): the core hooks.
+LIB_EXPORTS = corehooks=1
+# The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as packed on 2026-11-23,
+# the base 3.3 accessors stubbed (56 bytes); heap: no block held while idle, at most 66,044 bytes at once (U18 S13); the counts: lib_register's record.
+LIB_BUDGET = image=131808 heap_keep=0 heap_peak=66044 ops=47 states=51 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
 include $(SDK)/mk/lib.mk
-
-# lib.mk gives hidden.h (every declaration hidden) only to the C files. A C++ file that reads a variable of another file (g_api) would then reach it through
-# the global offset table, which lib.ld discards and the loader does not fill: the link fails on `.got.plt`.
-LIB_CXXFLAGS += -include $(SDK_HIDDEN)
 
 # setting.cc's lists of the values of every choice setting, from the core's menu.toml (setlists.py)
 setlists.h: menu.toml setlists.py
