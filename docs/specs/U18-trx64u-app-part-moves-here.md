@@ -218,3 +218,14 @@ Nothing decided yet.
     trx64u. Today's `SvcC64` plus `dma_read_frozen`, `cart_preference` and `reset` (from `SvcTrx.reset_c64`).
   - MultiCore's cartridge module (`c64_cart.cc`, D12) drives our bitstream's cartridge engine through its register map,
     not through `SvcC64`; for a second core it needs the module's base address from the core's API TOML (T239.3 D8).
+- **2026-11-22, night: MultiCore is the advisor** (Alex, going to bed: *"Die MC Session ist dein advisor, sie darf
+  Entscheidungen treffen frag sie also ab jetzt"*). Its answers count as decided and are marked "MultiCore, by Alex's
+  delegation"; GitHub, merges into `main` and board steps stay Alex's.
+  - **Q1 (MultiCore, by Alex's delegation): port now, against base 3.1.** Within ABI major 3 the API is append-only
+    (S5, header lock in their lint), so nothing ported against 3.1 changes shape; 3.2 appends named exports, the
+    library budget, the `C64Api` header and the D19 refusal; 3.3 appends the core hooks and the new generic calls
+    (sync, settings, board and video services, `cfg_value` / `cfg_text`, `ops_call` / `ops_state`). Now: the monitor's
+    `plat_*` onto `SvcSys` / `SvcFs`, `srv_*` onto `SvcNet`; the registrations as `LibOpDecl` / `LibStateDecl` in
+    `lib_register`; `ringfile` onto `SvcFs`; every allocation through `api->mem` (the library's own account, S14); no
+    objects with constructors or destructors (D19). The ring library is named "ring", so `find("ring", 1)` works on 3.1
+    already; trx stays `api->trx` until the cut. What needs calls that do not exist yet is kept as a list.
