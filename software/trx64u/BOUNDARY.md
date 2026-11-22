@@ -41,6 +41,23 @@ These calls must leave the core application (an operation, the library poll, or 
   `trx64u_ops.cc` today; they belong in the core application, not in our library.
 - `c64_cart`: `trx64u_uci_df1c`. `usb_hid`: `u64_get_usb_hid_config_value`.
 
+## Size per library (R5)
+
+From the link map of MultiCore's own trx64u image (`make own OWN_HEAP=0x950000`, commit `3b8e2955`), the sections kept
+after `--gc-sections`, without debug sections. `U2A3_IMAGE_MAX` is 1 MiB of image plus bss (`libfmt.h:40`).
+
+| Library | Code + rodata | Data | bss | Image + bss | Of 1 MiB |
+|---|---|---|---|---|---|
+| trx64u | 57,575 | 28 | 339,036 | 396,639 | 37.8 % |
+| ring | 69,873 | 18 | 14,281 | 84,172 | 8.0 % |
+| monitor | 170,115 | 284 | 475,133 | 645,532 | 61.6 % |
+
+The monitor counts MultiCore's older `tm_*` copy of trxmon; ours is somewhat larger (trace, rpc, ring). Most of the bss
+is static buffers that a resident library holds for good: in `trx64u_ops` three of 64 KiB (`op_load_mp3::buf`,
+`reu_load::buf`, `write_ddr::buf`), in trxmon `s_reply` 64 KiB, `s_text` 48 KiB, `s_b64` 43 KiB (`rpc`), `s_fbuf` and
+`s_move` 64 KiB each (`mon`). They count against the core's heap (T239.3 D1, D13); sharing them or taking them from
+the heap while in use would leave more for sub-apps.
+
 ## Raw lists
 
 

@@ -19,6 +19,16 @@ commit `3b8e2955` (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from
 SDK's public API (`include/` of the package) is the open work, U18 §5. What they take from outside the SDK is measured in
 `BOUNDARY.md` (`tools/boundary.py`).
 
+## Build
+
+`./build.sh [trx64u] [ring] [monitor]` builds the libraries in `build/<name>/` (copies of the sources; the monitor
+also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. Today every
+library stops at its first header from MultiCore's core application (`ctx.h`, `trx_io.h`).
+
+trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
+(`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which
+`main.c` gives the firmware's trxmon and `monitor.cc` / `monsrv.cc` give the library.
+
 ## SDK
 
 `sdk.pin` names the SDK version and the sha256 of its tarball. `./fetch_sdk.sh <tarball>` checks the tarball and unpacks

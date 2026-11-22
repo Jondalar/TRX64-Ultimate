@@ -185,5 +185,16 @@ Nothing decided yet.
     application calls back into the moving code from `appsvc`, `c64`, `run`, `screens`, `diag` and five more. The
     preparation's "no constructors" holds for global objects; `ringfile` and `ringops` use `__cxa_atexit`
     (`FileSystem_Root`, `mstring` with destructors).
+  - MultiCore's answers: the C64 descriptor `c64.cc` splits, its data into the menu record's new sections (D8,
+    branch `t239.3-desc`), its hooks into the base library (`LibRecord` gets the core hooks, D10); `cfg_value` and
+    `cfg_text` go into their core application; the symbol mapping comes with base 3.2 / SDK 0.2.0. Interim rule for
+    the ring table while R4 is open: the ring library exports its own table (the firmware's `u2p_ring_api_t` with
+    `dump`, `save`, `load`, `trace_writes`, `load_entry`, `save_native`, which the SDK's `SvcRing` lacks) through
+    `SvcLib`, and trxmon takes it with `lib->find`.
+  - Size per library (R5) from MultiCore's own trx64u image: trx64u 397 KB of image and bss (37.8 % of the 1 MiB
+    limit), ring 84 KB (8.0 %), monitor 646 KB (61.6 %); mostly static buffers (`BOUNDARY.md`).
+  - `build.sh` and a `Makefile` per library. trxmon (D4) builds in the monitor library unchanged against the
+    firmware's ABI headers; only `plat_*` / `srv_*` are left, the platform its glue gives. The three libraries stop
+    at their first header from MultiCore's core application.
   - Menu speed (T239.3 D4): MultiCore builds a measurement in its menu simulator (`t239.3-speed`), flushed pixels per
     key press, trx64u against the A1200; both sessions exchange its numbers before and after each change.
