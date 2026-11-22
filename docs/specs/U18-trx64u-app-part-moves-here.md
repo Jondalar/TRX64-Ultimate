@@ -296,3 +296,11 @@ Nothing decided yet.
     argument), so the firmware writes `.trxring` files its own loader refuses; the library prints the numbers. The format
     1 stage path leaves `want` and `eeprom` uninitialised (`malloc`); the library uses `calloc`. `.c64re` load has no REU
     check; the library refuses. Firmware fixes are the maintainer's call.
+  - **Machine info and menu close (MultiCore, by Alex's delegation):** the ring library builds the machine info for a
+    dump or load itself (`ctx.media_source` for the slots, c64cart for type / require / prohibit, `cbm1541.drive_info`,
+    the video format from our API TOML register through `io`), so calls through the exported table and the menu ops share
+    one path; `c64_cart_require` / `prohibit` / `writable` go into c64cart 1. MultiCore's app puts back no machine state
+    when the menu closes (the menu draws on its own layer; `close_menu` in their run.cc only releases the monitor, applies
+    a pending ring frame and clears C64_STOP), so `op_load` stays immediate and the core hook `menu_closed` stays `void`.
+    It replaces those first two steps: it runs on the menu task with the machine still stopped, without the core lock,
+    and a `when_frozen` poll (monitor.serve) may run at the same time.
