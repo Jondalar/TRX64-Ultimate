@@ -8,10 +8,12 @@
 # the core's tabs C64, TRX and Expansion with headings, then Video, Audio (R5: "SID sockets" and "Emulated SIDs" are two rows under the heading reDIP:SID at its
 # end, each opens a page), Input. F7 is one tab of sections (T212 D12) with the apps last under their heading "Apps" (a group node); Softboot is hidden
 # under the MultiCore host (DC1: `hide`, read by a flat list when the menu is built). R6: F8 is the one generic System tab; under its Network heading
-# three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs, colour scheme) are
-# in no tab (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
+# three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs) are in no tab
+# (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
 # Drive A and the cartridge port are media slots whose rows open the drive list (T212 D5); the generic items (Persist mounts, Enter home, Menu opens at, Home
-# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the application's own and not declared here. A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
+# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the application's own and not declared here, and so are the menu's look, name squeeze and
+# navigation style, the keyboard joystick and the USB mouse (U18: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation Style, Joystick Input
+# and the five Mouse settings are the base's, svc_settings.h; their stored values carry over under the same keys). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
 # group's id ('_' is a space; not drawn when it repeats the tab's title). Nothing is saved to flash: every setting is written to the core's .cfg at once (D9-D11).
 
 # the machine line of F1 (T212 D13/D15): the values of these settings
@@ -38,7 +40,7 @@ name = "Home"
   name = "Monitor"
   widget = "nodes"
   layout = "terminal"
-  ui = { page = "home" }
+  ui = { page = "home", grid = "textgrid" }
 
 [[area]]
 key = "F3"
@@ -1167,10 +1169,6 @@ turbo = ["Off", "Manual", "U64 Turbo Registers", "TurboEnable Bit"]
 speeds = ["1", "2", "3", "4", "6", "8", "10", "12", "14", "16", "20", "24", "32", "40", "48", "64"]
 poweron = ["Off", "On", "Last State"]
 ledsel = ["On", "Off", "Drive A Pwr", "DrvAPwr + DrvBPwr", "Drive A Act", "DrvAAct + DrvBAct", "DrvAPwr ^ DrvAAct", "USB Activity", "Any Activity", "!(DrvAAct)", "!(DrvAAct+DrvBAct)", "!(USB Act)", "!(Any Act)", "IRQ Line", "!(IRQ Line)", "Drive B Act"]
-alpha = ["0 %", "25 %", "50 %", "75 %"]
-squeeze = ["None", "Beginning", "Middle", "End"]
-navstyles = ["Quick Search", "WASD Cursors"]
-schemes = ["Standard Blue", "Ultimate Black", "C128 Style", "Commodore Blue", "Commodore 1", "Commodore 2", "Commodore 3"]
 cartmodes = ["Auto", "Internal", "External", "Manual"]
 sharing = ["Internal", "External"]
 gameexrom = ["On", "Off"]
@@ -2318,56 +2316,6 @@ default = 0
 when = "live"
 apply = "u64.fx_sid"
 
-# T228 R21 (Alex 2026-11-18): the USB mouse as TRX64-Ultimate's driver has it, only what the bitstream does. Motion reaches the C64 as cursor keys through the keyboard
-# matrix (usb_hid.cc:1413-1417, 1562); the 1351 pots are not decoded, so the values that move a 1351 are out. The wheel is pulsed through the joystick output
-# (joystick_output.cc:130). The list's three values are the driver's modes 0, 2, 3 (u64cfg.cc maps them).
-[[core_setting]]
-group = "input"
-key = "Mouse Mode"
-label = "Mouse as"
-values = ["Cursor keys", "Wheel: cursor keys", "Wheel: joystick"]
-default = 0
-when = "live"
-apply = "u64.fx_input"
-
-[[core_setting]]
-group = "input"
-key = "Mouse Sensitivity"
-label = "Mouse cursor sensitivity"
-range = [1, 16]
-unit = ""
-default = 8
-apply = "u64.fx_input"
-show_state = "set.Mouse_Mode==Cursor keys"
-
-[[core_setting]]
-group = "input"
-key = "Mouse Acceleration"
-label = "Mouse cursor acceleration"
-values = ["Off", "Adaptive"]
-default = 0
-when = "live"
-apply = "u64.fx_input"
-show_state = "set.Mouse_Mode==Cursor keys"
-
-[[core_setting]]
-group = "input"
-key = "Mouse Wheel Sensitivity"
-label = "Mouse wheel sensitivity"
-range = [1, 16]
-unit = ""
-default = 8
-apply = "u64.fx_input"
-
-[[core_setting]]
-group = "input"
-key = "Mouse Wheel Direction"
-label = "Mouse wheel direction"
-values = ["Normal", "Reversed"]
-default = 0
-when = "live"
-apply = "u64.fx_input"
-
 [[core_setting]]
 group = "Emulated_SIDs"
 key = "UltiSID 1 Filter"
@@ -2488,34 +2436,6 @@ values = ["Port 1", "Port 2"]
 default = 1
 when = "live"
 apply = "pad.port"
-
-[[core_setting]]
-group = "Application"
-key = "Overlay Transparency"
-label = "Overlay transparency"
-list = "alpha"
-default = 1
-when = "live"
-apply = "ui.fx"
-
-# FW userinterface.cc:163, 339, 1081: the keys of the lists and sheets (menuctl.cc nav_fold); the default of a machine that has never been set up is Quick Search, WASD Cursors on the C64 Ultimate product
-# (U18: that default, like the look and the name squeeze, is the generic application's; the trx64u library's ui.fx does not set it)
-[[core_setting]]
-group = "Application"
-key = "Navigation Style"
-label = "Navigation style"
-list = "navstyles"
-default = 0
-when = "live"
-apply = "ui.fx"
-
-[[core_setting]]
-group = "Application"
-key = "Filename overflow squeeze"
-list = "squeeze"
-default = 0
-when = "live"
-apply = "ui.fx"
 
 [[core_setting]]
 group = "Application"
@@ -2887,15 +2807,6 @@ list = "ledsel"
 default = 4
 when = "live"
 apply = "u64.fx_misc"
-
-[[core_setting]]
-group = "hidden"
-key = "Color Scheme"
-label = "Color scheme"
-list = "schemes"
-default = 1
-when = "live"
-apply = "ui.fx"
 
 [[core_setting]]
 group = "Recording"

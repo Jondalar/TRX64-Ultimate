@@ -2,13 +2,13 @@
 // U64Config::effectuate_settings, setMixer, setSpeakerMixer, U64SidSockets/U64UltiSids/U64SidAddressing::effectuate_settings, setFilter, setSidEmuParams,
 // setCpuSpeed, setLedSelector, auto_mirror, SetResampleFilter, the palette programming; the register addresses are vendor/gideon/software/system/u64.h.
 // What is different: the values come from this application's settings (menu.toml groups video, audio, sid, input, expert) instead of a ConfigStore, and
-// the system mode goes to the host's picture layer (picture_set_system, which applies it through app/video/videomode.cc's video_apply).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.1). The settings are read through api->ops->state("set.<key>") (setting.cc), the SID
-// sockets through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx); the C64U's registers are c64u_regs.h; what base
-// 3.1 lacks is pending_api.h. lib_trx64u.cc lists the operations and states of this file with their names and arguments.
+// the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
+// U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read and written through the settings
+// group (setting.cc), the SID chips through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx), the keys, the SID
+// sockets' supply, the video PLL, the picture layer and the ESP32 through the 3.3 groups io and board (base33.h); the C64U's registers are c64u_regs.h.
+// lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "u64cfg.h"
 #include "trx64u_lib.h"
-#include "pending_api.h"
 #include "c64u_regs.h"
 #include "sid_decide.h"
 #include "resid8_filter.h"
@@ -39,9 +39,7 @@
     X(U1_OFFS, "UltiSID 1 6581 Offset") X(U2_OFFS, "UltiSID 2 6581 Offset")                                                                          \
     X(JOY, "Joystick Input") X(USERPORT, "UserPort Power Enable") X(TURBO, "Turbo Control") X(SPEED, "CPU Speed") X(BADLINE, "Badline Timing")        \
     X(SUPERCPU, "SuperCPU Detect (D0BC)") X(IECMODE, "Serial Bus Mode") X(PARCABLE, "SpeedDOS Parallel Cable") X(BURST, "Burst Mode Patch")          \
-    X(LED0, "LED Select Top") X(LED1, "LED Select Bot")                                                                                              \
-    X(MOUSEMODE, "Mouse Mode") X(MOUSESENS, "Mouse Sensitivity") X(MOUSEACC, "Mouse Acceleration") X(WHEELSENS, "Mouse Wheel Sensitivity")          \
-    X(WHEELDIR, "Mouse Wheel Direction")
+    X(LED0, "LED Select Top") X(LED1, "LED Select Bot")
 
 enum {
 #define X(i, k) K_##i,
@@ -55,7 +53,8 @@ static const char *const key_names[K_N] = {
 #undef X
 };
 
-// the keys the menu does not have, said once (their defaults are used)
+// the keys the menu does not have, said once (their defaults are used). Not looked for: the palette (a text setting) and "Joystick Input" (the base's own
+// setting, svc_settings.h; setting_ix reads it with settings.cfg_value).
 static void note_missing(void)
 {
     static bool done;
@@ -64,7 +63,7 @@ static void note_missing(void)
     }
     done = true;
     for (int i = 0; i < K_N; i++) {
-        if (i != K_PALETTE && !setting_known(key_names[i])) {
+        if (i != K_PALETTE && i != K_JOY && !setting_known(key_names[i])) {
             lib_logf("[u64cfg] the menu has no setting \"%s\"; its default is used", key_names[i]);
         }
     }
@@ -77,7 +76,7 @@ static int V(int id, int def = 0)
     return setting_ix(key_names[id], def);
 }
 
-// A range setting's number as the menu shows it (mouse sensitivity 1 .. 16, the 6581 offset -1024 .. 1023), `def` when the menu has no such item.
+// A range setting's number as the menu shows it (the 6581 base 0 .. 511, the 6581 offset -1024 .. 1023), `def` when the menu has no such item.
 static int VN(int id, int def)
 {
     note_missing();
@@ -136,7 +135,7 @@ static void program_palette(const uint8_t rgb[16][3])
 // CONTROL 0x51-0x54 of the command interface (control_target.cc:158-199, U64Config::get_palette_rgb / set_palette_rgb / set_palette_color / reset_palette, u64_config.cc:3099-3170).
 // what 0 reads the 16 colours in force, 1 sets all, 2 sets colour idx from rgb[0], 3 back to the default colours. A palette set here is not the setting's: the next change of the
 // palette's group loads the configured one again (the name is forgotten, as the firmware's effectuate always reads the file again).
-void u64cfg_palette(CoreCtx *, int what, uint8_t idx, uint8_t (*rgb)[3])
+void u64cfg_palette(int what, uint8_t idx, uint8_t (*rgb)[3])
 {
     if (what == 0) {
         memcpy(rgb, g_palette_valid ? g_palette : default_colors, sizeof(g_palette));
@@ -274,6 +273,21 @@ static void set_resample_filter(uint8_t audio_div)
     U64_RESAMPLE_FLUSH = 0;
 }
 
+// The colour timing of each system mode (the position of "System Mode"), the three fields the C64's video registers and the resampler take. PROVENANCE:
+// software/ultimate-app/software/u64/color_timings.cc (Gideon Zweijtzer, GPL-3.0), color_timings[] in its order: c_pal_50_283_5, c_ntsc_60_227_5,
+// c_pal_60_free, c_ntsc_50_free, c_pal_60_281_5, c_ntsc_50_228_5. mode_bits are its VIDEO_FMT_* (u64.h: NTSC_ENCODING 0x01, 60_HZ 0x02, NTSC_FREQ 0x08,
+// CYCLES_63 0x00, CYCLES_65 0x20), phase_inc includes its TABLE_520 bit 0x80. MultiCore keeps no copy for libraries (svc_board.h: this library keeps its own).
+static const struct {
+    uint8_t mode_bits, phase_inc, audio_div;
+} color_timing[6] = {
+    { 0x00, 0x37, 77 },                               // PAL 50, 283.5
+    { 0x2B, 0x87, 80 },                               // NTSC 60, 227.5
+    { 0x2A, 0x22, 80 },                               // PAL 60, free
+    { 0x01, 0x98, 77 },                               // NTSC 50, free
+    { 0x2A, 0xB3, 80 },                               // PAL 60, 281.5
+    { 0x01, 0x09, 77 },                               // NTSC 50, 228.5
+};
+
 static int g_sys = -1, g_ppm = 0;                 // the host brought the picture up with no offset
 
 int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
@@ -283,24 +297,30 @@ int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
     int dig = V(K_DIGITAL);
     U64_HDMI_ENABLE = dig == 2 ? 0 : 1;               // Auto: the screen is HDMI unless the user says DVI (the EDID tells nothing a DVI monitor does not also say)
     uint8_t format = V(K_ANALOG) ? VIDEO_FMT_RGB_OUTPUT : 0;
-    uint8_t mode_bits, phase_inc, audio_div;
-    if (!video_color_timing(sys, &mode_bits, &phase_inc, &audio_div)) {
+    if (sys < 0 || sys >= (int)(sizeof(color_timing) / sizeof(color_timing[0]))) {
         snprintf(o.msg, o.msglen, "No colour timing for system mode %d", sys);
         return OPE_FAILED;
     }
-    C64_PHASE_INCR = phase_inc;
+    C64_PHASE_INCR = color_timing[sys].phase_inc;
     int ppm = VN(K_PPM, 0);                           // the colour clock's offset, -100 .. 100 ppm
-    C64_VIDEOFORMAT = (uint8_t)(mode_bits | format);
+    C64_VIDEOFORMAT = (uint8_t)(color_timing[sys].mode_bits | format);
+    const SvcBoard *b = b33_board();
     if (sys != g_sys) {
-        lib_logf("[u64cfg] system mode %s", video_sys_name(sys));
-        picture_set_system(sys);                      // the picture layer takes the new family: its mode and the Picture row are picked again (FW u64_config.cc:1471-1508)
+        const char *name = setting_label(key_names[K_SYSMODE], sys);
+        if (name) {
+            lib_logf("[u64cfg] system mode %s", name);
+        } else {
+            lib_logf("[u64cfg] system mode %d", sys);
+        }
+        if (b) {
+            b->video_set_system(sys);                 // the picture layer takes the new family: its mode and the Picture row are picked again (FW u64_config.cc:1471-1508)
+        }
         g_ppm = 0;
         g_sys = sys;
-        set_resample_filter(audio_div);
+        set_resample_filter(color_timing[sys].audio_div);
     }
-    if (ppm != g_ppm) {
-        SetVideoPll(sys, ppm);                        // the colour clock's offset goes with the PLL setting (Gideon's setPllOffset is empty)
-        ResetHdmiPll();
+    if (ppm != g_ppm && b) {
+        b->video_set_pll(sys, ppm);                   // the colour clock's offset goes with the PLL setting (Gideon's setPllOffset is empty), then the HDMI PLL's reset
         g_ppm = ppm;
     }
     // the palette: the file named in the setting, else the default colours
@@ -429,14 +449,15 @@ void u64cfg_power_on_keys(CoreCtx *)
         return;
     }
     const int ctrl = 58, key_p = 41, key_n = 39;                   // the matrix index col * 8 + row (hotkeys.h): CTRL, P, N
+    const SvcIo *io = b33_io();
     uint8_t m[8];
     bool rs;
-    if (!io_keys_read(m, &rs) || !((m[ctrl >> 3] >> (ctrl & 7)) & 1)) {
+    if (!io || !io->keys_read(m, &rs) || !((m[ctrl >> 3] >> (ctrl & 7)) & 1)) {
         return;
     }
     int mode = ((m[key_p >> 3] >> (key_p & 7)) & 1) ? 0 : ((m[key_n >> 3] >> (key_n & 7)) & 1) ? 1 : -1;   // PAL = 0, NTSC = 1: the first two values of System Mode
     if (mode >= 0) {
-        settings_override("System Mode", mode);
+        setting_override("System Mode", mode);                     // not applied here: c64.cc calls this in its init hook, before the settings are applied
         lib_logf("[u64cfg] power-on key: %s for this start", mode ? "NTSC" : "PAL");
     }
 }
@@ -546,7 +567,7 @@ static void write_sid_addressing(void)
 // CONTROL GET_HWINFO device 1 on the U64 (control_target.cc:290-340): the SID map the machine decodes now - the two UltiSIDs, then each enabled socket - as 5 bytes each: address low
 // ($D4 + base << 4), high, 0, 0 (the stereo address of a socket value 4 would go in bytes 3-4: this core's enable is a switch, never 4) and the type (2 / 3 an UltiSID by its mask,
 // 4 / 5 a socket, bit 7 set). Returns the length.
-int u64cfg_sid_map(CoreCtx *, uint8_t *data)
+int u64cfg_sid_map(uint8_t *data)
 {
     bool s1 = V(K_S1_EN) != 0, s2 = V(K_S2_EN) != 0;
     data[0] = (uint8_t)(2 + (s1 ? 1 : 0) + (s2 ? 1 : 0));
@@ -619,28 +640,37 @@ static int detect_fpgasid(int s)
     return is ? 3 : 0;
 }
 
+// sys.delay_us: the busy wait of the chips' register handshakes
+static void delay_us(uint32_t us)
+{
+    const SvcSysAdd *x = b33_sys();
+    if (x) {
+        x->delay_us(us);
+    }
+}
+
 static int detect_remakes(int s)
 {
-    sr_wr(s, 29, 'S'); sys_delay_us(10);
-    sr_wr(s, 30, 'I'); sys_delay_us(10);
-    sr_wr(s, 31, 'D'); sys_delay_us(10);
+    sr_wr(s, 29, 'S'); delay_us(10);
+    sr_wr(s, 30, 'I'); delay_us(10);
+    sr_wr(s, 31, 'D'); delay_us(10);
     wait_ms(10);
     uint8_t id1 = sr_rd(s, 27);
-    sys_delay_us(10);
+    delay_us(10);
     uint8_t id2 = sr_rd(s, 28);
-    sys_delay_us(10);
+    delay_us(10);
     if (id1 == 'S' && id2 == 'W') {
         sr_wr(s, 29, 0);
         return 4;
     }
     if (id1 == 'N' && id2 == 'O') {
-        sr_wr(s, 31, 'I'); sys_delay_us(10);
-        sr_wr(s, 30, 'I'); sys_delay_us(10);
+        sr_wr(s, 31, 'I'); delay_us(10);
+        sr_wr(s, 30, 'I'); delay_us(10);
         wait_ms(10);
         uint8_t l = sr_rd(s, 27);
-        sys_delay_us(10);
+        delay_us(10);
         sr_wr(s, 29, 0);
-        sys_delay_us(10);
+        delay_us(10);
         return (l == 'L' || l == 'R') ? 6 : 5;
     }
     sr_wr(s, 29, 'P');
@@ -798,7 +828,7 @@ static int fsid_sync(int s)
 }
 
 // FW S_cfg_fpgasid_sidN_quick (:290): one value sets filter, crunchy DAC, mixed waveforms, register delay and (x3) the read back. The first call is the start applying
-// the stored value. The five are stored without their apply (settings_store): the bytes go to the chip once, below.
+// the stored value. The five are stored without their apply (settings.set): the bytes go to the chip once, below.
 static int fsid_quick(int s, int k, int value)
 {
     static int last[2][2] = { { -1, -1 }, { -1, -1 } };
@@ -812,7 +842,7 @@ static int fsid_quick(int s, int k, int value)
     for (int i = 0; i < 5; i++) {
         char key[48];
         if (setting_known(fsid_key(s, o + ids[i], key, sizeof(key)))) {
-            settings_store(key, i == 4 ? value * 3 : value);
+            setting_set(key, i == 4 ? value * 3 : value);
         }
     }
     return fsid_sync(s);
@@ -878,7 +908,7 @@ static void ck_store(int s, int i, int v)                           // the value
     ck_key(s, i, key, sizeof(key));
     if (setting_known(key)) {
         int mx = setting_count(key) - 1;
-        settings_store(key, v > mx ? mx : v);
+        setting_set(key, v > mx ? mx : v);
     }
 }
 
@@ -1167,7 +1197,8 @@ static bool g_detected;
 // C64's memory window (api->c64) no chip can be looked at: the detection waits for a later call.
 static void sid_types_detect(void)
 {
-    if (g_detected || machine_started() || machine_frozen() || !settings_ready() || !c64_window()) {
+    const SvcSettings *set = b33_settings();
+    if (g_detected || (ctx_state() & (CTX_STARTED | CTX_FROZEN)) || !set || !settings_ready() || !c64_window()) {
         return;
     }
     g_detected = true;
@@ -1196,38 +1227,40 @@ static void sid_types_detect(void)
     for (int s = 0; s < 2; s++) {
         g_sid_type[s] = t[s];
         char v[8];
-        int old = settings_extra_get(type_keys[s], v, sizeof(v)) ? atoi(v) : 0;
+        int old = set->extra_get(type_keys[s], v, sizeof(v)) ? atoi(v) : 0;
         if (t[s] == old) {
             continue;
         }
         snprintf(v, sizeof(v), "%d", t[s]);
-        settings_extra_set(type_keys[s], v);
+        set->extra_set(type_keys[s], v);
         SidChange ch = sid_type_change(t[s]);
         int key[3] = { s ? K_S2_EN : K_S1_EN, s ? K_S2_CAPS : K_S1_CAPS, s ? K_S2_SHUNT : K_S1_SHUNT };
         int val[3] = { ch.enable, ch.caps, ch.shunt };
         for (int k = 0; k < 3; k++) {
             if (val[k] >= 0 && setting_known(key_names[key[k]])) {
-                settings_store(key_names[key[k]], val[k]);                 // the start, before the executor: one task, no menu yet; a write of the settings file at most
+                setting_set(key_names[key[k]], val[k]);                    // the start, before the executor: one task, no menu yet; a write of the settings file at most
             }
         }
         snprintf(note, sizeof(note), "SID changed. Please review settings");
     }
-    if (note[0] && !ui_notice_pending()) {
-        ui_notice(note);
+    const SvcCtx *x = b33_ctx();
+    if (note[0] && x) {
+        x->notice(note, true);                                         // only when no notice waits (this file's rule)
     }
 }
 
 // The sockets' supply, shunt and capacitors (FW U64SidSockets::effectuate_settings): one call per socket, the base packs the bits and writes the board's
-// expander (pending_api.h board_sid_socket); then the sockets' enables.
+// expander (board.sid_socket); then the sockets' enables.
 static void write_sid_sockets(void)
 {
     sid_types_detect();
+    const SvcBoard *b = b33_board();
     for (int s = 0; s < 2; s++) {
         int reg = SID_SOCKET_OFF;
         if (V(s ? K_S2_EN : K_S1_EN)) {
             reg = g_sid_type[s] == 1 ? SID_SOCKET_ON_TYPE1 : SID_SOCKET_ON;
         }
-        int rc = board_sid_socket(s, reg, V(s ? K_S2_SHUNT : K_S1_SHUNT) != 0, V(s ? K_S2_CAPS : K_S1_CAPS) != 0);
+        int rc = b ? b->sid_socket(s, reg, V(s ? K_S2_SHUNT : K_S1_SHUNT) != 0, V(s ? K_S2_CAPS : K_S1_CAPS) != 0) : 0;
         if (rc < 0) {
             lib_logf("[u64cfg] SID socket %d: the board refused its settings (%d)", s + 1, rc);
         }
@@ -1636,8 +1669,8 @@ bool u64cfg_sid_autoconfig(CoreCtx *, int count, const uint8_t *base, const uint
 }
 
 // ---- the rest: joystick, user port, turbo, serial bus, LEDs ---------------------------------------------------------------------------------
-// The keyboard joystick (U64II_KEYB_JOY, MATRIX_WASD_TO_JOY and the firmware's keyb_joy_select / wasd_to_joy) is a setting of the generic application
-// (MultiCore, 2026-11-22); "Joystick Input" swaps the ports here only (the menu has no such row, T228 R20: its default, no swap).
+// "Joystick Input" is a setting the base owns and applies (svc_settings.h: the keyboard joystick, its port and WASD); the port swap of this core follows
+// its position here, read by key. The base calls no operation of this library when it changes: the swap is written when this group is applied.
 static const uint8_t speedregs_regvalues[] = { 0x00, 0x00, 0x01, 0x05 };
 static const uint8_t c_iec_connectors[] = { 0x70, 0x60, 0x30, 0x50 };      // 4: ext, 5: ult, 6: cia
 
@@ -1667,49 +1700,28 @@ int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
     return OPE_OK;
 }
 
-// the mouse and wheel items are read by usb_hid.cc through this (weak there): the value of Gideon's item numbers CFG_MOUSE_* (usb_hid_config.h)
-static bool g_input_on;                                          // fx_input has run: the settings are there
-extern "C" int u64_get_usb_hid_config_value(int key, int default_value)
-{
-    int v;
-    if (mouse_sink_scaling(key, &v)) {                           // T190: a core with a mouse sink and its own settings (Amiga): mouse.sens / mouse.accel
-        return v;
-    }
-    if (!g_input_on) {
-        return default_value;
-    }
-    switch (key) {
-    case 0x55: {                                                 // CFG_MOUSE_MODE: the menu offers the modes that work (motion as cursor keys; wheel to cursor / to the joystick output): the driver's 0, 2, 3
-        static const int driver_mode[3] = { 0, 2, 3 };
-        int m = V(K_MOUSEMODE, 0);
-        return driver_mode[m >= 0 && m < 3 ? m : 0];
-    }
-    case 0x56: return VN(K_WHEELSENS, 8);                        // CFG_SCROLL_FACTOR 1..16
-    case 0x57: return V(K_WHEELDIR);                             // CFG_WHEEL_DIRECTION
-    case 0x58: return 0; // CFG_MENU_MOUSE_NAV: never. Our menus are keys only (T104.1, Alex 2026-10-29: "menumouse raus"); the driver queues no menu key from the mouse
-    case 0x5D: return VN(K_MOUSESENS, 8);                        // CFG_MOUSE_SENSITIVITY 1..16
-    case 0x5E: return V(K_MOUSEACC);                             // CFG_MOUSE_ACCELERATION
-    }
-    return default_value;
-}
-
-int fx_input(CoreCtx *, const OpArgs &, OpOut &)
-{
-    g_input_on = true;                                           // the values are read when the report comes in
-    return OPE_OK;
-}
-
 // ---- power -----------------------------------------------------------------------------------------------------------------------------------
 // The U64-II has no power register (U64_POWER_REG is the first U64's): power goes through the ESP32 control module (Gideon c64_subsys.cc MENU_C64_POWEROFF,
 // wifi_machine_off() / wifi_machine_reboot(): rpc_calls.h CMD_MACHINE_OFF 0x0F, CMD_MACHINE_REBOOT 0x13). The module answers nothing, the machine is gone.
 #define ESP_CMD_MACHINE_OFF    0x0F
 #define ESP_CMD_MACHINE_REBOOT 0x13
+// The mounted media written back first (the base's "media.flush_for_core", T154, T180 D4), then the command; a medium that cannot be written back keeps
+// the machine on (1, the reason in msg). Else board.esp32_rpc's answer: the module answers nothing (timeout 0: 0 sent, -3 not sent).
+static int power_cmd(uint8_t cmd, OpOut &o)
+{
+    if (op_call("media.flush_for_core", 0, 0, o.msg, o.msglen) != OPE_OK) {
+        return 1;
+    }
+    const SvcBoard *b = b33_board();
+    return b ? b->esp32_rpc(cmd, 0, 0, 0, 0, 0) : -3;
+}
+
 int op_power_off(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    if (media_writeback(WB_WHY_POWER, o.msg, o.msglen)) {            // T154, T180 D4: the media first; one that cannot be written back keeps the machine on
+    int rc = power_cmd(ESP_CMD_MACHINE_OFF, o);
+    if (rc > 0) {
         return OPE_FAILED;
     }
-    int rc = hw_esp32_rpc(ESP_CMD_MACHINE_OFF, 0, 0, 0, 0, 0);
     if (rc < 0) {
         snprintf(o.msg, o.msglen, "The ESP32 control module is not there (no link)");
         return OPE_FAILED;
@@ -1719,10 +1731,10 @@ int op_power_off(CoreCtx *, const OpArgs &, OpOut &o)
 }
 int op_power_cycle(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    if (media_writeback(WB_WHY_POWER, o.msg, o.msglen)) {            // T154, T180 D4: the media first; one that cannot be written back keeps the machine on
+    int rc = power_cmd(ESP_CMD_MACHINE_REBOOT, o);
+    if (rc > 0) {
         return OPE_FAILED;
     }
-    int rc = hw_esp32_rpc(ESP_CMD_MACHINE_REBOOT, 0, 0, 0, 0, 0);
     if (rc < 0) {
         snprintf(o.msg, o.msglen, "The ESP32 control module is not there (no link)");
         return OPE_FAILED;

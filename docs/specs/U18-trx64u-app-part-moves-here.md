@@ -334,3 +334,14 @@ Nothing decided yet.
     (13 % of 1 MiB); permanent heap 1,486,893 B (the timeline 1,146,880 B), peak during a 64-entry `.c64rering` dump
     4,345,344 B on top. Found: loading a format 1 `.c64rering` holds the file and its unpacked JSON at once (firmware
     design), about 12 MB for a 30 s ring, more than trx64u's heap of 0x950000.
+  - **Base library on the 3.3 names (round 2 done):** all 59 rows mapped, `pending_api.h` gone; the link is open only on
+    `b33_board`, `b33_ctx`, `b33_io`, `b33_settings`, `b33_sys`. The library exports "corehooks": `start` starts the
+    command interface (uci) and calls `ring.init`; `menu_closed` calls `monitor.release`, then `ring.unfreeze`; init,
+    release and the media hooks stay null until c64.cc moves here. Nine base-owned settings left `menu.toml` (Joystick
+    Input never was in it); the Monitor tab names `grid = "textgrid"`. State functions: the REU MP3 states share one
+    look per pass (2 reads, kept 100 ms, dropped by our REU writes), `reu.on` and `c64.port_taken` read one register.
+    Settings are read through the settings group with each key's index kept. S13: no permanent heap, peak 66,044 B;
+    image 75,444 B, image + bss 129,296 B (12.3 % of 1 MiB). Open: the key table rows (KS_MONITOR, KS_TIMELINE, D7)
+    have no TOML format yet; `u2a_pack.py` refuses `--menu` for a core's menu, which our Makefile sets; the base library
+    still reads `api->trx` / `api->c64` and must export "trx" and "c64" itself (D20; one export per library in 3.1);
+    the U64 block, mixers, palettes and resampler registers have no `io` member and are still written directly.

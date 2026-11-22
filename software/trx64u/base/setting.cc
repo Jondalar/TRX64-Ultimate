@@ -1,7 +1,8 @@
-// The settings as the base shows them (trx64u_lib.h): a read is api->ops->state("set.<key>"), which answers the label of the value in force (a text
-// setting: its text) and null when the base has no such setting or no settings yet (the core application's ops_state, coreapp/src/ops_glue.cc
-// setting_state). The code works with the index of the value, as it did with Settings::value(): the label is looked up in the setting's values, which
-// setlists.h has from the same menu.toml (a range: the number in the label minus its low end).
+// The settings as the base holds them (trx64u_lib.h), through its settings group (svc_settings.h). A read is settings.value of the setting's index: the
+// position of the value in force, an override included. The index of each key of this library's menu is looked up once with settings.find and kept while
+// settings.generation is unchanged (a new Settings object or a rebind to another config counts it up, and every kept index is looked up again). setlists.h
+// has the choice settings of the same menu.toml: which keys the menu has, their number of values, a range's low end and base, and the labels.
+// A key the menu does not have (a setting of the generic application, "Joystick Input") is read with settings.cfg_value.
 #include "trx64u_lib.h"
 #include <string.h>
 
@@ -13,9 +14,11 @@ struct SetDef {
 };
 #include "setlists.h"
 
+#define N_DEFS ((int)(sizeof(set_defs) / sizeof(set_defs[0])))
+
 static const SetDef *find_def(const char *key)
 {
-    int a = 0, b = (int)(sizeof(set_defs) / sizeof(set_defs[0])) - 1;
+    int a = 0, b = N_DEFS - 1;
     while (a <= b) {
         int m = (a + b) / 2;
         int c = strcmp(key, set_defs[m].key);
@@ -31,60 +34,45 @@ static const SetDef *find_def(const char *key)
     return 0;
 }
 
-static const char *state_of(const char *key)
+// The base's index of a key of the menu: 0 not looked up yet, -1 the base has none, else index + 1; all of them belong to generation g_gen.
+static int16_t g_ix[N_DEFS];
+static uint32_t g_gen;
+
+static int base_ix(const SvcSettings *s, const SetDef *d)
 {
-    char name[72];
-    if (!g_api->ops || strlen(key) + 5 > sizeof(name)) {
-        return 0;
+    uint32_t gen = s->generation();
+    if (gen != g_gen) {
+        memset(g_ix, 0, sizeof(g_ix));
+        g_gen = gen;
     }
-    strcpy(name, "set.");
-    strcpy(name + 4, key);
-    return g_api->ops->state(name, 0);
+    int16_t &e = g_ix[d - set_defs];
+    if (!e) {
+        int ix = s->find(d->key);
+        e = (int16_t)(ix < 0 ? -1 : ix + 1);
+    }
+    return e < 0 ? -1 : e - 1;
 }
 
-// a range's label: the number, then the unit
-static bool label_number(const char *s, int32_t *v)
+// the base's index of any key: a key of the menu from the kept ones, another one looked up
+static int key_ix(const SvcSettings *s, const char *key)
 {
-    while (*s == ' ') {
-        s++;
-    }
-    bool neg = *s == '-';
-    if (neg) {
-        s++;
-    }
-    if (!lc_isdigit((unsigned char)*s)) {
-        return false;
-    }
-    int32_t x = 0;
-    while (lc_isdigit((unsigned char)*s)) {
-        x = x * 10 + (*s++ - '0');
-    }
-    *v = neg ? -x : x;
-    return true;
+    const SetDef *d = find_def(key);
+    return d ? base_ix(s, d) : s->find(key);
 }
 
 int setting_ix(const char *key, int def)
 {
-    const SetDef *d = find_def(key);
-    const char *v = d ? state_of(key) : 0;
-    if (!v) {
+    const SvcSettings *s = b33_settings();
+    if (!s) {
         return def;
     }
-    if (!d->labels) {
-        int32_t x;
-        if (!label_number(v, &x) || x < d->lo || x >= d->lo + d->n) {
-            return def;
-        }
-        return (int)(x - d->lo);
+    const SetDef *d = find_def(key);
+    if (!d) {
+        return s->cfg_value(key, def);
     }
-    const char *l = d->labels;
-    for (int i = 0; i < d->n; i++) {
-        if (!strcmp(l, v)) {
-            return i;
-        }
-        l += strlen(l) + 1;
-    }
-    return def;
+    int ix = base_ix(s, d);
+    int v = ix < 0 ? -1 : s->value(ix);
+    return v < 0 || v >= d->n ? def : v;
 }
 
 int setting_num(const char *key, int def)
@@ -108,19 +96,44 @@ bool setting_known(const char *key)
     return find_def(key) != 0;
 }
 
+const char *setting_label(const char *key, int ix)
+{
+    const SetDef *d = find_def(key);
+    if (!d || !d->labels || ix < 0 || ix >= d->n) {
+        return 0;
+    }
+    const char *l = d->labels;
+    for (int i = 0; i < ix; i++) {
+        l += strlen(l) + 1;
+    }
+    return l;
+}
+
 const char *setting_text(const char *key)
 {
-    const char *t = state_of(key);
-    if (!t) {
-        return "";
-    }
-    while (*t == ' ') {
-        t++;
-    }
-    return t;
+    const SvcSettings *s = b33_settings();
+    const char *t = s ? s->cfg_text(key) : 0;
+    return t ? t : "";
 }
 
 bool settings_ready(void)
 {
-    return state_of(set_defs[0].key) != 0;
+    const SvcSettings *s = b33_settings();
+    return s && base_ix(s, &set_defs[0]) >= 0;
+}
+
+bool setting_set(const char *key, int ix)
+{
+    const SvcSettings *s = b33_settings();
+    int k = s ? key_ix(s, key) : -1;
+    return k >= 0 && s->set(k, ix);
+}
+
+void setting_override(const char *key, int ix)
+{
+    const SvcSettings *s = b33_settings();
+    int k = s ? key_ix(s, key) : -1;
+    if (k >= 0) {
+        s->override_value(k, ix);
+    }
 }

@@ -1,7 +1,8 @@
-// The C64U's register blocks this library writes directly: the C64 core's I/O block, the cartridge registers, the ROM aperture, the U64 block, the mixers, the
-// palettes and the command interface's slot registers. The library is the C64's code (U18 D3/R4: the C64 table is ours), and base 3.1 has no group for these
-// blocks (SvcC64 has the memory window, the cartridge mode and the port's GAME/EXROM, SvcTrx the TRX block), so they are reached at their bus addresses as the
-// core application reached them. PROVENANCE: the addresses are those of TRX64U-MultiCore 3b8e2955 host-app/software/system/iomap.h, u64.h and u2p.h, which are
+// The C64U's register blocks this library writes directly: the C64 core's I/O block, the cartridge registers, the ROM aperture, the U64 block, the mixers and
+// the palettes (the command interface's slot registers are the UCI library's: uci_api.h). The library is the C64's code (U18 D3/R4: the C64 table is ours);
+// the blocks are reached at their bus addresses as the core application reached them. Base 3.1 has no group for them; base 3.3's io group (svc_io.h) has the
+// cartridge block, the bus bridge, the stop, the reset and the ROM aperture, which this file does not use yet (the U64 block, the mixers and the palettes have
+// no member there). PROVENANCE: the addresses are those of TRX64U-MultiCore 3b8e2955 host-app/software/system/iomap.h, u64.h and u2p.h, which are
 // Gideon's (vendor/gideon/software/system, GPL-3.0); the six helpers at the end are coreapp/src/hw.cc HwIo's ram_memonly, cart_rd, cart_wr, bus_wr, stop,
 // mode_reset and rom_write of that commit.
 #ifndef TRX64U_C64U_REGS_H
@@ -11,7 +12,6 @@
 
 #define IOBASE             0x04000000u
 #define C64_CARTREGS_BASE  (IOBASE + 0x40000u)
-#define CMD_IF_BASE        (IOBASE + 0x44000u)
 
 #define U2P_IO_BASE        0xA0000000u
 #define U2PIO_SPEAKER_EN   (*(volatile uint8_t *)(U2P_IO_BASE + 0x0C))
@@ -84,10 +84,6 @@
 #define C64_BASIC_BYTES  8192u
 #define C64_KERNAL_BYTES 8192u
 #define C64_CHAR_BYTES   4096u
-
-// The command interface's slot registers: +0 the base ($DF1C is 0x47), +1 enable.
-#define CMD_IF_SLOT_BASE_REG   (*(volatile uint8_t *)(CMD_IF_BASE + 0x0))
-#define CMD_IF_SLOT_ENABLE_REG (*(volatile uint8_t *)(CMD_IF_BASE + 0x1))
 
 // C64_DMA_MEMONLY: on, every byte of the memory window goes to the RAM's second port, $D000-$DFFF included.
 static inline void c64_ram_memonly(bool on) { C64_DMA_MEMONLY = on ? 1 : 0; }

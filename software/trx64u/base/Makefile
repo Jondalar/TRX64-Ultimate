@@ -9,6 +9,10 @@ LIB_LIBC = 1
 LIB_INC = $(TRX_INC)
 include $(SDK)/mk/lib.mk
 
+# lib.mk gives hidden.h (every declaration hidden) only to the C files. A C++ file that reads a variable of another file (g_api) would then reach it through
+# the global offset table, which lib.ld discards and the loader does not fill: the link fails on `.got.plt`.
+LIB_CXXFLAGS += -include $(SDK_HIDDEN)
+
 # setting.cc's lists of the values of every choice setting, from the menu.toml the image carries (setlists.py)
 setlists.h: menu.toml setlists.py
 	python3 setlists.py $(SDK_TOOLS) menu.toml $@

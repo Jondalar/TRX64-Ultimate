@@ -1,8 +1,9 @@
-// The trx64u base library (U18 D5): its entry, its record and what its files share (trx64u_lib.h). The record is one list of operations and one of state
-// values (LibRecord takes one of each): those of trx64u_ops.cc and of u64cfg.cc, which registered themselves as two contributors ("trx64u", "u64cfg") in the
-// core application. A library has no contributor name of its own to give: the loader registers everything under the library's name, "trx64u".
+// The trx64u base library (U18 D5): its entry, its record, its core hooks and what its files share (trx64u_lib.h). The record is one list of operations and
+// one of state values (LibRecord takes one of each): those of trx64u_ops.cc and of u64cfg.cc, which registered themselves as two contributors ("trx64u",
+// "u64cfg") in the core application. A library has no contributor name of its own to give: the loader registers everything under the library's name, "trx64u".
 #include "trx64u_lib.h"
 #include "libfmt.h"
+#include "core_hooks.h"
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include <string.h>
@@ -49,6 +50,84 @@ uint8_t *xfer_alloc(uint32_t *cap)
     *cap = 0;
     return 0;
 }
+
+int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen)
+{
+    OpResult r;
+    r.msg[0] = 0;
+    int rc = g_api->ops->call(name, in, nin, &r);
+    if (msg && msglen > 0) {
+        snprintf(msg, msglen, "%s", r.msg);
+    }
+    return rc;
+}
+
+// ---- the exports of the shared libraries ----------------------------------------------------------------------------------------------------------
+// A table is kept once found: the loaded libraries stay. `size` is the smaller of what find reports and the table's own first word. Two tasks may look
+// at the same time; either order of the two stores leaves an entry that answers null or the table, never a wrong size.
+static struct {
+    const char *name;
+    const void *t;
+    uint32_t size;
+} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 } };
+
+const void *x_table(int which, uint32_t off)
+{
+    if (which < 0 || which >= X_N) {
+        return 0;
+    }
+    if (!g_x[which].t && g_api->lib) {
+        uint32_t n = 0;
+        const void *t = g_api->lib->find(g_x[which].name, 1, &n);
+        if (t && n >= sizeof(uint32_t)) {
+            uint32_t own = *(const uint32_t *)t;
+            g_x[which].size = own < n ? own : n;
+            g_x[which].t = t;
+        }
+    }
+    const char *t = (const char *)g_x[which].t;
+    if (!t || g_x[which].size < off + sizeof(void *)) {
+        return 0;
+    }
+    return *(void *const *)(t + off) ? t : 0;
+}
+
+// ---- the core hooks (core_hooks.h, the export "corehooks") ----------------------------------------------------------------------------------------
+// start: the command interface with this machine's side (uci.start, which does nothing when the bitstream lacks it) and the ring library's engine
+// ("ring.init", idempotent; no ring library: nothing; "ring.start" is the log's start, not this). A failure of the ring is the answer: the base logs
+// it and tells the person.
+static int hook_start(char *msg, int msglen)
+{
+    const UciApi *u = X_GET(X_UCI, UciApi, start);
+    if (u) {
+        u->start(trx64u_uci_hooks());
+    }
+    char m[OP_MSG_MAX];
+    int rc = op_call("ring.init", 0, 0, m, sizeof(m));
+    if (rc != OPE_OK && rc != OPE_NOT_FOUND) {
+        snprintf(msg, msglen, "Timewarp ring: %s", m);
+        return 1;
+    }
+    return 0;
+}
+
+// menu_closed: what the debugger held is given back, then the ring lands its pending frame and lets the machine go on (core_hooks.h: the menu task, the
+// machine still stopped, no core lock; the monitor's when_frozen poll and an executor operation may run meanwhile). The hook keeps no state of its own; the
+// two operations guard what they share with their own tasks. A library that is not loaded has no operation: OPE_NOT_FOUND is no failure.
+static void hook_menu_closed(void)
+{
+    static const char *const ops[2] = { "monitor.release", "ring.unfreeze" };
+    char m[OP_MSG_MAX];
+    for (int i = 0; i < 2; i++) {
+        int rc = op_call(ops[i], 0, 0, m, sizeof(m));
+        if (rc != OPE_OK && rc != OPE_NOT_FOUND) {
+            lib_logf("[trx64u] %s: %s", ops[i], m);
+        }
+    }
+}
+
+// init, release, warm_reset, cold_start, media_flush, media_pending come with c64.cc (the C64 descriptor's hooks), which moves into this library later.
+static const CoreHooks core_hooks = { sizeof(CoreHooks), 0, 0, 0, 0, 0, 0, hook_start, hook_menu_closed };
 
 // ---- the record -----------------------------------------------------------------------------------------------------------------------------------
 static const ArgSpec value_arg[] = { ARG_INT("value", -2000, 2000) };
@@ -110,7 +189,6 @@ static const LibOpDecl ops[] = {
     { "u64.fx_fsid_q20", value_arg, 1, fx_fsid_q20 },
     { "u64.fx_fsid_q21", value_arg, 1, fx_fsid_q21 },
     { "u64.fx_misc", value_arg, 1, fx_misc },
-    { "u64.fx_input", value_arg, 1, fx_input },
     { "u64.apply_palette", file_name_arg, 1, op_palette_apply },
     { "u64.set_palette", file_name_arg, 1, op_palette_default },
     { "u64.power_off", 0, 0, op_power_off },
@@ -179,7 +257,8 @@ static const LibStateDecl states[] = {
 #else
 #define LIB_ENTRY_ATTR
 #endif
-// The groups every handler uses (sys, mem, ops, fs) have to be there; api->trx and api->c64 are read at each use (the base fills them after the load).
+// The groups every handler uses (sys, mem, ops, fs) have to be there; api->trx, api->c64, the 3.3 groups and the exports are read at each use. The core
+// hooks are the library's export (one per library in 3.1; 3.2 gives it the name "corehooks").
 extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
 {
     if (api->abi_major != U2A_ABI_MAJOR || !api->sys || !api->mem || !api->ops || !api->fs) {
@@ -190,5 +269,7 @@ extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
     out->nops = (int)(sizeof(ops) / sizeof(ops[0]));
     out->states = states;
     out->nstates = (int)(sizeof(states) / sizeof(states[0]));
+    out->exports = &core_hooks;
+    out->exports_size = sizeof(core_hooks);
     return 0;
 }

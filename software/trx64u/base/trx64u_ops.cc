@@ -1,23 +1,75 @@
 // The operations and states of the TRX64U menu (menu.toml) that are not the C64U's hardware registers (u64cfg.cc is those): the C64's cartridge port, REU and
 // ROM settings, the machine's own actions. The register sequences of the cartridge port are Gideon's (vendor/gideon/software/io/c64/c64.cc
 // ConfigureU64SystemBus and set_emulation_flags, GPL-3.0), the fast reset patch is his (c64.cc fastresetPatch).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.1). The settings are read through api->ops->state("set.<key>") (setting.cc), the files
-// through api->fs, the TRX block through api->trx, the C64's memory window through api->c64; what base 3.1 lacks is pending_api.h. lib_trx64u.cc lists the
-// operations and states of this file with their names and arguments.
+// U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read through the settings group
+// (setting.cc), the files through api->fs, the TRX block through api->trx, the C64's memory window through api->c64, the running core's state, the REU's
+// memory and the board through the 3.3 groups ctx, io and board (base33.h), the cartridge port, drive A, the command interface, the SID file and the temp
+// disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "trx64u_lib.h"
-#include "pending_api.h"
 #include "c64u_regs.h"
 #include <string.h>
 
+// ---- the shared libraries' calls this file makes, each answering as "none there" when its library is not loaded ------------------------------------
+static bool cart_active(void)
+{
+    const C64CartApi *c = X_GET(X_CART, C64CartApi, active);
+    return c && c->active();
+}
+static const char *cart_name(void)
+{
+    const C64CartApi *c = X_GET(X_CART, C64CartApi, name);
+    return c ? c->name() : "";
+}
+static const char *cart_path(void)
+{
+    const C64CartApi *c = X_GET(X_CART, C64CartApi, path);
+    return c ? c->path() : "";
+}
+// Drive A as it stands (cbm1541.drive_info); false: no drive library or no drive. The strings are the drive library's until the next mount: copy them.
+static bool drive_info(Cbm1541Info *info)
+{
+    const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, drive_info);
+    memset(info, 0, sizeof(*info));
+    info->size = sizeof(*info);
+    return d && d->drive_info(0, info);
+}
+// A spec of cbm1541.slot_mount: the path, with "ro " or "unlinked " in front for those modes.
+static int drive_mount(const char *path, int mode, char *msg, int msglen)
+{
+    const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, slot_mount);
+    if (!d) {
+        snprintf(msg, msglen, "This machine has no drive A");
+        return 1;
+    }
+    char spec[FS_PATH_MAX + 12];
+    snprintf(spec, sizeof(spec), "%s%s", mode == CBM1541_MODE_RO ? "ro " : mode == CBM1541_MODE_UNLINKED ? "unlinked " : "", path);
+    return d->slot_mount(spec, msg, msglen);
+}
+// The command interface's slot (uci.set_slot_enable, then set_slot_base at $DF1C when `at_df1c`); the export ignores both unless the core has the
+// capability "uci" and the board's probe found the interface.
+static void uci_slot(bool on, bool at_df1c)
+{
+    const UciApi *u = X_GET(X_UCI, UciApi, set_slot_enable);
+    if (u) {
+        u->set_slot_enable(on ? 1 : 0);
+    }
+    u = at_df1c ? X_GET(X_UCI, UciApi, set_slot_base) : 0;
+    if (u) {
+        u->set_slot_base(0x47);
+    }
+}
+
 // ---- the temp folder ------------------------------------------------------------------------------------------------------------------------------
-// "ui.fx" is the apply of the Application group. The menu's look (Overlay Transparency, Color Scheme), the name squeeze and the navigation style are
-// settings of the generic application (MultiCore, 2026-11-22: ui_set_look, ui_set_name_squeeze and the keyboard joystick are not called from here); what
-// stays here is the temp folder's two settings.
+// "ui.fx" is the apply of "Temp Auto Cleanup" and "Temp Subfolders": the temp disk's two switches (the export "tempdisk"). The menu's look, the name
+// squeeze, the navigation style and the keyboard joystick are settings the base owns and applies (svc_settings.h).
 int fx_ui(CoreCtx *, const OpArgs &, OpOut &)
 {
-    tempdisk_set(setting_ix("Temp Auto Cleanup", 1) != 0, setting_ix("Temp Subfolders", 1) != 0);
+    const TempDiskApi *t = X_GET(X_TEMPDISK, TempDiskApi, set);
+    if (t) {
+        t->set(setting_ix("Temp Auto Cleanup", 1) != 0, setting_ix("Temp Subfolders", 1) != 0);
+    }
     return OPE_OK;
 }
 
@@ -61,22 +113,30 @@ static void fast_reset(void)
 }
 
 static int reu_load(const char *path, char *msg, int msglen, bool at_zero = true);
-static const UciHost *uci_host(void);
+static void mp3_forget(void);
 #define TRX_SLOT_CTRL 0x7000                                       // TRX_IO_BASE + 0x7000 = 0x101A7000
 
-// The command interface is there: the core has the capability "uci" and the board's probe found it (the same condition as the core application's).
-static bool uci_present(void)
+// TRX_SLOT_STATUS (TRX block +0x7004, 32 bit): b31 the slot block is in the bitstream, b16 the port is armed for a cartridge. b31 is the bitstream's and is
+// read once (the firmware's trx_slot_present keeps it the same way, software/ultimate-app/software/io/c64/trx_cart.cc); b16 is read each time, one byte.
+static bool slot_armed(void)
 {
-    return g_api->sys && g_api->sys->has_capability("uci") && board_has_uci();
+    static int8_t block = -1;
+    if (!g_api->trx) {
+        return false;
+    }
+    if (block < 0) {
+        block = (trx_rd(0x7007) & 0x80) ? 1 : 0;
+    }
+    return block && (trx_rd(0x7006) & 0x01);
 }
 
-// c64.cc:421: the expansion port is taken when a .crt runs, a cartridge was seen in the port at the last bus setup (trx_ext_cart_seen: GAME or EXROM pulled low) or the slot is armed for one
-// (TRX_SLOT_STATUS b16, valid with b31). The REU, the Ultimate Audio mapping and the UCI are off then (the saved values stay), and the rows say "Disabled (cartridge)".
+// c64.cc:421: the expansion port is taken when a .crt runs, a cartridge was seen in the port at the last bus setup (trx_ext_cart_seen: GAME or EXROM pulled low) or the slot is armed for one.
+// The REU, the Ultimate Audio mapping and the UCI are off then (the saved values stay), and the rows say "Disabled (cartridge)". The menu's states read it on
+// every pass: the cartridge library's flag and one register byte, the bus setup's finding as fx_io left it.
 static bool g_ext_cart_seen;
 static bool port_taken(void)
 {
-    bool armed = (trx_rd(0x7007) & 0x80) && (trx_rd(0x7006) & 0x01);     // SLOT_STATUS +004: b31 the block is there, b16 armed for a cartridge
-    return c64_cart_active() || g_ext_cart_seen || armed;
+    return cart_active() || g_ext_cart_seen || slot_armed();
 }
 
 int fx_io(CoreCtx *, const OpArgs &, OpOut &)
@@ -84,7 +144,7 @@ int fx_io(CoreCtx *, const OpArgs &, OpOut &)
     g_ext_cart_seen = g_api->c64 && (g_api->c64->cart_detect() & 3) != 3;         // U64_CART_DETECT: GAME and EXROM both high = nothing in the port
     trx_wr(TRX_SLOT_CTRL, 2);                                                        // T228 R20 29: CPU writes reach a real cartridge (TRX-Ultimate trx_cart.cc:364-406 keeps it at 2)
     c64_bus_wr(C64_BUSREG_BRIDGE, bus_mode_values[setting_ix("Bus Operation Mode", 0)]);
-    bool cart = c64_cart_active();
+    bool cart = cart_active();
     if (!cart) {
         uint8_t internal = 0, external = 0;
         bool ext_cart = g_ext_cart_seen;
@@ -117,17 +177,13 @@ int fx_io(CoreCtx *, const OpArgs &, OpOut &)
         c64_cart_wr(C64_CARTREG_REU, !taken && setting_ix("RAM Expansion Unit", 0) == 1 ? 1 : 0);
         c64_cart_wr(C64_CARTREG_REU_SIZE, (uint8_t)setting_ix("REU Size", 4));
         c64_cart_wr(C64_CARTREG_SAMPLER, taken ? 0 : (uint8_t)setting_ix("Map Ultimate Audio $DF20-DFFF", 0));
-        if (uci_present()) {
-            uci_start(uci_host());                                                  // the server and its targets (uci.cc), once
-            CMD_IF_SLOT_ENABLE_REG = !taken && setting_ix("Command Interface (UCI)", 0) ? 1 : 0;
-            CMD_IF_SLOT_BASE_REG = 0x47;                                            // $DF1C
-        }
-    } else if (uci_present()) {
-        CMD_IF_SLOT_ENABLE_REG = 0;                                                 // c64.cc:426-445: a running cartridge has the port, the UCI is off (the saved value stays)
+        uci_slot(!taken && setting_ix("Command Interface (UCI)", 0), true);        // the server itself was started by the start hook (uci.start)
+    } else {
+        uci_slot(false, false);                                                     // c64.cc:426-445: a running cartridge has the port, the UCI is off (the saved value stays)
     }
     fast_reset();
     static bool preloaded;                                               // "REU Preload": the image goes into the REU once, at the start
-    if (!preloaded && !machine_started() && setting_ix("REU Preload", 0) && setting_ix("RAM Expansion Unit", 0) == 1) {
+    if (!preloaded && !(ctx_state() & CTX_STARTED) && setting_ix("REU Preload", 0) && setting_ix("RAM Expansion Unit", 0) == 1) {
         preloaded = true;
         char m[100];
         const char *img = setting_text("REU Preload Image");
@@ -155,7 +211,7 @@ static int reu_load(const char *path, char *msg, int msglen, bool at_zero)
         snprintf(msg, msglen, "No file %s", path);
         return 1;
     }
-    if (c64_cart_active()) {
+    if (cart_active()) {
         snprintf(msg, msglen, "A cartridge uses the REU's memory: remove it first");
         return 1;
     }
@@ -174,10 +230,11 @@ static int reu_load(const char *path, char *msg, int msglen, bool at_zero)
     }
     uint32_t n = sz > room ? room : (uint32_t)sz;
     bool ok = true;
+    mp3_forget();
     for (uint32_t done = 0; ok && done < n;) {
         uint32_t k = n - done < cap ? n - done : cap;
         ok = g_api->fs->read(f, done, buf, k);
-        io_ddr_write(off + done, buf, k);
+        ddr_write(off + done, buf, k);
         done += k;
     }
     g_api->fs->close(f);
@@ -191,15 +248,6 @@ static int reu_load(const char *path, char *msg, int msglen, bool at_zero)
 }
 
 int op_reu_load(CoreCtx *, const OpArgs &a, OpOut &o) { return reu_load(a.s(0), o.msg, o.msglen) ? OPE_FAILED : OPE_OK; }
-
-// a cartridge that requires the command interface asks for it at $DF1C (c64_cart.cc, c64.cc:2019-2024; the same condition as fx_io)
-void trx64u_uci_df1c(CoreCtx *)
-{
-    if (uci_present()) {
-        CMD_IF_SLOT_ENABLE_REG = 1;
-        CMD_IF_SLOT_BASE_REG = 0x47;
-    }
-}
 
 int op_reu_preload(CoreCtx *, const OpArgs &a, OpOut &o)
 {
@@ -318,13 +366,26 @@ const char *state_roms_basic(CoreCtx *)  { static char t[24 * 60]; return rom_ch
 const char *state_roms_char(CoreCtx *)   { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", C64_CHAR_BYTES, C64_CHAR_BYTES); }
 const char *state_roms_1541(CoreCtx *)   { static char t[24 * 60]; return rom_choices(t, sizeof(t), "1541.rom", 16384, 32768); }   // "1541.rom" is the built-in one (drive.fx_misc)
 
+// The built-in image of a ROM role back in through the role's put operation (the base's "machine.put_builtin_rom"). 0, or the reason in msg.
+static int put_builtin_rom(const char *put_op, char *msg, int msglen)
+{
+    OpIn in[1] = { in_str("put_op", put_op) };
+    return op_call("machine.put_builtin_rom", in, 1, msg, msglen) != OPE_OK;
+}
+
+// The machine held, the reset-time settings put, released (the base's "machine.cold_reset"). 0, or the reason in msg.
+static int cold_reset(char *msg, int msglen)
+{
+    return op_call("machine.cold_reset", 0, 0, msg, msglen) != OPE_OK;
+}
+
 // the chosen file goes in; an empty choice puts the built-in file back (not at the start: the boot has put it)
 static bool roms_after_reload;
 int fx_roms(CoreCtx *, const OpArgs &, OpOut &o)
 {
     static const struct { const char *key, *put_op; } roles[3] = { { "Kernal ROM", "c64.put_kernal" }, { "Basic ROM", "c64.put_basic" }, { "Char ROM", "c64.put_char" } };
-    for (int i = 0; i < 3 && machine_started() && !roms_after_reload; i++) {
-        if (!setting_text(roles[i].key)[0] && boot_put_builtin_rom(roles[i].put_op, o.msg, o.msglen)) {
+    for (int i = 0; i < 3 && (ctx_state() & CTX_STARTED) && !roms_after_reload; i++) {
+        if (!setting_text(roles[i].key)[0] && put_builtin_rom(roles[i].put_op, o.msg, o.msglen)) {
             return OPE_FAILED;
         }
     }
@@ -343,10 +404,10 @@ int fx_roms(CoreCtx *, const OpArgs &, OpOut &o)
 #define ESP_CMD_GET_WAKE_ON_WIFI 0x19
 
 // reply layout: header (4) + esp_err (4) + the field(s)
-static bool esp_get(uint8_t cmd, int field, uint8_t *v)
+static bool esp_get(const SvcBoard *b, uint8_t cmd, int field, uint8_t *v)
 {
     uint8_t r[16];
-    int n = hw_esp32_rpc(cmd, 0, 0, r, sizeof(r), 300);
+    int n = b->esp32_rpc(cmd, 0, 0, r, sizeof(r), 300);
     if (n < 9 + field || r[4] || r[5] || r[6] || r[7]) {
         return false;
     }
@@ -356,18 +417,19 @@ static bool esp_get(uint8_t cmd, int field, uint8_t *v)
 
 int fx_power(CoreCtx *, const OpArgs &, OpOut &o)
 {
+    const SvcBoard *b = b33_board();
     uint8_t want, have;
     want = (uint8_t)setting_ix("Power On After Power Loss", 0);
-    if (!esp_get(ESP_CMD_GET_POWER_MODE, 0, &have)) {
+    if (!b || !esp_get(b, ESP_CMD_GET_POWER_MODE, 0, &have)) {
         snprintf(o.msg, o.msglen, "The control module does not answer: power-on behaviour not stored");
         return OPE_IO;
     }
     if (have != want) {
-        hw_esp32_rpc(ESP_CMD_SET_POWER_MODE, &want, 1, 0, 0, 0);
+        b->esp32_rpc(ESP_CMD_SET_POWER_MODE, &want, 1, 0, 0, 0);
     }
     want = (uint8_t)setting_ix("Wake On Wi-Fi", 0);
-    if (esp_get(ESP_CMD_GET_WAKE_ON_WIFI, 0, &have) && have != want) {
-        hw_esp32_rpc(ESP_CMD_SET_WAKE_ON_WIFI, &want, 1, 0, 0, 0);
+    if (esp_get(b, ESP_CMD_GET_WAKE_ON_WIFI, 0, &have) && have != want) {
+        b->esp32_rpc(ESP_CMD_SET_WAKE_ON_WIFI, &want, 1, 0, 0, 0);
     }
     return OPE_OK;
 }
@@ -377,21 +439,23 @@ int fx_power(CoreCtx *, const OpArgs &, OpOut &o)
 
 int fx_drive_misc(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    CbmDrive *d = cbm1541_drive(0, 0);
-    if (!d) {
+    const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, set_options);
+    Cbm1541Options opt;
+    opt.size = sizeof(opt);
+    opt.track_twist = setting_ix("Track Twist", 27);
+    opt.align_tracks = setting_ix("GCR Save Align Tracks", 1) != 0;
+    opt.reset_with_c64 = setting_ix("Resets when C64 resets", 1) != 0;
+    opt.freeze_in_menu = setting_ix("Freezes in menu", 1) != 0;         // c1541.cc:343-344: b2 of the reset register, written at the next drive reset
+    opt.geos_protection = (uint8_t)setting_ix("D64 Geos Copy Protection", 0);   // c1541.cc:599: the D64 -> GCR conversion of the next mount
+    if (!d || !d->set_options(&opt)) {
         return OPE_OK;                                              // no drive in this machine: nothing to set
     }
-    cbm_drive_set_twist(d, setting_ix("Track Twist", 27));
-    cbm_drive_set_align(d, setting_ix("GCR Save Align Tracks", 1) != 0);
-    cbm_drive_set_reset_with_c64(d, setting_ix("Resets when C64 resets", 1) != 0);
-    cbm_drive_set_freeze(d, setting_ix("Freezes in menu", 1) != 0);            // c1541.cc:343-344: b2 of the reset register, written at the next drive reset
-    cbm_drive_set_geos(d, setting_ix("D64 Geos Copy Protection", 0));           // c1541.cc:599: the D64 -> GCR conversion of the next mount
     const char *rom = setting_text("ROM for 1541 mode");
     static char last_rom[64];                                       // the choice the drive has now; a change is applied at once, the other settings leave the ROM alone
     bool changed = strncmp(last_rom, rom, sizeof(last_rom) - 1) != 0;
     snprintf(last_rom, sizeof(last_rom), "%s", rom);
-    if (changed && machine_started() && (!rom[0] || !strcasecmp(rom, "1541.rom"))) {      // back to the standard ROM
-        if (boot_put_builtin_rom("drive.put_rom", o.msg, o.msglen)) {
+    if (changed && (ctx_state() & CTX_STARTED) && (!rom[0] || !strcasecmp(rom, "1541.rom"))) {      // back to the standard ROM
+        if (put_builtin_rom("drive.put_rom", o.msg, o.msglen)) {
             return OPE_FAILED;
         }
     } else if (rom[0] && strcasecmp(rom, "1541.rom") && (changed || roms_after_reload)) {      // another file than the standard one
@@ -430,7 +494,7 @@ int op_load_kernal(CoreCtx *, const OpArgs &a, OpOut &o)
         snprintf(o.msg, o.msglen, "%s", r.msg);
         return OPE_FAILED;
     }
-    if (boot_cold_reset(o.msg, o.msglen)) {
+    if (cold_reset(o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     snprintf(o.msg, o.msglen, "KERNAL from %s for this session, machine restarted", a.s(0));
@@ -496,21 +560,12 @@ int op_set_rom_store(CoreCtx *, const OpArgs &a, OpOut &o)
     return OPE_OK;
 }
 
-// where the drive's image lies: its folder and name
-static bool drive_image_path(CbmDrive *d, char *out, int n)
-{
-    if (!cbm_drive_image_name(d) || !cbm_drive_last_dir(d)[0]) {
-        return false;
-    }
-    snprintf(out, n, "%s/%s", cbm_drive_last_dir(d), cbm_drive_image_name(d));
-    return true;
-}
-
 // "Insert Blank": a blank D64 made in a writable folder, mounted unlinked (nothing of it is written back), the file removed again
 int op_insert_blank(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    CbmDrive *d = cbm1541_drive(o.msg, o.msglen);
+    const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, create);
     if (!d) {
+        snprintf(o.msg, o.msglen, "This machine has no drive A");
         return OPE_FAILED;
     }
     char dir[200];
@@ -528,10 +583,10 @@ int op_insert_blank(CoreCtx *, const OpArgs &, OpOut &o)
     }
     char path[220];
     snprintf(path, sizeof(path), "%s/.blank.d64", dir);
-    if (cbm_drive_create(d, path, DF_D64, "BLANK", o.msg, o.msglen)) {
+    if (d->create(path, CBM1541_FORMAT_D64, "BLANK", o.msg, o.msglen)) {
         return OPE_FAILED;
     }
-    int rc = cbm_drive_mount(d, path, MM_UNLINKED, o.msg, o.msglen);
+    int rc = drive_mount(path, CBM1541_MODE_UNLINKED, o.msg, o.msglen);
     g_api->fs->remove(path);
     if (rc) {
         return OPE_FAILED;
@@ -544,10 +599,10 @@ int op_insert_blank(CoreCtx *, const OpArgs &, OpOut &o)
 // no digit follows, or the last letter between two non-letters - and the next file that has the next character there (digits 0-9, letters A-Z, round and
 // round, names compared in upper case) takes the place of this one after the swap delay, in the mode of this one. The walk is the firmware's own: its
 // wrap-around lands on the second character (a `continue` before the loop's c++), so after 9 comes 1 and after Z comes B, as there. The folder is listed
-// through api->fs, whose entries keep 55 characters of a name: a series whose names are longer finds no next disk.
-static int swap_next(CbmDrive *d, SvcFsEntry *ents, int cap, OpOut &o)
+// through api->fs, whose entries keep 55 characters of a name: a series whose names are longer finds no next disk. `cur` and `dir` are copies of what
+// drive_info gave (the eject ends the drive library's strings).
+static int swap_next(const char *cur, const char *dir, int mode, int delay_ms, SvcFsEntry *ents, int cap, OpOut &o)
 {
-    const char *cur = cbm_drive_image_name(d);
     char work[FS_NAME_MAX + 1];
     int len = (int)strlen(cur);
     if (len < 5 || len > FS_NAME_MAX) {
@@ -574,7 +629,7 @@ static int swap_next(CbmDrive *d, SvcFsEntry *ents, int cap, OpOut &o)
         snprintf(o.msg, o.msglen, "No denominating character found in %s", cur);
         return OPE_FAILED;
     }
-    int k = g_api->fs->list(cbm_drive_last_dir(d), ents, cap);
+    int k = g_api->fs->list(dir, ents, cap);
     char current = work[index];
     char top = lc_isalpha((unsigned char)current) ? 'A' : '0';
     char bottom = lc_isalpha((unsigned char)current) ? 'Z' : '9';
@@ -590,16 +645,15 @@ static int swap_next(CbmDrive *d, SvcFsEntry *ents, int cap, OpOut &o)
                 continue;
             }
             char next[FS_PATH_MAX];
-            snprintf(next, sizeof(next), "%s/%s", cbm_drive_last_dir(d), ents[i].name);
+            snprintf(next, sizeof(next), "%s/%s", dir, ents[i].name);
             char name[sizeof(ents[i].name)];
             snprintf(name, sizeof(name), "%s", ents[i].name);
-            const char *mn = cbm_drive_mode_name(d);
-            int mode = !strcmp(mn, "ro") ? MM_RO : (!strcmp(mn, "unlinked") ? MM_UNLINKED : MM_RW);
-            if (cbm_drive_eject(d, o.msg, o.msglen)) {            // c1541.cc:712: what the head wrote goes back to the file first
+            const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, slot_eject);
+            if (!d || d->slot_eject(o.msg, o.msglen)) {            // c1541.cc:712: what the head wrote goes back to the file first
                 return OPE_FAILED;
             }
-            wait_ms((uint32_t)cbm_drive_swap_delay_ms(d));
-            if (cbm_drive_mount(d, next, mode, o.msg, o.msglen)) {
+            wait_ms((uint32_t)(delay_ms > 0 ? delay_ms : 0));
+            if (drive_mount(next, mode, o.msg, o.msglen)) {
                 return OPE_FAILED;
             }
             snprintf(o.msg, o.msglen, "Swapped to %s", name);
@@ -610,59 +664,88 @@ static int swap_next(CbmDrive *d, SvcFsEntry *ents, int cap, OpOut &o)
     return OPE_FAILED;
 }
 
+// The disk in drive A: its full path, its file name and folder copied, its mode and the swap delay. False: no drive or no disk.
+struct DriveDisk {
+    char path[FS_PATH_MAX], name[FS_NAME_MAX + 1], dir[FS_PATH_MAX];
+    int mode, delay_ms;
+};
+static bool drive_disk(DriveDisk *k)
+{
+    Cbm1541Info info;
+    if (!drive_info(&info) || !info.image_path || !info.image_name || !info.last_dir || !info.last_dir[0]) {
+        return false;
+    }
+    snprintf(k->path, sizeof(k->path), "%s", info.image_path);
+    snprintf(k->name, sizeof(k->name), "%s", info.image_name);
+    snprintf(k->dir, sizeof(k->dir), "%s", info.last_dir);
+    k->mode = info.mode;
+    k->delay_ms = info.swap_delay_ms;
+    return true;
+}
+
 int op_swap(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    CbmDrive *d = cbm1541_drive(o.msg, o.msglen);
-    char cur[FS_PATH_MAX];
-    if (!d || !drive_image_path(d, cur, sizeof(cur))) {
-        snprintf(o.msg, o.msglen, "There is no disk in the drive to swap");
+    DriveDisk *k = (DriveDisk *)g_api->mem->malloc(sizeof(DriveDisk));                // 1.3 KB off the stack while the swap runs
+    if (!k || !drive_disk(k)) {
+        g_api->mem->free(k);
+        snprintf(o.msg, o.msglen, k ? "There is no disk in the drive to swap" : "No memory to swap");
         return OPE_FAILED;
     }
     SvcFsEntry *ents = (SvcFsEntry *)g_api->mem->malloc(256 * sizeof(SvcFsEntry));     // 18 KB while the swap runs, not for good
     if (!ents) {
+        g_api->mem->free(k);
         snprintf(o.msg, o.msglen, "No memory to list the folder");
         return OPE_FAILED;
     }
-    int rc = swap_next(d, ents, 256, o);
+    int rc = swap_next(k->name, k->dir, k->mode, k->delay_ms, ents, 256, o);
     g_api->mem->free(ents);
+    g_api->mem->free(k);
     return rc;
 }
 
 // "Unlink": the disk stays in the drive, the file is let go (what the machine writes is not saved any more)
 int op_unlink(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    CbmDrive *d = cbm1541_drive(o.msg, o.msglen);
-    char cur[FS_PATH_MAX];
-    if (!d || !drive_image_path(d, cur, sizeof(cur))) {
-        snprintf(o.msg, o.msglen, "There is no disk in the drive");
+    DriveDisk *k = (DriveDisk *)g_api->mem->malloc(sizeof(DriveDisk));
+    if (!k || !drive_disk(k)) {
+        g_api->mem->free(k);
+        snprintf(o.msg, o.msglen, k ? "There is no disk in the drive" : "No memory to unlink");
         return OPE_FAILED;
     }
-    if (!strcmp(cbm_drive_mode_name(d), "unlinked")) {
+    int rc = OPE_OK;
+    if (k->mode == CBM1541_MODE_UNLINKED) {
         snprintf(o.msg, o.msglen, "The disk is unlinked already");
-        return OPE_OK;
+    } else if (drive_mount(k->path, CBM1541_MODE_UNLINKED, o.msg, o.msglen)) {
+        rc = OPE_FAILED;
+    } else {
+        snprintf(o.msg, o.msglen, "Unlinked: %s is no longer written", k->name);
     }
-    if (cbm_drive_mount(d, cur, MM_UNLINKED, o.msg, o.msglen)) {
-        return OPE_FAILED;
-    }
-    snprintf(o.msg, o.msglen, "Unlinked: %s is no longer written", cbm_drive_image_name(d));
-    return OPE_OK;
+    g_api->mem->free(k);
+    return rc;
 }
 
 // ---- the machine: pause, clear memory, save memory ------------------------------------------------------------------------------------------------
 // Pause keeps C64_STOP asserted after the menu closes (run.cc close_menu, Freeze::leave(keep_stopped)); Resume takes the flag away and the close releases it.
 int op_pause_toggle(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    if (!machine_started()) {
+    const SvcCtx *c = b33_ctx();
+    uint32_t st = ctx_state();
+    if (!c || !(st & CTX_STARTED)) {
         snprintf(o.msg, o.msglen, "The machine is not running yet");
         return OPE_FAILED;
     }
-    machine_set_paused(!machine_paused());
-    snprintf(o.msg, o.msglen, machine_paused() ? "Paused: the machine stands still, F7 or the menu key brings the menu back" : "Resumed");
+    bool pause = !(st & CTX_PAUSED);
+    c->set_paused(pause);
+    snprintf(o.msg, o.msglen, pause ? "Paused: the machine stands still, F7 or the menu key brings the menu back" : "Resumed");
     return OPE_OK;
 }
 
-const char *state_pause_label(CoreCtx *) { return machine_paused() ? "Resume" : "Pause"; }
-const char *state_machine(CoreCtx *) { return !machine_started() ? "Waiting" : (machine_paused() ? "Paused" : (menu_is_open() ? "Frozen" : "Running")); }
+const char *state_pause_label(CoreCtx *) { return (ctx_state() & CTX_PAUSED) ? "Resume" : "Pause"; }
+const char *state_machine(CoreCtx *)
+{
+    uint32_t st = ctx_state();
+    return !(st & CTX_STARTED) ? "Waiting" : (st & CTX_PAUSED) ? "Paused" : (st & CTX_MENU_OPEN) ? "Frozen" : "Running";
+}
 
 // "Reboot (Clr Mem)": the RAM is zeroed through the second port while the machine is held, then the cold reset (Gideon MENU_C64_CLEARMEM: clear_ram, start_cartridge)
 int op_clear_reboot(CoreCtx *, const OpArgs &, OpOut &o)
@@ -678,35 +761,18 @@ int op_clear_reboot(CoreCtx *, const OpArgs &, OpOut &o)
         ram_write(a, zero, sizeof(zero));
     }
     c64_ram_memonly(false);
-    if (boot_cold_reset(o.msg, o.msglen)) {
+    if (cold_reset(o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     snprintf(o.msg, o.msglen, "Memory cleared, machine restarted");
     return OPE_OK;
 }
 
-// where a file of the menu goes: the folder the menu was on (MenuCtl::note_folder), else the first medium; the extension is added when the name has none
-bool trx_target_path(CoreCtx *, const char *name, const char *ext, char *out, int n)
+// where a file of the menu goes (ctx.target_path): the folder the menu was on, else the first medium of the root but /flash; `ext` is added when the name has none
+static bool target_path(const char *name, const char *ext, char *out, int n)
 {
-    char dir[200];
-    snprintf(dir, sizeof(dir), "%s", menu_media_dir());
-    if (!dir[0]) {
-        SvcFsEntry r[4];
-        int k = g_api->fs->list("/", r, 4);
-        for (int i = 0; i < k; i++) {
-            if (strcasecmp(r[i].name, "flash")) {
-                snprintf(dir, sizeof(dir), "/%s", r[i].name);
-                break;
-            }
-        }
-    }
-    if (!dir[0]) {
-        return false;
-    }
-    const char *dot = strrchr(name, '.');
-    int dl = (int)strlen(dir);
-    snprintf(out, n, "%s%s%s%s", dir, dl && dir[dl - 1] == '/' ? "" : "/", name, dot ? "" : ext);
-    return true;
+    const SvcCtx *c = b33_ctx();
+    return c && c->target_path(name, ext, out, n);
 }
 
 static int write_ddr(const char *path, uint32_t off, uint32_t len, bool ram, char *msg, int msglen)
@@ -743,7 +809,7 @@ static int write_ddr(const char *path, uint32_t off, uint32_t len, bool ram, cha
             ram_read(off + done, buf, n);
             c64_ram_memonly(false);
         } else {
-            io_ddr_read(off + done, buf, n);
+            ddr_read(off + done, buf, n);
         }
         ok = g_api->fs->write(f, done, buf, n);
         done += n;
@@ -760,24 +826,24 @@ static int write_ddr(const char *path, uint32_t off, uint32_t len, bool ram, cha
     return 0;
 }
 
-int op_save_ram(CoreCtx *c, const OpArgs &a, OpOut &o)
+int op_save_ram(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     char p[260];
-    if (!trx_target_path(c, a.s(0), ".bin", p, sizeof(p))) {
+    if (!target_path(a.s(0), ".bin", p, sizeof(p))) {
         snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
     return write_ddr(p, 0, 0x10000, true, o.msg, o.msglen) ? OPE_FAILED : OPE_OK;
 }
 
-int op_save_reu(CoreCtx *c, const OpArgs &a, OpOut &o)
+int op_save_reu(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     char p[260];
     if (setting_ix("RAM Expansion Unit", 0) != 1) {
         snprintf(o.msg, o.msglen, "The REU is not enabled (F5 > 4 I/O)");
         return OPE_FAILED;
     }
-    if (!trx_target_path(c, a.s(0), ".reu", p, sizeof(p))) {
+    if (!target_path(a.s(0), ".reu", p, sizeof(p))) {
         snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
@@ -792,29 +858,68 @@ int op_save_reu(CoreCtx *c, const OpArgs &a, OpOut &o)
 static uint8_t reu_byte(uint32_t at)
 {
     uint8_t b = 0;
-    io_ddr_read(at, &b, 1);
+    ddr_read(at, &b, 1);
     return b;
 }
 
+// The type of the four drives (0 none, 1541, 1581, MP3_DNP) from at most three reads of four bytes: the type bytes at $BB0E (which are also the GEOS 64
+// mark), GEOS 64's at $798E, the first banks at $7DC7.
+static void mp3_types_now(int t[4])
+{
+    uint8_t real[4], bank[4];
+    if (cart_active()) {
+        t[0] = t[1] = t[2] = t[3] = 0;
+        return;
+    }
+    ddr_read(0xBB0E, real, 4);
+    bool geos64 = real[0] == 0x03 && real[1] == 0xA9 && real[2] == 0x06 && real[3] == 0x8D;
+    if (geos64) {
+        ddr_read(0x798E, real, 4);
+    }
+    ddr_read(0x7DC7, bank, 4);
+    for (int n = 0; n < 4; n++) {
+        uint8_t r = geos64 && real[n] > 0x83 ? 0 : real[n];
+        int k = 0;
+        k = r == 0x81 ? 1541 : k;
+        // 0x82, a 1571 RAM drive, counts as none: .d71 is out of trx64u (Alex 2026-11-18: ".d71 goes out completely")
+        k = r == 0x83 ? 1581 : k;
+        k = r == 0x84 || r == 0xA4 ? MP3_DNP : k;
+        t[n] = bank[n] > 0x40 ? 0 : k;
+    }
+}
+
+// for an operation: the drive as the REU holds it now
 static int mp3_type(int n)
 {
-    if (c64_cart_active()) {
-        return 0;
+    int t[4];
+    mp3_types_now(t);
+    return t[n & 3];
+}
+
+// For the menu's states: they all run in one pass (at the open, after an operation, every 2 s), and the eight of the RAM drives (and the show_state
+// conditions over them) share one look at the REU per pass instead of three reads each. The REU changes outside this library (the C64, a state load), so the
+// look is not kept past the pass (MP3_LOOK_MS); an operation of this library that writes the REU drops it (mp3_forget).
+#define MP3_LOOK_MS 100
+static struct {
+    bool valid;
+    uint32_t at;
+    int t[4];
+} g_mp3;
+
+static void mp3_forget(void)
+{
+    g_mp3.valid = false;
+}
+
+static int mp3_seen(int n)
+{
+    uint32_t now = now_ms();
+    if (!g_mp3.valid || now - g_mp3.at > MP3_LOOK_MS) {
+        mp3_types_now(g_mp3.t);
+        g_mp3.at = now;
+        g_mp3.valid = true;
     }
-    uint8_t head[4], real = reu_byte(0xBB0E + (uint32_t)n);
-    io_ddr_read(0xBB0E, head, 4);
-    if (head[0] == 0x03 && head[1] == 0xA9 && head[2] == 0x06 && head[3] == 0x8D) {          // GEOS 64
-        real = reu_byte(0x798E + (uint32_t)n);
-        if (real > 0x83) {
-            real = 0;
-        }
-    }
-    int t = 0;
-    t = real == 0x81 ? 1541 : t;
-    // 0x82, a 1571 RAM drive, counts as none: .d71 is out of trx64u (Alex 2026-11-18: ".d71 goes out completely")
-    t = real == 0x83 ? 1581 : t;
-    t = real == 0x84 || real == 0xA4 ? MP3_DNP : t;
-    return reu_byte(0x7DC7 + (uint32_t)n) > 0x40 ? 0 : t;
+    return g_mp3.t[n & 3];
 }
 
 static uint32_t mp3_size(int n, int type)
@@ -830,7 +935,7 @@ static uint32_t mp3_size(int n, int type)
 }
 
 // The command interface's view of a RAM drive (CONTROL 0x40, DOS 0x41 / 0x42): its type, its size (a native one by its track count) and where its first byte lies in the REU.
-static void uci_ramdrive(CoreCtx *, int n, int *type, uint32_t *size, uint32_t *base)
+static void uci_ramdrive(int n, int *type, uint32_t *size, uint32_t *base)
 {
     *type = mp3_type(n);
     *size = *type ? mp3_size(n, *type) : 0;
@@ -839,7 +944,7 @@ static void uci_ramdrive(CoreCtx *, int n, int *type, uint32_t *size, uint32_t *
 
 static const char *mp3_name(int n)
 {
-    switch (mp3_type(n)) {
+    switch (mp3_seen(n)) {
     case 1541: return "1541";
     case 1581: return "1581";
     case MP3_DNP: return "DNP";
@@ -850,13 +955,13 @@ const char *state_mp3_a(CoreCtx *) { return mp3_name(0); }
 const char *state_mp3_b(CoreCtx *) { return mp3_name(1); }
 const char *state_mp3_c(CoreCtx *) { return mp3_name(2); }
 const char *state_mp3_d(CoreCtx *) { return mp3_name(3); }
-const char *state_nomp3_a(CoreCtx *) { return mp3_type(0) ? 0 : "none"; }
-const char *state_nomp3_b(CoreCtx *) { return mp3_type(1) ? 0 : "none"; }
-const char *state_nomp3_c(CoreCtx *) { return mp3_type(2) ? 0 : "none"; }
-const char *state_nomp3_d(CoreCtx *) { return mp3_type(3) ? 0 : "none"; }
+const char *state_nomp3_a(CoreCtx *) { return mp3_seen(0) ? 0 : "none"; }
+const char *state_nomp3_b(CoreCtx *) { return mp3_seen(1) ? 0 : "none"; }
+const char *state_nomp3_c(CoreCtx *) { return mp3_seen(2) ? 0 : "none"; }
+const char *state_nomp3_d(CoreCtx *) { return mp3_seen(3) ? 0 : "none"; }
 
 // "Save MP3 Drv A..D": the drive's bytes into a file named by the person
-int op_save_mp3(CoreCtx *c, const OpArgs &a, OpOut &o)
+int op_save_mp3(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     int n = a.i(0), type = mp3_type(n);
     char p[260];
@@ -864,7 +969,7 @@ int op_save_mp3(CoreCtx *c, const OpArgs &a, OpOut &o)
         snprintf(o.msg, o.msglen, "No GEOS RAM drive %c in the REU", 'A' + n);
         return OPE_FAILED;
     }
-    if (!trx_target_path(c, a.s(1), type == 1541 ? ".d64" : type == 1581 ? ".d81" : ".dnp", p, sizeof(p))) {
+    if (!target_path(a.s(1), type == 1541 ? ".d64" : type == 1581 ? ".d81" : ".dnp", p, sizeof(p))) {
         snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
@@ -914,6 +1019,7 @@ int op_load_mp3(CoreCtx *, const OpArgs &a, OpOut &o)
     }
     uint32_t half = len, total = 0;
     bool ok = true;
+    mp3_forget();
     {
         uint32_t from = 0, dst = at;
         for (uint32_t done = 0; ok && done < half && from + done < sz;) {
@@ -922,7 +1028,7 @@ int op_load_mp3(CoreCtx *, const OpArgs &a, OpOut &o)
                 k = (uint32_t)(sz - from - done);
             }
             ok = g_api->fs->read(f, from + done, buf, k);
-            io_ddr_write(dst + done, buf, k);
+            ddr_write(dst + done, buf, k);
             done += k;
             total += k;
         }
@@ -937,14 +1043,19 @@ int op_load_mp3(CoreCtx *, const OpArgs &a, OpOut &o)
     return OPE_OK;
 }
 
-int op_save_cart(CoreCtx *c, const OpArgs &a, OpOut &o)
+int op_save_cart(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     char p[260];
-    if (!trx_target_path(c, a.s(0), ".crt", p, sizeof(p))) {
+    if (!target_path(a.s(0), ".crt", p, sizeof(p))) {
         snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
-    return c64_cart_save(p, o.msg, o.msglen) ? OPE_FAILED : OPE_OK;
+    const C64CartApi *k = X_GET(X_CART, C64CartApi, save);
+    if (!k) {
+        snprintf(o.msg, o.msglen, "No cartridge library");
+        return OPE_FAILED;
+    }
+    return k->save(p, o.msg, o.msglen) ? OPE_FAILED : OPE_OK;
 }
 
 const char *state_suggest_ram(CoreCtx *) { return "c64ram"; }
@@ -958,16 +1069,16 @@ const char *state_suggest_ring(CoreCtx *) { return "ring"; }
 const char *state_reu_on(CoreCtx *) { return setting_ix("RAM Expansion Unit", 0) == 1 && !port_taken() ? "yes" : 0; }   // T228 R20 2: the REU is there only as the REU (not GeoRAM) and while no cartridge has the port
 // the three rows of the port's devices (REU, Ultimate audio, UCI) are listed while the port is free; while it is taken a row of the same name says why they are off (c64.cc:424-428)
 const char *state_port_taken(CoreCtx *) { return port_taken() ? "Disabled (cartridge)" : 0; }
-const char *state_cartridge(CoreCtx *) { return c64_cart_active() ? c64_cart_name() : 0; }
-const char *state_cartridge_path(CoreCtx *) { return c64_cart_active() ? c64_cart_path() : 0; }
+const char *state_cartridge(CoreCtx *) { return cart_active() ? cart_name() : 0; }
+const char *state_cartridge_path(CoreCtx *) { return cart_active() ? cart_path() : 0; }
 
-// ---- the command interface's machine side (uci.cc): the REU and drive A -------------------------------------------------------------------------------------------
-static int uci_reu(CoreCtx *, uint32_t *size, uint32_t *offset, char *img, int imgn, char *busy, int busyn)
+// ---- the command interface's machine side (UciHooks of the export "uci"; every callback runs on the UCI's own task): the REU and drive A -----------------
+static int uci_reu(uint32_t *size, uint32_t *offset, char *img, int imgn, char *busy, int busyn)
 {
     if (setting_ix("RAM Expansion Unit", 0) != 1) {
         return -2;
     }
-    if (c64_cart_active()) {
+    if (cart_active()) {
         snprintf(busy, busyn, "A cartridge uses the REU's memory: remove it first");
         return -4;
     }
@@ -977,19 +1088,19 @@ static int uci_reu(CoreCtx *, uint32_t *size, uint32_t *offset, char *img, int i
     return 0;
 }
 
-static bool uci_drive_info(CoreCtx *, int idx, uint8_t *type, uint8_t *addr, bool *power)
+static bool uci_drive_info(int idx, uint8_t *type, uint8_t *addr, bool *power)
 {
-    CbmDrive *d = idx == 0 ? cbm1541_drive(0, 0) : 0;
-    if (!d) {
+    Cbm1541Info info;
+    if (idx != 0 || !drive_info(&info)) {
         return false;
     }
-    *type = (uint8_t)(cbm_drive_type(d) == DT_UNSET ? DT_1541 : cbm_drive_type(d));
-    *addr = (uint8_t)cbm_drive_bus_id(d);
-    *power = cbm_drive_powered(d);
+    *type = (uint8_t)(info.type == CBM1541_TYPE_UNSET ? (int32_t)CBM1541_TYPE_1541 : info.type);
+    *addr = info.unit;
+    *power = info.powered != 0;
     return true;
 }
 
-static int uci_drive_do(CoreCtx *, int idx, int what, const char *path, char *msg, int msglen)
+static int uci_drive_do(int idx, int what, const char *path, char *msg, int msglen)
 {
     static const char *const names[] = { "drive.mount", "drive.eject", "drive.swap", "drive.set_power", "drive.set_power" };
     OpIn in[3] = { in_str("slot", "iec:drive_a"), in_str("path", path ? path : ""), in_str("mode", "rw") };
@@ -1009,15 +1120,15 @@ static int uci_drive_do(CoreCtx *, int idx, int what, const char *path, char *ms
     return rc == OPE_OK ? 0 : 1;
 }
 
-static bool uci_ef_clear(CoreCtx *, uint8_t bank, bool high) { return c64_cart_ef_clear(bank, high); }
-static int uci_sid_map(CoreCtx *c, uint8_t *data) { return u64cfg_sid_map(c, data); }
-static void uci_palette(CoreCtx *c, int what, uint8_t idx, uint8_t (*rgb)[3]) { u64cfg_palette(c, what, idx, rgb); }
-
-static const UciHost *uci_host(void)
+static bool uci_ef_clear(uint8_t bank, bool high)
 {
-    static const UciHost h = { uci_reu, uci_drive_info, uci_drive_do, uci_sid_map, "/temp/c64_memory.bin", uci_ef_clear, uci_ramdrive, uci_palette };
-    return &h;
+    const C64CartApi *c = X_GET(X_CART, C64CartApi, ef_clear);
+    return c && c->ef_clear(bank, high);
 }
+
+static const UciHooks uci_hooks = { sizeof(UciHooks), uci_reu, uci_drive_info, uci_drive_do, u64cfg_sid_map, "/temp/c64_memory.bin", uci_ef_clear,
+                                    uci_ramdrive, u64cfg_palette };
+const UciHooks *trx64u_uci_hooks(void) { return &uci_hooks; }
 
 
 // ---- the SID player (T228 R21 item 7) ---------------------------------------------------------------------------------------------------------
@@ -1070,6 +1181,19 @@ static const char *file_name(const char *path)
     return sl ? sl + 1 : path;
 }
 
+// The export "sid" with the six calls this file makes (members are only appended, so a table that has the last one has them all); null: not loaded.
+static const SidApi *sid_lib(void)
+{
+    return X_GET(X_SID, SidApi, mus_header);
+}
+
+// the folder the core's .cor installed its data into (ctx.core_folder); false: this start has no .cor
+static bool core_folder(char *out, int n)
+{
+    const SvcCtx *c = b33_ctx();
+    return c && c->core_folder(0, out, n);
+}
+
 struct SidFile {
     SidTune t;
     uint32_t fsize;
@@ -1081,6 +1205,11 @@ static SidFile g_sf;
 
 static int sid_open(const char *path, SidFile *sf, bool for_play, char *msg, int msglen)
 {
+    const SidApi *s = sid_lib();
+    if (!s) {
+        snprintf(msg, msglen, "The SID library is not loaded");
+        return 1;
+    }
     bool ext_mus = ext_is(path, "mus") || ext_is(path, "str");
     if (for_play && ext_mus) {
         with_ext(path, ".mus", sf->use, sizeof(sf->use));            // a .str selected: the .mus is loaded first
@@ -1111,7 +1240,7 @@ static int sid_open(const char *path, SidFile *sf, bool for_play, char *msg, int
         snprintf(msg, msglen, "Can't read header");
         return 1;
     }
-    if (!sid_parse(head, n, file_name(path), ext_mus, &sf->t)) {
+    if (!s->parse(head, n, file_name(path), ext_mus, &sf->t)) {
         snprintf(msg, msglen, "File type error");
         return 1;
     }
@@ -1154,7 +1283,7 @@ int op_sid_info(CoreCtx *, const OpArgs &a, OpOut &o)
     if (sid_open(a.s(0), sf, false, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
-    int n = sid_info_text(&sf->t, (char *)o.data, o.datacap - 1);
+    int n = sid_lib()->info_text(&sf->t, (char *)o.data, o.datacap - 1);   // sid_open found the library
     o.data[n] = 0;
     o.ndata = n;
     return OPE_OK;
@@ -1236,8 +1365,9 @@ static int sid_fire(CoreCtx *c, char *msg, int msglen)
 {
     SidFile *sf = &g_sf;
     SidTune &t = sf->t;
-    if (!c64_window()) {
-        snprintf(msg, msglen, "The C64's memory window is not there");
+    const SidApi *s = sid_lib();
+    if (!c64_window() || !s) {
+        snprintf(msg, msglen, !s ? "The SID library is not loaded" : "The C64's memory window is not there");
         return 1;
     }
     c64_stop(true);
@@ -1250,7 +1380,7 @@ static int sid_fire(CoreCtx *c, char *msg, int msglen)
     uint32_t off_end = load_file(sf->use, pos, t.start);
     if (t.mus) {
         uint32_t first_end;
-        bool stereo = sid_mus_stereo(&t, off_end, mus_rd, 0, &first_end);
+        bool stereo = s->mus_stereo(&t, off_end, mus_rd, 0, &first_end);
         if (stereo) {
             off_end = first_end;
         } else if (ext_is(g_sj.path, "mus") || ext_is(g_sj.path, "str")) {      // tryLoadStereoMus: the .str of the same name
@@ -1269,7 +1399,7 @@ static int sid_fire(CoreCtx *c, char *msg, int msglen)
         uint8_t *player = (uint8_t *)g_api->mem->malloc(0x2000);  // the MUS player's 8 KB while it goes in
         uint32_t pn = 0;
         char dir[FS_PATH_MAX], pp[FS_PATH_MAX];
-        if (!corefolder_dir(dir, sizeof(dir))) {
+        if (!core_folder(dir, sizeof(dir))) {
             g_api->mem->free(player);
             c64_ram_memonly(false);
             c64_stop(false);
@@ -1295,7 +1425,7 @@ static int sid_fire(CoreCtx *c, char *msg, int msglen)
         g_api->mem->free(player);
         ram_poke(0xEC6E, (uint8_t)t.start);
         ram_poke(0xEC70, (uint8_t)(t.start >> 8));
-        sid_mus_header(&t, stereo);
+        s->mus_header(&t, stereo);
         if (stereo) {
             ram_poke(0xFC6E, (uint8_t)off_end);
             ram_poke(0xFC70, (uint8_t)(off_end >> 8));
@@ -1304,7 +1434,7 @@ static int sid_fire(CoreCtx *c, char *msg, int msglen)
     t.hdr[0x7E] = (uint8_t)(t.end & 0xFF);
     t.hdr[0x7F] = (uint8_t)(t.end >> 8);
     SidReq req[3];
-    int count = sid_requests(&t, req);
+    int count = s->requests(&t, req);
     ram_put(t.header_location, t.hdr, 0x80);                        // the SID header goes into the C64's memory
     ram_poke(0x0164, (uint8_t)t.header_location);
     ram_poke(0x0165, (uint8_t)(t.header_location >> 8));
@@ -1387,13 +1517,13 @@ int op_sid_play(CoreCtx *, const OpArgs &a, OpOut &o)
         return OPE_FAILED;
     }
     const char *why = 0;
-    if (sid_plan(&sf->t, sf->fsize, sf->load_le, song, &why)) {
+    if (sid_lib()->plan(&sf->t, sf->fsize, sf->load_le, song, &why)) {
         snprintf(o.msg, o.msglen, "%s", why);
         return OPE_FAILED;
     }
     // the cartridge image: the player's 8 KB, the BASIC ROM, the song lengths (initSidCart, readSongLengths)
     char dir[FS_PATH_MAX], pp[FS_PATH_MAX];
-    if (!corefolder_dir(dir, sizeof(dir))) {
+    if (!core_folder(dir, sizeof(dir))) {
         snprintf(o.msg, o.msglen, "the SID player files are in the .cor's folder: this start has no .cor");
         return OPE_FAILED;
     }
@@ -1429,10 +1559,15 @@ int op_sid_play(CoreCtx *, const OpArgs &a, OpOut &o)
     ram_poke(0x0162, 0);                                            // the address of the handshake DMA load
     c64_ram_memonly(false);
     snprintf(g_sj.path, sizeof(g_sj.path), "%s", path);
-    if (c64_cart_run_image(sf->t.mus ? "MUS Player Cartridge" : "SID Player Cartridge", g_img, o.msg, o.msglen)) {
+    const C64CartApi *k = X_GET(X_CART, C64CartApi, run_image);
+    if (!k) {
+        snprintf(o.msg, o.msglen, "No cartridge library: the SID player is a cartridge");
         return OPE_FAILED;
     }
-    if (boot_cold_reset(o.msg, o.msglen)) {
+    if (k->run_image(sf->t.mus ? "MUS Player Cartridge" : "SID Player Cartridge", g_img, o.msg, o.msglen)) {
+        return OPE_FAILED;
+    }
+    if (cold_reset(o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     g_sj.active = true;
@@ -1461,16 +1596,19 @@ void trx64u_sid_service(CoreCtx *c)
     ram_read(2, &b, 1);
     char msg[160];
     msg[0] = 0;
+    const SvcCtx *x = b33_ctx();
     if (b == 0x01) {
         g_sj.active = false;
-        if (sid_fire(c, msg, sizeof(msg))) {
-            ui_notice(msg);
+        if (sid_fire(c, msg, sizeof(msg)) && x) {
+            x->notice(msg, false);                                  // replaces a waiting notice (this file's rule)
         }
     } else if (g_sj.ran_ms > SID_WAIT_MS) {
         g_sj.active = false;
         lib_logf("[sid] time out: the player cartridge did not answer");
-        ui_notice("Time out: the SID player cartridge did not start");
-        boot_cold_reset(msg, sizeof(msg));                         // FW init_cartridge: the machine as it was
+        if (x) {
+            x->notice("Time out: the SID player cartridge did not start", false);
+        }
+        cold_reset(msg, sizeof(msg));                               // FW init_cartridge: the machine as it was
     }
 }
 // ---- the Ultimate DMA service (dmasvc.cc, FW network/socket_dma.cc:129-232): what a command of port 64 does here, by the names the server calls (dma.*). The server stages
@@ -1526,15 +1664,16 @@ int op_dma_crt(CoreCtx *, const OpArgs &a, OpOut &o)
 // SOCKET_CMD_REUWRITE (FW :165-173): the bytes into the REU's memory at the 24 bit offset, wrapping at 16 MB; dropped while a cartridge image is in that memory (FW reu_memory_usable).
 int op_dma_reu(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    if (c64_cart_active()) {
+    if (cart_active()) {
         snprintf(o.msg, o.msglen, "REU write dropped: a cartridge uses the REU's memory");
         return OPE_FAILED;
     }
     uint32_t off = (uint32_t)a.i(0), n = a.len(1);
     const uint8_t *p = a.p(1);
+    mp3_forget();
     while (n) {
         uint32_t k = 0x1000000u - off < n ? 0x1000000u - off : n;
-        io_ddr_write(off, p, k);
+        ddr_write(off, p, k);
         p += k;
         n -= k;
         off = 0;

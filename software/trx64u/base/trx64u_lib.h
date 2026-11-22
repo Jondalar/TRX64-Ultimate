@@ -1,29 +1,75 @@
-// What every file of the trx64u library shares: the base's table (lib_trx64u.cc keeps it), the log, the settings as the base shows them (setting.cc), and
-// small helpers over the groups of base 3.1. A group the base does not give (null) makes its helper do nothing and read 0; the code that needs a group
-// checks it first. The groups are read at each use, not at the registration: the base fills api->trx and api->c64 after the libraries are loaded.
+// What every file of the trx64u library shares: the base's table (lib_trx64u.cc keeps it), the log, the settings as the base holds them (setting.cc), the
+// groups of base 3.3 (../include/base33.h), the exports of MultiCore's shared libraries, and small helpers over them. A group or an export the base does
+// not give (null) makes its helper do nothing and read 0; the code that needs one checks it first. Nothing is read at the registration: the groups and
+// the exports are read at each use (api->trx and api->c64 are filled after the libraries are loaded, the shared libraries load in any order).
 #ifndef TRX64U_LIB_H
 #define TRX64U_LIB_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <string.h>
 #include "libapi.h"
 #include "libc_extra.h"
+#include "base33.h"
+#include "c64cart_api.h"
+#include "cbm1541_api.h"
+#include "uci_api.h"
+#include "sid_api.h"
+#include "tempdisk_api.h"
 
 extern const LibApi *g_api;
 
 // printf for the log: one line (a trailing newline is dropped), at most 200 bytes.
 void lib_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
-// ---- the settings: what api->ops->state("set.<key>") says, turned back into what the code works with (setting.cc, the lists of setlists.h)
-int setting_ix(const char *key, int def);           // the index of the value (an enum's position, a range's number - its low end); def: no such setting or no value
-int setting_num(const char *key, int def);          // the index plus the setting's base: a range's number as shown (-780), an enum's index
+// ---- the settings of the running core (setting.cc): the base's settings group, the index of each key of this menu kept while its generation holds
+int setting_ix(const char *key, int def);           // the position of the value in force (an enum's index, a range's number - its low end); def: no such setting
+int setting_num(const char *key, int def);          // the position plus the setting's base: a range's number as shown (-780), an enum's index
 int setting_count(const char *key);                 // the number of values, 0 for a key the menu does not have
 bool setting_known(const char *key);                // the menu has a choice setting of that key
-const char *setting_text(const char *key);          // a text setting's text without leading blanks, "" when empty or unknown
-bool settings_ready(void);                          // the base has the settings (a state of the menu's own answers)
+const char *setting_label(const char *key, int ix); // the label of value ix of a choice setting of the menu; null: none (a range, no such key)
+const char *setting_text(const char *key);          // a text setting's text without leading blanks, "" when empty or unknown; copy it at once
+bool settings_ready(void);                          // the base has merged this menu's settings
+bool setting_set(const char *key, int ix);          // settings.find + settings.set: stored (the .cfg with Auto Save Config), not applied
+void setting_override(const char *key, int ix);     // settings.find + settings.override_value: this run only, not applied
 
 // ---- the groups
 static inline uint32_t now_ms(void) { return g_api->sys ? g_api->sys->ms() : 0; }
 void wait_ms(uint32_t ms);                          // at least ms (lib_trx64u.cc)
+
+// The running core's flags, CTX_* of svc_ctx.h (ctx.state); 0 without the group.
+static inline uint32_t ctx_state(void)
+{
+    const SvcCtx *c = b33_ctx();
+    return c ? c->state() : 0;
+}
+
+// The DDR2 window of the core from offset 0 (io.ddr_read, io.ddr_write): the REU's memory. A write is complete on return. Without the group a read gives zeros.
+static inline void ddr_read(uint32_t off, void *p, uint32_t n)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->ddr_read(off, p, n);
+    } else {
+        memset(p, 0, n);
+    }
+}
+static inline void ddr_write(uint32_t off, const void *p, uint32_t n)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->ddr_write(off, p, n);
+    }
+}
+
+// An operation of the registry by name (api->ops->call), its message copied to msg. Returns its OpErr (OPE_NOT_FOUND: no library has it).
+int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
+
+// ---- the exports of MultiCore's shared libraries (api->lib->find(name, 1, &size)): found at the first use and kept, looked for again while not found.
+// x_table answers the table when its size covers the member at `off` and that member is set; else null. X_GET names the member.
+enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk"
+const void *x_table(int which, uint32_t off);
+#define X_GET(which, T, m) ((const T *)x_table((which), (uint32_t)offsetof(T, m)))
 
 // The TRX block, byte registers (api->trx->regs).
 static inline uint8_t trx_rd(uint32_t reg) { return g_api->trx ? g_api->trx->regs[reg] : 0; }

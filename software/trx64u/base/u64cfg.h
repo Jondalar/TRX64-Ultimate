@@ -25,7 +25,6 @@ int fx_fsid_q11(CoreCtx *c, const OpArgs &a, OpOut &o);
 int fx_fsid_q20(CoreCtx *c, const OpArgs &a, OpOut &o);
 int fx_fsid_q21(CoreCtx *c, const OpArgs &a, OpOut &o);
 int fx_misc(CoreCtx *c, const OpArgs &a, OpOut &o);
-int fx_input(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_palette_apply(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_palette_default(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_power_off(CoreCtx *c, const OpArgs &a, OpOut &o);
@@ -66,9 +65,10 @@ void u64cfg_mute_sids(void);
 void u64cfg_power_on_keys(CoreCtx *c);
 void u64cfg_restore_mixer(CoreCtx *c);
 
-// The command interface's palette and SID map commands (uci.cc through UciHost): what 0 reads the 16 colours, 1 sets all, 2 sets colour idx from rgb[0], 3 resets; the SID map bytes.
-void u64cfg_palette(CoreCtx *c, int what, uint8_t idx, uint8_t (*rgb)[3]);
-int u64cfg_sid_map(CoreCtx *c, uint8_t *data);
+// The command interface's palette and SID map commands (the export "uci" through UciHooks): what 0 reads the 16 colours, 1 sets all, 2 sets colour idx from
+// rgb[0], 3 resets; the SID map bytes.
+void u64cfg_palette(int what, uint8_t idx, uint8_t (*rgb)[3]);
+int u64cfg_sid_map(uint8_t *data);
 
 // Which SID sits in a socket (the last detection, 0 none, 1 6581, 2 8580, ...) and the names for the screen.
 const char *u64cfg_sid_type_name(int type);
@@ -77,8 +77,5 @@ const char *u64cfg_sid_type_name(int type);
 // and type (1 6581, 2 8580, 3 either) are mapped on the sockets and the emulated SIDs, the mixer follows. The machine must be stopped. False: no mapping
 // was found (every SID is left unmapped). True also when the setting "SID Player Autoconfig" is off (nothing is done then).
 bool u64cfg_sid_autoconfig(CoreCtx *c, int count, const uint8_t *base, const uint8_t *type);
-
-// The USB HID driver's mouse items (usb_hid.cc reads them by this C name, weak there).
-extern "C" int u64_get_usb_hid_config_value(int key, int default_value);
 
 #endif
