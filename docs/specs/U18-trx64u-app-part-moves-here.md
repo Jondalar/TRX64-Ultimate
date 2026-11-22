@@ -420,3 +420,8 @@ Nothing decided yet.
     and `ringdump /usb0/t.c64rering 4 5`, watch the progress row, RUN/STOP mid-dump removes the file, the same frame
     over RPC (`monitor/exec dump`) is byte-identical. Open: the info row (`trx_ring_status`, register reads) and
     `rstep` / `frame` / `goto` / `mark` still reach the ring on the menu task.
+  - **More of F4 through the queue, and RingSteps (MultiCore, by Alex's delegation):** the verbs rstep, frame, goto,
+    mark and the trace status go through the same queue and run in `monitor.serve` one pass later; the info row draws
+    from a snapshot the poll refreshes (at most 5 ms old). One rule: register calls only under the lock, no exception
+    list. RingSteps is its own named export "ringsteps" 1 (`LIB_EXPORTS = ring=1 ringsteps=1`); "ring" stays exactly
+    the firmware's `u2p_ring_api_t`; a second table inside one export is not an append.
