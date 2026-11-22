@@ -30,7 +30,7 @@ gateware block: `PROVENANCE.md`. Building: `BUILD.md`.
 
 ## Status
 
-Release 0.3.0 (build `main-31e69921`, 2026-11-16); the files are on the releases page, the way to
+Release 0.3.1 (build `main-d94aa68e`, 2026-11-22); the files are on the releases page, the way to
 install them in `INSTALL.md`. The milestones of the beginning ended when the platform work moved into
 its own project, TRX64U-MultiCore (ADR-0066 in the repository); what is open is in `TODO.md`.
 
