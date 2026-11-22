@@ -390,3 +390,9 @@ Nothing decided yet.
     one call, no progress); the F4 terminal reaches the ring table from `monitor.key`, which runs without the core lock.
     More firmware bugs (D6, frozen copy; fixed in the library): `Gz` writes through a null pointer when its 16 KB buffer
     allocation fails; a failed `.c64rering` write leaves the partial file.
+  - **F4 ring commands and the core lock (MultiCore, by Alex's delegation):** the terminal's key handler only queues
+    dump / ringdump / ringsave / undump / ringload; the when_frozen poll `monitor.serve` (lock held) runs them one step
+    per pass through the ring's stepped operations, so the lock is held one step at a time and the terminal keeps
+    answering and shows progress; RPC and F4 share the path. Not without `KF_DIRECT` (typing must stay immediate), and the
+    base hands no core lock to libraries (deadlocks from the menu task). "Save .C64RE dump" stays a `[[task]]` in Home:
+    `job = true` on a task comes with descrec 3.3.
