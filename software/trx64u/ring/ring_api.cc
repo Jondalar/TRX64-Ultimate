@@ -5,6 +5,7 @@
 #include "app_api.h"
 #include "trx_ring.h"
 #include "trx_c64re.h"
+#include "trx_trxring.h"
 #include <string.h>
 
 static int api_ring_status(u2p_ring_status_t *st)
@@ -73,20 +74,32 @@ static int api_trace_writes(uint32_t start, uint32_t n, u2p_trace_write_t *out)
     return trx_ring_trace_writes(start, n, (TrxWriteRec *)out);
 }
 
-// This engine's whowrote has no I/O scan (the firmware's has, with its count of unresolved pointer writes): bit 1 of *exhausted is never set.
+// *exhausted: bit 0 the scan reached the start of the history, bit 1 an I/O address scan passed writes through a pointer it cannot resolve
 static int api_trace_whowrote(uint16_t addr, int limit, u2p_trace_hit_t *hits, int *exhausted)
 {
     bool ex = true;
-    int n = trx_ring_trace_whowrote(addr, limit, (TrxTraceHit *)hits, &ex);
-    *exhausted = ex ? 1 : 0;
+    uint32_t unres = 0;
+    int n = trx_ring_trace_whowrote(addr, limit, (TrxTraceHit *)hits, &ex, &unres);
+    *exhausted = (ex ? 1 : 0) | (unres ? 2 : 0);
     return n;
 }
 
 static int api_log_read(uint64_t *out, int max, uint32_t *lost) { return trx_ring_log_read(out, max, lost); }
 
-// dump, save and load as the firmware's table has them; the source of a dump and the hooks of a load (System Mode, cartridge, drive A) are set only
-// by the menu's operations (ringops.cc), so through this table a .c64re names no medium and a load puts none back. load_entry and save_native have no
-// code in this engine yet: null, which U2P_HAS(ring, ...) does not see as there.
+// The ring as a file (.trxring); the size goes back through *bytes. No progress callback through this table.
+static const char *api_ring_save_native(const char *path, uint32_t *bytes)
+{
+    uint32_t n = 0;
+    const char *err = trx_trxring_save(path, &n, NULL, NULL);
+    if (bytes) {
+        *bytes = err ? 0 : n;
+    }
+    return err;
+}
+
+// dump, save, load, load_entry and save_native as the firmware's table has them. The source of a dump and the hooks of a load (System Mode, cartridge,
+// drive A) are set only by the menu's operations (ringops.cc), so through this table a .c64re names no medium and a load puts none back; the
+// .trxring of save_native names the media it finds through the same source, so through this table it names none.
 static const u2p_ring_api_t s_ring = {
     sizeof(u2p_ring_api_t),
     api_ring_status,
@@ -104,8 +117,8 @@ static const u2p_ring_api_t s_ring = {
     api_trace_writes,
     api_trace_whowrote,
     api_log_read,
-    0,                                  // load_entry
-    0,                                  // save_native
+    trx_c64re_load_entry,
+    api_ring_save_native,
 };
 
 const void *ring_exports(uint32_t *size)

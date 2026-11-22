@@ -3,6 +3,9 @@
 // is the setting "Timewarp Ring" (ring_autostart). The menu is declarative (menu.toml, ring.* operations in ringops.cc); no screen code comes along.
 // U18 (the ring library on the SDK): the TRX registers through api->trx and the C64's memory window through api->c64 (ringsys.h), memory on the
 // library's own account, the poll task replaced by the library's poll (trx_ring_engine_poll); what base 3.1 does not have is pending_api.h.
+// U18 D6 (2026-11-22): brought to the firmware's state - the whowrote I/O address scan, the REU gate of trx_ring_reu.h, trx_ring_stream2_pos(),
+// C64_STOP let go before a restore's RAM load. Kept from MultiCore's copy: a .c64re load (trx_ring_load_state) refuses while the REU is on; the
+// cartridge image of a load goes in through TrxLoadMem::rom_put.
 // The frame ring, app side. See trx_ring.h.
 //
 // Hardware (TRX64-Ultimate designs/c64_basic: trx_engine.v page 2, trx_sys.v
@@ -46,6 +49,8 @@
 // EEPROM writes (no tap: the engine's LOG_PUT is gone, SLIM D6).
 
 #include "trx_ring.h"
+#include "trx_ea.h"
+#include "trx_ring_reu.h"
 #include "ringsys.h"
 #include <string.h>
 
@@ -134,10 +139,10 @@ static volatile int pending = -1;   // the freeze menu's choice (timeline index)
 static uint32_t log_rd;             // the observer log reader (trx_ring_log_read): the next stream 1 record to look at
 static bool log_have;               // log_rd is valid
 static volatile bool scrubbing;     // a Timewarp scrub holds the machine (§16.7 below)
-// A08: the engine logs no REU memory, so while the REU is enabled there is no ring and no way into it
+static TrxReuGate reu_gate;         // A08: the REU is on, the ring is off
+// A08: the REU's enable, as the machine has it now. The ring does not record the REU's contents, so
+// while it is on there is no ring (trx_ring_reu_sync) and no way into it (E_REU).
 static inline bool reu_on(void) { return c64_reu_enable() != 0; }
-static bool reu_blocked;            // the ring was stopped (or kept from starting) because the REU is on
-static bool reu_resume;             // it ran, or was due to start, then: it starts again when the REU is off
 static bool trace_on = true;       // the trace former runs with the log (trace_ctl)
 
 // LOG_CTRL as the log runs: every tap, the trace, and with flush the machine's flow cut (a
@@ -904,7 +909,7 @@ const char *trx_ring_error(int code)
     case E_STAGE:   return "the state bus refused the staged words";
     case E_MEM:     return "out of memory";
     case E_APPLY:   return "the engine did not finish applying the log";
-    case E_REU:     return "Timewarp is off while the REU is enabled (A08)";
+    case E_REU:     return TRX_REU_OFF_TEXT;
     default:        return "error";
     }
 }
@@ -1071,7 +1076,14 @@ static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn b
     }
 
     // C64 RAM through the second port (the CPU is held at a read: no more
-    // writes of its own)
+    // writes of its own). The stop position holds the whole gate now, so the app's pause
+    // is let go first: with C64_STOP set, ultimate_sys makes a MEMONLY write of $0000/$0001
+    // a bus cycle (T16 Q8), which opens the gate for one edge and moves the machine off the
+    // snap position the block is loaded on. The CPU walk's undo of the KERNAL IRQ's STA $01
+    // did that (T20: $01F2 differed from the engine's APPLY, which only writes RAM).
+    if (!err) {
+        c64_stop(0);
+    }
     c64_set_dma_memonly(1);
     if (ram) {
         ram(ctx);
@@ -1931,20 +1943,19 @@ bool trx_ring_start(void)
 
 const char *trx_ring_reu_refusal(void)
 {
-    return (present && reu_on()) ? trx_ring_error(E_REU) : NULL;
+    return (present && reu_on()) ? TRX_REU_OFF_TEXT : NULL;
 }
 
-// The one place the ring follows the REU (A08), looked at by every poll. A scrub or land holds the
-// machine: the ring is left alone until it ends. Never waits for the ring: the next poll looks again.
-static void reu_sync(void)
+// The one place the ring follows the REU (A08). Called by every poll, which catches a change of the
+// REU enable wherever it was made, and by whoever changes it. It never waits for the ring: a restore
+// in progress holds the mutex, and the next poll looks again.
+void trx_ring_reu_sync(void)
 {
-    if (!present || scrubbing || !sync_mutex_lock(mutex, 0)) {
+    if (!present || !sync_mutex_lock(mutex, 0)) {
         return;
     }
-    bool on = reu_on();
-    if (on && !reu_blocked) {
-        reu_blocked = true;
-        reu_resume = log_on;
+    switch (trx_reu_gate_step(&reu_gate, reu_on(), scrubbing, log_on)) {
+    case TRX_REU_STOP:
         w32(LOG_CTRL, 0);
         log_on = false;
         pending = -1;
@@ -1955,13 +1966,13 @@ static void reu_sync(void)
         cyc_acc = 0;
         resyncs = 0;
         r_log("[RING] REU enabled: ring off, frames dropped (A08)\n");
-    } else if (!on && reu_blocked) {
-        reu_blocked = false;
-        if (reu_resume) {
-            start_locked();
-            r_log("[RING] REU off: ring restarted from now (A08)\n");
-        }
-        reu_resume = false;
+        break;
+    case TRX_REU_START:
+        start_locked();
+        r_log("[RING] REU off: ring restarted from now (A08)\n");
+        break;
+    default:
+        break;
     }
     sync_mutex_unlock(mutex);
 }
@@ -2008,7 +2019,7 @@ void trx_ring_status(TrxRingStatus *st)
 
 void trx_ring_poll(void)
 {
-    reu_sync();
+    trx_ring_reu_sync();
     if (!lock()) {
         return;
     }
@@ -2288,6 +2299,12 @@ void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len)
         }
     }
     __asm__ volatile ("fence" ::: "memory");
+}
+
+// The stream 2 record the parse reads next (the .trxring rebases its stream 2 counts on it)
+uint32_t trx_ring_stream2_pos(void)
+{
+    return p2 & M28;
 }
 
 // A saved ring back into the engine and the machine: the log goes off and its counters to 0 first (the caller's area writes land where those counters
@@ -2684,9 +2701,15 @@ int trx_ring_log_read(uint64_t *out, int max, uint32_t *lost)
 
 // The last writers of addr in the history, newest first. *exhausted: the scan reached the
 // start of the history (or of stream 0's area) with fewer than limit hits.
-int trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *exhausted)
+// An I/O address ($D000-$DFFF) is not in stream 0 (that is the RAM write log): its writers are the store
+// instructions of the trace itself, by effective address (trx_ea.h). The record carries no old byte, so the
+// hit says so (TRX_HIT_OLD_UNKNOWN), and no new byte for a read-modify-write. *unresolved counts the
+// instructions that write through a zero page pointer (or an SH* store over a page crossing): their address is
+// not in the record, they are not guessed.
+int trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *exhausted, uint32_t *unresolved)
 {
     *exhausted = true;
+    *unresolved = 0;
     if (!trace_ready() || limit < 1 || !lock()) {
         return 0;
     }
@@ -2697,6 +2720,42 @@ int trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *e
     int ns = trace_segs(sg, cnt, &total, &gap);
     int found = 0;
     uint32_t lbase = total;
+    if (addr >= 0xD000 && addr <= 0xDFFF) {
+        for (int si = ns - 1; si >= 0 && found < limit; si--) {
+            lbase -= sg[si].n;
+            uint32_t remaining = sg[si].n;
+            while (remaining && found < limit) {
+                uint32_t m = remaining < TRACE_CHUNK ? remaining : TRACE_CHUNK;
+                uint32_t k0 = remaining - m;
+                trace_fetch(tr_add(sg[si].start, k0), m, tbuf);
+                for (int j = (int)m - 1; j >= 0 && found < limit; j--) {
+                    TrxTraceRec r;
+                    tr_decode(tbuf + 24 * j, ep[sg[si].e], &r);
+                    trx_store_t st;
+                    int k = trx_store_ea(r.opcode, r.b1, r.b2, r.a, r.x, r.y, &st);
+                    if (k == TRX_EA_UNRESOLVED) {
+                        (*unresolved)++;
+                        continue;
+                    }
+                    if (k != TRX_EA_KNOWN || st.ea != addr) {
+                        continue;
+                    }
+                    TrxTraceHit &h = hits[found++];
+                    h.cycle = r.cycle;
+                    h.addr = addr;
+                    h.pc = r.pc;
+                    h.old_value = 0;
+                    h.new_value = st.new_known ? st.new_value : 0;
+                    h.flags = TRX_HIT_OLD_UNKNOWN | (st.new_known ? 0 : TRX_HIT_NEW_UNKNOWN);
+                    h.index = lbase + k0 + (uint32_t)j;
+                }
+                remaining -= m;
+            }
+        }
+        *exhausted = found < limit;
+        unlock();
+        return found;
+    }
     for (int si = ns - 1; si >= 0 && found < limit; si--) {
         lbase -= sg[si].n;
         uint32_t remaining = sg[si].n;
@@ -2749,6 +2808,7 @@ int trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *e
                     h.pc = r.pc;
                     h.old_value = uint8_t(v >> 16);
                     h.new_value = uint8_t(v >> 24);
+                    h.flags = 0;
                     h.index = lbase + k0 + (uint32_t)j;
                 }
             }
@@ -2787,8 +2847,10 @@ void trx_ring_engine_poll(void)
         engine_started = true;
         if (ring_autostart) {
             if (reu_on()) {
-                reu_blocked = true; // A08: the REU is on at boot: no ring until it is off, then it starts
-                reu_resume = true;
+                // A08: the REU is on at boot: no ring until it is off, then it starts
+                reu_gate.blocked = true;
+                reu_gate.resume = true;
+                r_log("[RING] REU enabled: no ring until it is off (A08)\n");
             } else {
                 trx_ring_start();
             }

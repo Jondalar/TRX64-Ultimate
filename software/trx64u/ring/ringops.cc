@@ -7,6 +7,7 @@
 #include "ringops.h"
 #include "trx_ring.h"
 #include "trx_c64re.h"
+#include "trx_trxring.h"
 #include "ringsys.h"
 #include <string.h>
 
@@ -298,14 +299,15 @@ static void dump_progress(int done, int total, void *ctx)
 // the firmware's task had 12 * configMINIMAL_STACK_SIZE words (1600 each)
 #define DUMP_STACK (12 * 1600 * 4)
 
+// The source goes with both kinds: a .c64rering entry names the cartridge and drive A as a .c64re does (FW write_checkpoint).
 static void dump_run(DumpJob *j)
 {
+    trx_c64re_set_source(&j->src);
     if (j->ring) {
         j->why = trx_c64rering_dump_ex(j->path, j->secs, 5, &j->bytes, &j->entries, dump_progress, j->c);
-        return;
+    } else {
+        j->why = trx_c64re_dump_ex(j->path, j->idx, &j->bytes, dump_progress, j->c);
     }
-    trx_c64re_set_source(&j->src);
-    j->why = trx_c64re_dump_ex(j->path, j->idx, &j->bytes, dump_progress, j->c);
     trx_c64re_set_source(NULL);
 }
 
@@ -331,6 +333,9 @@ static void dump_prepare(CoreCtx *c, DumpJob *j)
         j->src.cart_name = c64_cart_name();
         j->src.cart_src = c64_cart_path();
         j->src.cart_type = c64_cart_crt_type();
+        j->src.cart_require = c64_cart_require();
+        j->src.cart_prohibit = c64_cart_prohibit();
+        j->src.cart_writable = c64_cart_writable();
         if (j->src.cart_type == 60) {                   // GMod2: the saved game is in the 93C86, outside the ROM window (io.h: the array is at +2048)
             core_eeprom_read(c, 2048, j->eeprom, sizeof(j->eeprom));
             j->src.eeprom = j->eeprom;
@@ -362,9 +367,8 @@ static int dump_op(CoreCtx *c, const OpArgs &a, OpOut &o, bool ring)
             int fps = trx_ring_fps() ? trx_ring_fps() : 50;
             j->secs = trx_ring_count() / fps;
             j->secs = j->secs < 1 ? 1 : (j->secs > 30 ? 30 : j->secs);
-        } else {
-            dump_prepare(c, j);
         }
+        dump_prepare(c, j);
         if (ops_job_step(c) && g_api->job) {
             ops_job_progress(c, 0, j->path);
             j->state = 1;
@@ -450,6 +454,9 @@ static int op_load(CoreCtx *c, const OpArgs &a, OpOut &o)
     src.eeprom_put = eeprom_put;
     src.machine_set = machine_set;
     src.drive_mount = drive_mount;
+    if (c64_cart_active()) {
+        src.rom_bytes = c64_cart_image_bytes();         // a format 1 file's cartFlash is put back up to the image the port has
+    }
     trx_c64re_set_source(&src);
     const char *why = trx_c64re_load(a.s(0));
     trx_c64re_set_source(NULL);
@@ -459,7 +466,7 @@ static int op_load(CoreCtx *c, const OpArgs &a, OpOut &o)
     }
     g_sel = -1;
     g_nmark = 0;
-    if (trx_c64re_missed()[0]) {
+    if (trx_c64re_missed()) {
         r_snprintf(o.msg, o.msglen, "State loaded from %s; not put back: %s", a.s(0), trx_c64re_missed());
     } else {
         r_snprintf(o.msg, o.msglen, "State loaded from %s", a.s(0));
@@ -620,10 +627,17 @@ static int op_poll(CoreCtx *, const OpArgs &, OpOut &)
 }
 
 // ring.unfreeze: the menu closes (run.cc before freeze->leave): the frame chosen in the Timewarp bar is where the machine runs on.
+// A state file chosen while the menu was up (trx_c64re_set_pending, trx_trxring_set_pending) goes in here as well.
 static int op_unfreeze(CoreCtx *, const OpArgs &, OpOut &)
 {
     if (trx_ring_pending()) {
         trx_ring_unfreeze();
+    }
+    if (trx_c64re_pending()) {
+        trx_c64re_unfreeze();
+    }
+    if (trx_trxring_pending()) {
+        trx_trxring_unfreeze();
     }
     return OPE_OK;
 }

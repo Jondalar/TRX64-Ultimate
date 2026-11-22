@@ -24,6 +24,9 @@ struct TrxC64reSrc {
     const char *cart_name;
     const char *cart_src;
     int cart_type;
+    uint16_t cart_require;      // the cartridge definition's require / prohibit flags (the header's machineState.cartridge carries them)
+    uint16_t cart_prohibit;
+    bool cart_writable;         // the C64 can change the cartridge's flash or EEPROM: a .c64rering entry carries the image (cartFlash)
     const uint8_t *eeprom;
     const char *disk_path;
     bool drive_power;
@@ -43,8 +46,11 @@ struct TrxC64reSrc {
     int (*drive_mount)(void *ctx, const char *spec);
 };
 void trx_c64re_set_source(const TrxC64reSrc *src);
+// The source set now, or NULL (the .trxring names its media from it).
+const TrxC64reSrc *trx_c64re_source(void);
 
-// Writes timeline entry idx as a .c64re. NULL, or what went wrong.
+// Writes timeline entry idx as a .c64re of format 2 (U8): a binary section table, streamed, with the cartridge image as it stands at the freeze, once.
+// NULL, or what went wrong - and then no file is left behind.
 const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes);
 // The same, calling progress(done, total, ctx) once before the first section (done 0) and after every piece written.
 typedef void (*trx_progress_fn)(int done, int total, void *ctx);
@@ -62,17 +68,51 @@ const char *trx_c64rering_dump(const char *path, int seconds, int stride, uint32
 const char *trx_c64rering_dump_ex(const char *path, int seconds, int stride, uint32_t *bytes, int *entries,
                                   trx_progress_fn progress, void *ctx);
 
-// Loads a .c64re into the machine: format 2 (the chip block, RAM, colour RAM and drive A's RAM, CPU and VIAs) or format 1 written by this board (its
-// trx64Hw node). A file of another writer or compressed (TRX64's own) is refused. What the file holds and this load does not put back (the cartridge's
-// RAM, image and EEPROM) is named by trx_c64re_missed() until the next load; it is empty when nothing was left out.
-const char *trx_c64re_load(const char *path);
-const char *trx_c64re_missed(void);
+// Where a state file belongs and what to name it after: the folder of the cartridge or disk the source names, else a timewarp/ folder on the first
+// volume there is (U8 §5). False when there is nowhere to write at all.
+bool trx_c64re_place(char *dir, int dirlen, char *base, int baselen);
 
-// The .trxring (FW io/c64/trx_trxring.h): the whole frame ring in a file. is_one: the file starts with the magic; check: the header only, NULL or what is
-// wrong; load: the ring and the machine back (trx_c64re_load sends such a file here, so one path loads whichever kind it is).
-bool trx_trxring_is_one(const char *path);
-const char *trx_trxring_check(const char *path);
-const char *trx_trxring_load(const char *path);
+// Loads a .c64re into the machine: format 2 exactly, or a format 1 file with our trx64Hw node exactly, or one of trx64's coarsely (T20 §9.4). A .trxring
+// goes to trx_trxring_load(). The machine the file needs (System Mode, cartridge, drive A's image, settings) is built through the hooks of the source set
+// when the file was staged; without them it is not built and what that leaves out is named by trx_c64re_missed().
+const char *trx_c64re_load(const char *path);
+// With the entry selector of trx_c64re_stage_entry().
+const char *trx_c64re_load_entry(const char *path, const char *entry);
+
+// The two halves of that load (T66): a menu that holds the machine while it is up reads and checks the file when it is chosen (a wrong file says so at
+// once) and puts it in when it closes (trx_c64re_set_pending, trx_c64re_unfreeze). The source set at the stage goes with the staged state.
+struct TrxC64reStaged;
+// Reads, checks and keeps the state of the file. NULL and *out set, or what went wrong (nothing is kept then).
+const char *trx_c64re_stage(const char *path, TrxC64reStaged **out);
+// The same with progress(done, total, ctx) while the file is read (U9).
+const char *trx_c64re_stage_ex(const char *path, TrxC64reStaged **out, trx_progress_fn progress, void *ctx);
+// The same, naming which entry of a .c64rering to take (T66 part 3): NULL or "" is the cursor the file carries (current_id), else an entry's id
+// ("cp_<frame>_<seq>") or label, a frame number, or "#N" for the Nth entry in the file (0 = oldest). A .c64re holds one state and ignores it.
+const char *trx_c64re_stage_entry(const char *path, const char *entry, TrxC64reStaged **out);
+// Puts a staged state into the machine and lets it run; frees it either way. NULL, or what the hardware said.
+const char *trx_c64re_apply(TrxC64reStaged *st);
+// U9 D3d: the medium a stage could not find. After a stage that failed, base[] is the name to look for and want[] the path the file asks for; base[] is
+// empty when the stage failed for any other reason.
+struct TrxC64reMissing {
+    char want[144];
+    char base[72];
+};
+// Stage, and say when it was the medium that was missing (U9 D3d). "miss" may be NULL. "medium" is tried before the path in the file and before the name
+// beside it: a file to use, or a folder to look in (what the user answered the last refusal with). NULL for an ordinary stage.
+const char *trx_c64re_stage_ask(const char *path, TrxC64reStaged **out, trx_progress_fn progress, void *ctx, TrxC64reMissing *miss,
+                                const char *medium);
+// U9 D6: what the last load could not put back, or NULL.
+const char *trx_c64re_missed(void);
+// Breaks a message into lines of at most cols characters, at a space, '/', '-' or '_' near the end where there is one.
+void trx_c64re_wrap(char *dst, int cap, const char *text, int cols);
+// Drops a staged state without loading it.
+void trx_c64re_discard(TrxC64reStaged *st);
+
+// The deferred load: the staged state is taken over here, and the menu's close asks for it. A second choice replaces the first.
+void trx_c64re_set_pending(TrxC64reStaged *st);
+bool trx_c64re_pending(void);
+// From the menu's close when trx_c64re_pending(): loads and runs. What fails goes to the log - the menu is already gone by then.
+void trx_c64re_unfreeze(void);
 
 
 #endif

@@ -93,6 +93,12 @@ uint32_t c64_cart_image_bytes(void);
 void c64_cart_image_read(CoreCtx *c, uint32_t off, uint8_t *dst, uint32_t n);
 void c64_cart_image_write(CoreCtx *c, uint32_t off, const uint8_t *src, uint32_t n);
 int c64_cart_for_state(CoreCtx *c, const char *path, char *msg, int msglen);
+// The cartridge definition's require / prohibit flags as the cartridge in the port has them (FW C64::get_cart_definition()): a .c64re's
+// machineState.cartridge carries them.
+uint16_t c64_cart_require(void);
+uint16_t c64_cart_prohibit(void);
+// The cartridge in the port has flash or an EEPROM the C64 can change (FW trx_cart_writable()): a .c64rering entry carries its image (cartFlash).
+bool c64_cart_writable(void);
 
 // ---- MultiCore's shared 1541 drive library (D12, cbm1541.h, d1541_drive.h) -------------------------------------------------------------------------------
 // Mounts drive A's image without a reset: "ro <path>", "unlinked <path>" or "<path>". 0: done.

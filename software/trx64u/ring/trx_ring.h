@@ -22,6 +22,8 @@
 
 #include <stdint.h>
 
+#define TRX_CART_RAM_BYTES 65536  // the cartridge RAM window in DDR2 (cart_slot.v: 0xEF0000)
+
 #define TRX_BLOCK_WORDS 58   // the capture table's reset value (c64_core.v map)
 
 // One frame boundary (the snap that starts frame "seq").
@@ -75,9 +77,13 @@ struct TrxTraceHit {         // a write of whowrote's address
     uint64_t cycle;
     uint16_t addr, pc;
     uint8_t  old_value, new_value;
-    uint16_t reserved;
+    uint16_t flags;          // TRX_HIT_*
     uint32_t index;          // of the writing instruction in the history
 };
+// Hit flags: a write of an I/O address ($D000-$DFFF) is found from the instruction trace, which carries
+// no old byte, and for a read-modify-write no new byte either.
+#define TRX_HIT_OLD_UNKNOWN 1
+#define TRX_HIT_NEW_UNKNOWN 2
 
 struct TrxTraceStatus {
     bool     present, on, gap;
@@ -131,7 +137,10 @@ int  trx_ring_trace_ctl(int on);
 bool trx_ring_trace_status(TrxTraceStatus *st);
 int  trx_ring_trace_read(uint32_t first, uint32_t n, TrxTraceRec *out);
 int  trx_ring_trace_writes(uint32_t start, uint32_t n, TrxWriteRec *out);
-int  trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *exhausted);
+// whowrote's `unresolved` out value: the history holds writes through a zero page pointer ((zp,X), (zp),Y)
+// or an SH* store over a page crossing; their address is not in the trace record, so an I/O address scan
+// cannot say whether they hit it. Counted, never guessed.
+int  trx_ring_trace_whowrote(uint16_t addr, int limit, TrxTraceHit *hits, bool *exhausted, uint32_t *unresolved);
 // The observer log of the debug block (trx_ring.cc): the stream 1 records that came since the last call; max 0 moves the reader to the present.
 int  trx_ring_log_read(uint64_t *out, int max, uint32_t *lost);
 
@@ -144,6 +153,10 @@ void trx_ring_stop(void);
 void trx_ring_status(TrxRingStatus *st);
 // A08: the text why the ring refuses while the REU is on, NULL when it does not
 const char *trx_ring_reu_refusal(void);
+// Makes the ring follow the REU enable: on -> log off and the frames dropped; off again -> the ring
+// starts over from that moment (when it ran or was due before). Every poll calls it; call it after
+// anything that changes C64_REU_ENABLE. It is cheap and never blocks.
+void trx_ring_reu_sync(void);
 
 // Reads the markers that came since the last call into the timeline.
 void trx_ring_poll(void);
@@ -235,6 +248,9 @@ uint32_t trx_ring_area_size(int s);
 uint32_t trx_ring_rec_size(int s);
 void trx_ring_area_read(int s, uint32_t off, void *dst, uint32_t len);
 void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len);
+// The stream 2 record the parse reads next: the newest entry's marker is
+// before it, so the save rebases the stream 2 counts on this one.
+uint32_t trx_ring_stream2_pos(void);
 typedef int (*trx_area_fn)(void *ctx);
 int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_area_fn areas, void *ctx);
 

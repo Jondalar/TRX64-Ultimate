@@ -1,4 +1,8 @@
-// PROVENANCE: copied unchanged from TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.cc (.c64re and .c64rering from the frame ring; GPL-3.0), T104.2 UI.
+// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.cc and trx_drive.cc (.c64re and .c64rering from the frame ring, drive A's
+// own state; GPL-3.0), ported for the ring library (U18 D6: this copy is the master). Changes: files through api->fs (RFile), memory through api->mem,
+// text through r_snprintf; what the firmware asks the machine (System Mode, cartridge, drive A, their files) comes from the source trx_c64re_set_source()
+// set, and a load builds the machine through that source's hooks; the cartridge image of a format 2 file is streamed into the machine at the load
+// (TrxLoadMem::rom_put) instead of held; trx_c64re_dump_machine() is the library's own (FW apps/c64re).
 // .c64re / .c64rering writer and .c64re loader for the frame ring. See
 // trx_c64re.h. The gzip, SHA-256 and JSON pieces follow apps/c64re/src/c64re.c
 // (the same container, written from a .u2a there).
@@ -23,8 +27,12 @@
 #include "ringsys.h"
 #include <string.h>
 
-#define JSMN_STATIC
-#include "jsmn.h"                    // the firmware's software/api/jsmn.h, copied (MIT)
+#include "trx_sha256.h"
+#include "trx_json.h"                // jsmn (the firmware's software/api/jsmn.h, copied, MIT) and the token helpers
+#include "trx_inflate.h"
+#include "trx_c64re_nodes.h"
+#include "trx_trxring.h"
+#include "trx_drive.h"
 
 #define LAYOUT         1
 #define PC_ADJ         0     // chip 1 w1's PC at the snap edge minus the next opcode's address
@@ -34,107 +42,7 @@
 #define W_CIA2         21
 #define W_CIA1H        34
 #define W_CIA2H        46
-
-// ---- SHA-256 ---------------------------------------------------------------------
-struct Sha256 {
-    uint32_t h[8];
-    uint8_t block[64];
-    uint32_t len_lo, len_hi;
-    int fill;
-};
-
-static const uint32_t sha_k[64] = {
-    0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
-    0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
-    0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
-    0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
-    0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
-    0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
-    0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
-    0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
-};
-
-static inline uint32_t ror32(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
-
-static void sha_compress(Sha256 *s, const uint8_t *p)
-{
-    uint32_t w[64];
-    for (int i = 0; i < 16; i++) {
-        w[i] = uint32_t(p[4 * i]) << 24 | uint32_t(p[4 * i + 1]) << 16 | uint32_t(p[4 * i + 2]) << 8 | p[4 * i + 3];
-    }
-    for (int i = 16; i < 64; i++) {
-        uint32_t s0 = ror32(w[i - 15], 7) ^ ror32(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        uint32_t s1 = ror32(w[i - 2], 17) ^ ror32(w[i - 2], 19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-    }
-    uint32_t a = s->h[0], b = s->h[1], c = s->h[2], d = s->h[3];
-    uint32_t e = s->h[4], f = s->h[5], g = s->h[6], h = s->h[7];
-    for (int i = 0; i < 64; i++) {
-        uint32_t S1 = ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25);
-        uint32_t ch = (e & f) ^ (~e & g);
-        uint32_t t1 = h + S1 + ch + sha_k[i] + w[i];
-        uint32_t S0 = ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22);
-        uint32_t mj = (a & b) ^ (a & c) ^ (b & c);
-        uint32_t t2 = S0 + mj;
-        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
-    }
-    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d;
-    s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
-}
-
-static void sha_init(Sha256 *s)
-{
-    static const uint32_t h0[8] = { 0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-                                    0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u };
-    memcpy(s->h, h0, sizeof(h0));
-    s->len_lo = s->len_hi = 0;
-    s->fill = 0;
-}
-
-static void sha_add(Sha256 *s, const uint8_t *p, uint32_t len)
-{
-    uint32_t lo = s->len_lo + len;
-    if (lo < s->len_lo) {
-        s->len_hi++;
-    }
-    s->len_lo = lo;
-    while (len) {
-        int n = 64 - s->fill;
-        if (uint32_t(n) > len) {
-            n = len;
-        }
-        memcpy(s->block + s->fill, p, n);
-        s->fill += n;
-        p += n;
-        len -= n;
-        if (s->fill == 64) {
-            sha_compress(s, s->block);
-            s->fill = 0;
-        }
-    }
-}
-
-static void sha_final(Sha256 *s, uint8_t *out)
-{
-    uint64_t bits = (uint64_t(s->len_hi) << 32 | s->len_lo) * 8;
-    uint8_t pad = 0x80;
-    sha_add(s, &pad, 1);
-    pad = 0;
-    while (s->fill != 56) {
-        sha_add(s, &pad, 1);
-    }
-    uint8_t tail[8];
-    for (int i = 0; i < 8; i++) {
-        tail[i] = uint8_t(bits >> (56 - 8 * i));
-    }
-    sha_add(s, tail, 8);
-    for (int i = 0; i < 8; i++) {
-        out[4 * i] = uint8_t(s->h[i] >> 24);
-        out[4 * i + 1] = uint8_t(s->h[i] >> 16);
-        out[4 * i + 2] = uint8_t(s->h[i] >> 8);
-        out[4 * i + 3] = uint8_t(s->h[i]);
-    }
-}
+#define W_CPUH         27
 
 // ---- gzip with stored blocks, written as the document is produced ----------------
 #define GZ_BLOCK 16384
@@ -163,7 +71,7 @@ class Gz {
     uint32_t crc, isize;
     bool hash;
 public:
-    Sha256 sha;
+    TrxSha256 sha;
     bool failed;
     uint32_t written;
     uint32_t write_ms;
@@ -178,7 +86,7 @@ public:
         hash = with_hash;
         written = 0;
         write_ms = 0;
-        sha_init(&sha);
+        trx_sha_init(&sha);
         buf = (uint8_t *)r_malloc(GZ_BLOCK);
         failed = !buf;
         static const uint8_t header[10] = { 0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0, 0, 0x03 };
@@ -196,7 +104,7 @@ public:
             return;
         }
         if (hash) {
-            sha_add(&sha, p, len);
+            trx_sha_add(&sha, p, len);
         }
         uint16_t t = sys_ms_timer();
         if (!rf_write(f, p, len)) {
@@ -348,6 +256,20 @@ public:
         str("\"}");
     }
 
+    // the same through a reader (the cartridge image through the source's rom_read), in the same 3 KB pieces
+    void read_ta(void (*rd)(void *ctx, uint32_t off, uint8_t *dst, uint32_t n), void *ctx, uint32_t len)
+    {
+        str("{\"$ta\":\"Uint8Array\",\"b64\":\"");
+        uint8_t piece[3072];
+        for (uint32_t done = 0; done < len && !failed;) {
+            uint32_t want = len - done > sizeof(piece) ? uint32_t(sizeof(piece)) : len - done;
+            rd(ctx, done, piece, want);
+            b64(piece, int(want));
+            done += want;
+        }
+        str("\"}");
+    }
+
     void array(const uint8_t *data, int count, int mask)
     {
         char out[4 * 64 + 4];
@@ -385,7 +307,7 @@ public:
         }
         raw(tail, 8);
         if (digest) {
-            sha_final(&sha, digest);
+            trx_sha_final(&sha, digest);
         }
         return !failed;
     }
@@ -505,8 +427,24 @@ static void write_vic(Gz &g, const uint32_t *w, const uint8_t *color, int line, 
 // turbo yet (T29): the machine always runs at 1 MHz with badline stalls, which is the registers-
 // mode reset state, written out. T29 puts its state (regs_en, prefer, d030_b0, d031, hold) on
 // the state bus; this takes it from the frame's block words then.
+// With the T29 engine (CAPS2 b6) it is the engine's live state: TURBO_W1/W2 (TRX64-Ultimate docs/specs/T29-turbo.md
+// §12.7). Without it the machine runs at 1 MHz with badline stalls, the registers-mode reset state, written out.
 static void write_turbo(Gz &g, const TrxFrame &)
 {
+    if (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO) {
+        // T29: the engine's live state (TURBO_W1/W2); the ring records at 1 MHz only, so a frame's
+        // node is the state of the machine when it is written, not per frame
+        uint32_t w1 = trx_io_read32(TRX_TURBO_W1), w2 = trx_io_read32(TRX_TURBO_W2);
+        g.str("\"turbo\":{");
+        g.num("\"enable\":", (w1 >> 8) & 7);
+        g.num(",\"menuIndex\":", w1 & 15);
+        g.str((w1 & 0x80) ? ",\"menuStalls\":true" : ",\"menuStalls\":false");
+        g.num(",\"d031\":", w1 >> 24);
+        g.num(",\"d030\":", 0xFE | ((w1 >> 11) & 1));
+        g.num(",\"resetHold\":", w2 & 0x7FFFFF);
+        g.str("}");
+        return;
+    }
     g.str("\"turbo\":{\"enable\":1,\"menuIndex\":0,\"menuStalls\":true,\"d031\":0,\"d030\":0,\"resetHold\":0}");
 }
 
@@ -523,15 +461,253 @@ void trx_c64re_set_source(const TrxC64reSrc *src)
     g_src_on = src != NULL;
 }
 
+const TrxC64reSrc *trx_c64re_source(void)
+{
+    return g_src_on ? &g_src : NULL;
+}
+
+static bool is_dir(const char *path)
+{
+    uint64_t size;
+    bool dir = false;
+    return g_api->fs && g_api->fs->stat(path, &size, &dir) && dir;
+}
+
+// Where a state file belongs, and what to call it: beside the image that is
+// running (Alex, 2026-11-07 - "neben das laufende Image, source kennt den
+// Ordner"). The cartridge carries its own source path; with no cartridge, the
+// image on drive A does; with neither, the first volume that is there and its
+// timewarp/ folder. `base` gets the image's name without its extension, which
+// the file is then named after. Both come from the source.
+bool trx_c64re_place(char *dir, int dirlen, char *base, int baselen)
+{
+    char full[192];
+    full[0] = 0;
+    if (g_src_on && g_src.cart_src && g_src.cart_src[0]) {
+        r_snprintf(full, sizeof(full), "%s", g_src.cart_src);
+    } else if (g_src_on && g_src.disk_path && g_src.disk_path[0]) {
+        r_snprintf(full, sizeof(full), "%s", g_src.disk_path);
+    }
+    const char *cut = strrchr(full, '/');
+    if (full[0] && cut && cut != full && int(cut - full) < dirlen) {
+        int dn = int(cut - full);
+        memcpy(dir, full, dn);
+        dir[dn] = 0;
+        r_snprintf(base, baselen, "%s", cut + 1);
+        char *dot = strrchr(base, '.');
+        if (dot) {
+            *dot = 0;
+        }
+        if (is_dir(dir)) {
+            return true;
+        }
+    }
+    r_snprintf(base, baselen, "state");
+    static const char *volumes[] = { "/Usb0", "/Usb1", "/SD" };
+    for (unsigned i = 0; i < sizeof(volumes) / sizeof(volumes[0]); i++) {
+        if (!is_dir(volumes[i])) {
+            continue;
+        }
+        r_snprintf(dir, dirlen, "%s/timewarp", volumes[i]);
+        if (!is_dir(dir) && g_api->fs) {
+            g_api->fs->mkdir(dir);
+        }
+        if (is_dir(dir)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static const char *machine_name(void)
 {
     return (g_src_on && g_src.machine >= 0 && g_src.machine < 6) ? machine_names[g_src.machine] : machine_names[0];
 }
 
-#define TRX_CART_RAM_BYTES 65536
 #define W_GLUE         0
 #define W_CART         26
 #define GLUE_CART      0x08
+
+// T20 §9.3 "iec": the serial bus as far as this board captures it, which is the
+// C64's own half - CIA 2 port A (b3 ATN, b4 CLK, b5 DATA out, b6 CLK, b7 DATA
+// in). The drive's side sits in state-bus chips 9-12, which the capture table
+// does not walk (c64_core.v reads chips 0-4 and 7), so it is not in here. The
+// bits are given as they are, out of the port latch and out of the read image,
+// with the raw bytes next to them: nothing here claims which way round the
+// C64's inverters put a line. The field names are ours until the TRX64 session
+// says what its own node calls them (T20 §13.3).
+static void write_iec(Gz &g, const uint32_t *w)
+{
+    const uint32_t *h = w + W_CIA2H;
+    uint8_t latch = uint8_t(bits(h, 32, 8)), ddr = uint8_t(bits(h, 16, 8)), rd = wbyte(w, W_CIA2, 0);
+    g.str("\"iec\":{");
+    g.num("\"atnOutBit\":", (latch >> 3) & 1);
+    g.num(",\"clockOutBit\":", (latch >> 4) & 1);
+    g.num(",\"dataOutBit\":", (latch >> 5) & 1);
+    g.num(",\"clockInBit\":", (rd >> 6) & 1);
+    g.num(",\"dataInBit\":", (rd >> 7) & 1);
+    g.num(",\"cia2PaLatch\":", latch);
+    g.num(",\"cia2PaRead\":", rd);
+    g.num(",\"cia2Ddra\":", ddr);
+    g.str("}");
+}
+
+// T20 §9.3 "cpuIntStatus": the interrupt lines at the snap and which chip was
+// asserting. The lines are the 6510 wrapper's own registered samples, active
+// high there (cpu6510.v drives the core's irq_n/nmi_n inverted); the sources
+// are the IR bit of each chip's interrupt register image. pendingInt is VICE's
+// encoding (1 IRQ, 2 NMI), which is what TRX64 reads.
+static void write_ints(Gz &g, const uint32_t *w)
+{
+    const uint32_t *h = w + W_CPUH;
+    int irq = int(bits(h, 207, 1)), nmi = int(bits(h, 208, 1));
+    bool cia1 = (wbyte(w, W_CIA1, 13) & 0x80) != 0;
+    bool cia2 = (wbyte(w, W_CIA2, 13) & 0x80) != 0;
+    bool vic = (wbyte(w, W_VIC, 0x19) & 0x80) != 0;
+    g.str("\"cpuIntStatus\":{");
+    g.num("\"pendingInt\":", (irq ? 1 : 0) | (nmi ? 2 : 0));
+    g.str(",\"intNames\":[");
+    const char *sep = "";
+    if (cia1) {
+        g.str("\"cia1\"");
+        sep = ",";
+    }
+    if (vic) {
+        g.str(sep);
+        g.str("\"vic\"");
+        sep = ",";
+    }
+    if (cia2) {
+        g.str(sep);
+        g.str("\"cia2\"");
+    }
+    g.str("]");
+    g.num(",\"irqLine\":", irq);
+    g.num(",\"nmiLine\":", nmi);
+    g.num(",\"interruptPending\":", int(bits(h, 120, 1)));      // proc_control intg_i
+    g.num(",\"nmiActive\":", int(bits(h, 128, 1)));             // proc_interrupt nmi_act
+    g.num(",\"irqInhibit\":", int(bits(h, 116, 1)));            // proc_control irq_inhibit
+    g.str("}");
+}
+
+// T20 §9.3 "cartState": the cartridge's own registers out of state-bus chip 7
+// word 0 ({reg_1, reg_0} of the icepi model), which is all of it the capture
+// table walks, the type the machine has configured, and, when cart is given, the
+// cartridge RAM window as it was at this frame. Not in here: easyflashJumper,
+// because this board has no jumper state (the flash responder is configured by
+// the app and takes writes whenever it is on), and the flash / 93C86 states,
+// which the capture does not reach either.
+static void write_cart(Gz &g, const uint32_t *w, const uint8_t *cart)
+{
+    if (!(w[W_GLUE] & GLUE_CART)) {
+        g.str("\"cartBytes\":null,\"cartFlash\":null,\"cartState\":null");
+        return;
+    }
+    // cartBytes (T20 §9.3): the .crt the machine loaded, as it is on disk. Read
+    // from the file, not written out of the image: the image may differ from the
+    // file (a game that programmed its flash), which cartFlash below carries.
+    const char *src = g_src_on ? g_src.cart_src : NULL;
+    RFile cf = { 0, 0 };
+    uint32_t crt_len = 0;
+    bool open = src && *src && rf_open(&cf, src);
+    if (open) {
+        crt_len = uint32_t(rf_size(&cf));
+    }
+    g.str("\"cartBytes\":");
+    if (!crt_len) {
+        g.str("null");
+    } else {
+        g.file_ta(&cf, crt_len);
+    }
+    if (open) {
+        rf_close(&cf);
+    }
+    // cartFlash: the live window, for a cartridge whose flash the C64 can
+    // program - that is the one case where the image can differ from the file,
+    // and the ring's log does not carry flash writes, so only this node brings
+    // it back.
+    g.str(",\"cartFlash\":");
+    uint32_t rom_len = (g_src_on && g_src.cart_writable && g_src.rom_read) ? g_src.rom_bytes : 0;
+    if (!rom_len) {
+        g.str("null");
+    } else {
+        g.read_ta(g_src.rom_read, g_src.rom_ctx, rom_len);
+    }
+    g.str(",\"cartState\":{");
+    g.num("\"currentBank\":", uint8_t(w[W_CART]));
+    g.num(",\"controlRegister\":", uint8_t(w[W_CART] >> 8));
+    g.num(",\"cartridgeType\":", c64_cartridge_type());
+    g.str(",\"source\":\"");
+    g.jstr(src ? src : "");
+    g.str("\"");
+    if (cart) {
+        g.str(",\"cartRam\":");
+        g.ta(cart, TRX_CART_RAM_BYTES);
+    }
+    g.str("}");
+}
+
+// T66 part 8: drive A's own state, read by a stub on its CPU (trx_drive_read).
+// The node is ours - "trx64Drive" - because TRX64's "drive1541" is a set of
+// VICE modules whose layout cannot be checked against anything here (T20
+// §13.3). It goes only into a single-frame .c64re: reading it holds the drive
+// for a moment, which is nothing to do once per ring entry.
+static void write_drive(Gz &g, const TrxDriveState *d)
+{
+    if (!d) {
+        g.str("\"trx64Drive\":null");
+        return;
+    }
+    g.str("\"trx64Drive\":{");
+    g.str(d->regs ? "\"regs\":true" : "\"regs\":false");
+    g.num(",\"cycles\":", int64_t(d->cycles));
+    if (d->regs) {
+        g.num(",\"pc\":", d->pc);
+        g.num(",\"a\":", d->a);
+        g.num(",\"x\":", d->x);
+        g.num(",\"y\":", d->y);
+        g.num(",\"sp\":", d->sp);
+        g.num(",\"p\":", d->p);
+        g.str(",\"via1\":");
+        g.array(d->via1, 16, 0xFF);
+        g.str(",\"via2\":");
+        g.array(d->via2, 16, 0xFF);
+    }
+    g.str(",\"ram\":");
+    g.ta(d->ram, TRX_DRIVE_RAM);
+    g.str("}");
+}
+
+// T20 §9.3 "media" and "drivePart": which file the source has on drive A and
+// whether that drive is powered. The image itself is not in here; this says
+// which file the state belongs to.
+static void write_media(Gz &g)
+{
+    g.str("\"drivePart\":");
+    if (!g_src_on || !g_src.drive_type) {
+        g.str("null,\"media\":null");
+        return;
+    }
+    g.str(g_src.drive_power ? "{\"power\":true" : "{\"power\":false");
+    g.num(",\"unit\":", g_src.drive_unit);
+    g.str(",\"driveType\":\"");
+    g.jstr(g_src.drive_type);
+    g.str("\"}");
+    const char *full = g_src.disk_path;
+    const char *name = full ? strrchr(full, '/') : NULL;
+    name = name ? name + 1 : full;
+    g.str(",\"media\":");
+    if (!name || !*name) {
+        g.str("null");
+        return;
+    }
+    g.str("{\"diskPath\":\"");
+    g.jstr(full);
+    g.str("\",\"imageFormat\":\"");
+    const char *dot = strrchr(name, '.');
+    g.jstr(dot ? dot + 1 : "");
+    g.str("\"}");
+}
 
 // The media of the manifest: media0 the disk image, media1 (or media0 without a disk) the cartridge, each hashed here and streamed into mediaPayloads.
 struct MediaFile {
@@ -564,8 +740,8 @@ static bool media_probe(MediaFile *m, const char *path, const char *role, const 
         return false;
     }
     m->size = uint32_t(rf_size(f));
-    Sha256 sh;
-    sha_init(&sh);
+    TrxSha256 sh;
+    trx_sha_init(&sh);
     uint8_t piece[3072];
     uint32_t left = m->size;
     bool ok = m->size != 0;
@@ -575,15 +751,16 @@ static bool media_probe(MediaFile *m, const char *path, const char *role, const 
             ok = false;
             break;
         }
-        sha_add(&sh, piece, want);
+        trx_sha_add(&sh, piece, want);
         left -= want;
     }
-    sha_final(&sh, m->digest);
+    trx_sha_final(&sh, m->digest);
     rf_close(f);
     return ok;
 }
 
-static void write_checkpoint(Gz &g, const TrxFrame &f, uint8_t *ram, const uint8_t *col)
+static void write_checkpoint(Gz &g, const TrxFrame &f, uint8_t *ram, const uint8_t *col, const uint8_t *cart,
+                             const TrxDriveState *drive)
 {
     const uint32_t *w = f.w;
     static uint8_t under_io[1024];  // one writer at a time (the REST task or the menu)
@@ -612,8 +789,16 @@ static void write_checkpoint(Gz &g, const TrxFrame &f, uint8_t *ram, const uint8
     write_cia(g, "cia2", w, W_CIA2, W_CIA2H, f.cycles);
     g.str(",");
     write_vic(g, w, col, f.line, cycle);
-    g.str(",\"alarmsMaincpu\":[],");
-    g.str("\"cartBytes\":null");
+    g.str(",\"alarmsMaincpu\":[],\"cartBytes\":null,");
+    write_iec(g, w);
+    g.str(",");
+    write_ints(g, w);
+    g.str(",");
+    write_cart(g, w, cart);
+    g.str(",");
+    write_media(g);
+    g.str(",");
+    write_drive(g, drive);
     g.str(",");
     write_turbo(g, f);
     g.num(",\"trx64Hw\":{\"layout\":", LAYOUT);
@@ -667,16 +852,6 @@ static const char *open_out(const char *path, RFile *f)
 #define STUB_BASE      0x0100
 #define STUB_SIZE      0x90
 #define STUB_NEED      (STUB_SIZE + 4)
-#define TRX_DRIVE_RAM  2048
-
-struct TrxDriveState {
-    bool     regs;                  // the stub ran: cpu and via* are there
-    uint8_t  a, x, y, sp, p;
-    uint16_t pc;
-    uint8_t  via1[16], via2[16];    // $1800-$180F and $1C00-$1C0F as read
-    uint32_t cycles;
-    uint8_t  ram[TRX_DRIVE_RAM];
-};
 
 static inline uint8_t dpeek(uint16_t a) { return drive_a_image()[a < 0x1800 ? (a & 0x07FFu) : a]; }
 static inline void dpoke(uint16_t a, uint8_t v) { drive_a_image()[a < 0x1800 ? (a & 0x07FFu) : a] = v; }
@@ -809,22 +984,33 @@ static uint16_t find_patch(uint16_t *at_dpc, uint8_t *dpc_len)
     return 0;
 }
 
-// Is there a drive whose state can be read at all (the bitstream has the debug page and drive A is powered)?
-static bool drive_present(void)
+// Drive A is powered as the source says (the firmware asks its drive object; the library has no other way to know).
+static bool drive_powered(void)
 {
-    return (trx_io_caps() & CAPS_DBG) && g_src_on && g_src.drive_type && g_src.drive_power;
+    return g_src_on && g_src.drive_type && g_src.drive_power;
 }
 
-static const char *drive_read(TrxDriveState *st)
+bool trx_drive_present(void)
+{
+    return (trx_io_caps() & CAPS_DBG) && drive_powered();
+}
+
+const char *trx_drive_read(TrxDriveState *st, bool with_regs)
 {
     memset(st, 0, sizeof(*st));
-    if (!drive_present()) {
-        return "Drive A is not powered or this bitstream has no debug page";
+    if (!(trx_io_caps() & CAPS_DBG)) {
+        return "This bitstream has no debug page, so drive A cannot be read";
+    }
+    if (!drive_powered()) {
+        return "Drive A is not powered";
     }
     for (int a = 0; a < TRX_DRIVE_RAM; a++) {
         st->ram[a] = dpeek(uint16_t(a));
     }
     st->cycles = trx_io_read32(DRV_CYCLES);
+    if (!with_regs) {
+        return NULL;
+    }
     if (!drv_hold()) {
         return "Drive A did not stop";
     }
@@ -919,12 +1105,12 @@ static const char *drive_read(TrxDriveState *st)
     return err;
 }
 
-static const char *drive_write(const TrxDriveState *st)
+const char *trx_drive_write(const TrxDriveState *st)
 {
     if (!(trx_io_caps() & CAPS_DBG)) {
         return "This bitstream has no debug page, so drive A cannot be written";
     }
-    if (!g_src_on || !g_src.drive_type || !g_src.drive_power) {
+    if (!drive_powered()) {
         return "Drive A is not powered";
     }
     if (!drv_hold()) {
@@ -1049,7 +1235,7 @@ static const char *drive_write(const TrxDriveState *st)
 class Raw {
     RFile *f;
 public:
-    Sha256 sha;
+    TrxSha256 sha;
     bool failed;
     uint32_t written;
 
@@ -1058,14 +1244,14 @@ public:
         f = file;
         failed = false;
         written = 0;
-        sha_init(&sha);
+        trx_sha_init(&sha);
     }
     void put(const void *p, uint32_t len)
     {
         const uint8_t *b = (const uint8_t *)p;
         while (!failed && len) {
             uint32_t want = len > RAW_CHUNK ? RAW_CHUNK : len;
-            sha_add(&sha, b, want);
+            trx_sha_add(&sha, b, want);
             if (!rf_write(f, b, want)) {
                 failed = true;
                 return;
@@ -1172,13 +1358,17 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     n += u64dec(dst + n, cap - n, f.cycles);
     n += r_snprintf(dst + n, cap - n, ",\"pc\":%d", int((f.w[W_CPU + 1] & 0xFFFF) - PC_ADJ) & 0xFFFF);
     if (cart) {
-        n += r_snprintf(dst + n, cap - n, ",\"cartridgeType\":%u,\"source\":\"", (unsigned)g_src.cart_type);
+        // the type is C64_CARTRIDGE_TYPE, the machine's own number (the one trx_ring_cart_state_ok() and a load compare), not the .crt's hardware type
+        n += r_snprintf(dst + n, cap - n, ",\"cartridgeType\":%u,\"source\":\"", (unsigned)c64_cartridge_type());
         n += json_str(dst + n, cap - n, g_src.cart_src);
         n += r_snprintf(dst + n, cap - n, "\",\"mediumBytes\":%u", (unsigned)rom_len);
     }
     n += r_snprintf(dst + n, cap - n, ",\"machineState\":{");
     if (cart) {
-        n += r_snprintf(dst + n, cap - n, "\"cartridge\":{\"type\":%u,\"bytes\":%u,\"source\":\"", (unsigned)g_src.cart_type, (unsigned)rom_len);
+        // require/prohibit come along because a load without the .crt has to build the same cartridge definition, which the firmware derives from the
+        // CRT header (the EasyFlash subtype among others). Carried, not guessed.
+        n += r_snprintf(dst + n, cap - n, "\"cartridge\":{\"type\":%u,\"bytes\":%u,\"require\":%u,\"prohibit\":%u,\"source\":\"",
+                        (unsigned)c64_cartridge_type(), (unsigned)rom_len, (unsigned)g_src.cart_require, (unsigned)g_src.cart_prohibit);
         n += json_str(dst + n, cap - n, g_src.cart_src);
         n += r_snprintf(dst + n, cap - n, "\"},");
     }
@@ -1191,13 +1381,6 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
                   (fpga_capabilities() & CAPAB_COMMAND_INTF) && cmd_if_slot_enable() ? "true" : "false",
                   (unsigned)(c64_reu_enable() ? 1 : 0), (unsigned)c64_reu_size(), c64_sampler_enable() ? "true" : "false");
     return n;
-}
-
-static const char *g_missed = "";
-
-const char *trx_c64re_missed(void)
-{
-    return g_missed;
 }
 
 const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes)
@@ -1260,9 +1443,9 @@ const char *trx_c64re_dump_ex(const char *path, int idx, uint32_t *bytes, trx_pr
     }
     // drive A, through the stub on its own CPU. A drive that cannot be entered gives its RAM only, and one that is off gives nothing; neither stops the
     // file from being written.
-    if (!err && drive_present()) {
+    if (!err && trx_drive_present()) {
         drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState));
-        const char *derr = drive ? drive_read(drive) : "Out of memory";
+        const char *derr = drive ? trx_drive_read(drive, true) : "Out of memory";
         if (derr) {
             r_log("[C64RE] drive A is not in the file: %s\n", derr);
             r_free(drive);
@@ -1344,7 +1527,7 @@ const char *trx_c64re_dump_ex(const char *path, int idx, uint32_t *bytes, trx_pr
         }
         if (!err) {
             uint8_t digest[32];
-            sha_final(&w.sha, digest);
+            trx_sha_final(&w.sha, digest);
             if (!rf_seek(file, 9) || !rf_write(file, digest, 32)) {
                 err = "The file could not be written";
             }
@@ -1496,352 +1679,6 @@ const char *trx_c64re_dump_machine(const char *path, uint32_t *bytes)
     return err;
 }
 
-// The loader of format 2: the whole file hashed once, then the sections it can put back are read at their offsets - the file is never held whole (a
-// cartridge image is megabytes).
-static inline uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | uint32_t(p[3]) << 24; }
-
-// The cartridge image goes into DDR2 from the file while the machine stands (TrxLoadMem::rom_put), piece by piece through the caller's rom_write.
-struct RomJob {
-    RFile *file;
-    uint32_t off, len;
-    uint8_t *chunk;
-};
-static RomJob g_rom;
-
-static void rom_put_cb(void *)
-{
-    for (uint32_t k = 0; k < g_rom.len; k += RAW_CHUNK) {
-        uint32_t want = g_rom.len - k > RAW_CHUNK ? RAW_CHUNK : g_rom.len - k;
-        if (!rf_seek(g_rom.file, g_rom.off + k) || !rf_read(g_rom.file, g_rom.chunk, want)) {
-            r_log("[C64RE] the cartridge image could not be read back from the file\n");
-            return;
-        }
-        g_src.rom_write(g_src.rom_ctx, k, g_rom.chunk, want);
-    }
-}
-
-// What a load could not put back, named once each (FW note())
-static void note_missed(char *missed, int cap, const char *what)
-{
-    int n = int(strlen(missed));
-    if (n + int(strlen(what)) + 3 >= cap) {
-        return;
-    }
-    if (n) {
-        missed[n++] = ',';
-        missed[n++] = ' ';
-    }
-    strcpy(missed + n, what);
-}
-
-static bool is_there(const char *path)
-{
-    return rf_exists(path);
-}
-
-// the string value after pat (a `"key":"` prefix) in the header, up to its closing quote; false when the key is not there
-static bool hdr_str(const char *hdr, const char *pat, char *out, int cap)
-{
-    const char *p = r_strstr(hdr, pat);
-    if (!p) {
-        return false;
-    }
-    p += strlen(pat);
-    int k = 0;
-    while (*p && *p != '"' && k < cap - 1) {
-        if (*p == '\\' && p[1]) {
-            p++;
-        }
-        out[k++] = *p++;
-    }
-    out[k] = 0;
-    return true;
-}
-
-
-// FW build_settings (D4): the registers, directly, for as long as this state runs; the setting values are not written, so nothing reaches the card
-static void build_settings(const char *ms, char *missed, int cap)
-{
-    const char *se = r_strstr(ms, "\"settings\":{");
-    if (!se) {
-        return;
-    }
-    const bool uci = r_strstr(se, "\"uci\":true") != NULL;
-    const bool sampler = r_strstr(se, "\"sampler\":true") != NULL;
-    const char *rp = r_strstr(se, "\"reu\":");
-    const char *sp = r_strstr(se, "\"reuSize\":");
-    const int reu = rp ? r_atoi(rp + 6) : 0;
-    const int reu_size = sp ? r_atoi(sp + 10) : 0;
-    if (fpga_capabilities() & CAPAB_COMMAND_INTF) {
-        cmd_if_set_slot_enable(uci ? 1 : 0);
-        if (uci) {
-            cmd_if_set_slot_base(0x47);                        // $DF1C
-        }
-    } else if (uci) {
-        note_missed(missed, cap, "UCI");
-    }
-    if (fpga_capabilities() & CAPAB_SAMPLER) {
-        c64_set_sampler_enable(sampler ? 1 : 0);
-    } else if (sampler) {
-        note_missed(missed, cap, "the sampler");
-    }
-    // the REU is off in every state a ring can produce (A08); this only puts back an "off" that the machine may currently contradict
-    c64_set_reu_enable(reu ? 1 : 0);
-    c64_set_reu_size(uint8_t(reu_size));
-}
-
-// FW build_drive: the image drive A had, mounted before the drive's own state goes in (a mount resets the drive and would overwrite it); the state decides,
-// not what happens to be in the drive. A path that is gone is looked for under the same name beside the file being loaded (FW resolve_medium).
-static char g_load_path[192];                      // the file being loaded: a medium that is gone is looked for beside it (FW resolve_medium)
-static void build_drive(const char *ms, char *missed, int cap)
-{
-    char img[144], mode[12];
-    if (!g_src_on || !g_src.drive_mount || !hdr_str(ms, "\"drive\":{\"image\":\"", img, sizeof(img)) || !img[0]) {
-        return;
-    }
-    if (!hdr_str(ms, "\"mode\":\"", mode, sizeof(mode))) {
-        mode[0] = 0;
-    }
-    char spec[200];
-    if (!is_there(img)) {
-        const char *base = strrchr(img, '/');
-        const char *cut = strrchr(g_load_path, '/');
-        char tmp[200];
-        if (base && cut && int(cut - g_load_path) + int(strlen(base)) < int(sizeof(tmp))) {
-            memcpy(tmp, g_load_path, cut - g_load_path);
-            strcpy(tmp + (cut - g_load_path), base);
-            if (is_there(tmp)) {
-                r_log("[C64RE] '%s' is not there; '%s' is used instead\n", img, tmp);
-                r_snprintf(img, sizeof(img), "%s", tmp);
-            }
-        }
-    }
-    r_snprintf(spec, sizeof(spec), "%s%s", !strcmp(mode, "unlinked") ? "unlinked " : !strcmp(mode, "ro") ? "ro " : "", img);
-    if (g_src.drive_mount(g_src.rom_ctx, spec) != 0) {
-        r_log("[C64RE] drive A: '%s' was not mounted\n", img);
-        note_missed(missed, cap, "the disk in drive A");
-    } else {
-        r_log("[C64RE] drive A: '%s' mounted\n", img);
-    }
-}
-
-static const char *load_v2(RFile *file, uint32_t size)
-{
-    const char *err = NULL;
-    uint8_t *chunk = (uint8_t *)r_malloc(RAW_CHUNK);
-    uint8_t *ram = (uint8_t *)r_malloc(65536);
-    uint8_t *col = (uint8_t *)r_malloc(1024);
-    uint8_t *blk = (uint8_t *)r_malloc(BLOCK_SEC_BYTES);
-    TrxDriveState *drive = NULL;
-    static char missed[96];
-    missed[0] = 0;
-    g_missed = missed;
-    if (!chunk || !ram || !col || !blk) {
-        err = "Out of memory";
-    }
-    uint8_t head[41];
-    if (!err && (size < 41 + 8 || !rf_seek(file, 0) || !rf_read(file, head, 41))) {
-        err = "The file could not be read";
-    }
-    if (!err) {
-        Sha256 s;
-        sha_init(&s);
-        for (uint32_t left = size - 41; left && !err;) {
-            uint32_t want = left > RAW_CHUNK ? RAW_CHUNK : left;
-            if (!rf_read(file, chunk, want)) {
-                err = "The file could not be read";
-                break;
-            }
-            sha_add(&s, chunk, want);
-            left -= want;
-        }
-        uint8_t d[32];
-        sha_final(&s, d);
-        if (!err && memcmp(d, head + 9, 32)) {
-            err = "Hash mismatch";
-        }
-    }
-    uint32_t pos = 41;
-    uint8_t w4[4];
-    uint32_t hl = 0;
-    if (!err && (!rf_seek(file, pos) || !rf_read(file, w4, 4))) {
-        err = "The file could not be read";
-    }
-    if (!err) {
-        hl = le32(w4);
-        pos += 4 + ((hl + 3) & ~3u);
-        if (pos + 4 > size) {
-            err = "Bad header length";
-        }
-    }
-    // the header names the machine the state needs (FW build_cartridge reads machineState.cartridge): the type and the .crt it came from
-    static char hdr[HDR_JSON_MAX + 1];
-    hdr[0] = 0;
-    if (!err && hl <= HDR_JSON_MAX && (!rf_seek(file, 41 + 4) || !rf_read(file, hdr, hl))) {
-        err = "The file could not be read";
-    }
-    hdr[hl <= HDR_JSON_MAX ? hl : 0] = 0;
-    const char *ms_at = r_strstr(hdr, "\"machineState\"");
-    bool has_ms = ms_at != NULL;
-    int machine = -1;                                   // the video standard the file is of (FW stage_v2: a name this build does not run refuses before anything moves)
-    char mname[40];
-    if (!err && hdr_str(hdr, "\"machine\":\"", mname, sizeof(mname))) {
-        for (int i = 0; i < 6; i++) {
-            if (!strcmp(mname, machine_names[i])) {
-                machine = i;
-            }
-        }
-        if (machine < 0) {
-            static char msg[96];
-            char mn[41];
-            r_copy(mn, sizeof(mn), mname, 40);
-            r_snprintf(msg, sizeof(msg), "The file is for machine \"%s\", which this build does not run", mn);
-            err = msg;
-        }
-    }
-    int cart_type = 0;
-    static char cart_src[160];
-    cart_src[0] = 0;
-    if (const char *cp = r_strstr(hdr, "\"cartridge\":{\"type\":")) {
-        cart_type = r_atoi(cp + 20);
-        if (const char *sp = r_strstr(cp, "\"source\":\"")) {
-            sp += 10;
-            int k = 0;
-            while (*sp && *sp != '"' && k < int(sizeof(cart_src)) - 1) {
-                cart_src[k++] = *sp++;
-            }
-            cart_src[k] = 0;
-        }
-    }
-    uint8_t *cartram = NULL, *eeprom = NULL;
-    uint32_t rom_off = 0, rom_len = 0;
-    int ns = 0;
-    uint8_t tab[SEC_SLOTS * 4 * SEC_ENTRY];
-    if (!err && (!rf_seek(file, pos) || !rf_read(file, w4, 4))) {
-        err = "The file could not be read";
-    }
-    if (!err) {
-        ns = w4[0] | w4[1] << 8;
-        if (ns < 1 || ns > SEC_SLOTS * 4 || pos + 4 + uint32_t(ns) * SEC_ENTRY > size) {
-            err = "Bad section table";
-        } else if (!rf_read(file, tab, uint32_t(ns) * SEC_ENTRY)) {
-            err = "The file could not be read";
-        }
-    }
-    bool have_block = false, have_ram = false, have_col = false;
-    uint32_t off = pos + 4 + uint32_t(ns) * SEC_ENTRY;
-    for (int i = 0; i < ns && !err; i++) {
-        uint8_t id = tab[i * SEC_ENTRY];
-        uint32_t len = le32(tab + i * SEC_ENTRY + 4);
-        uint32_t padded = (len + 3) & ~3u;
-        if (off + len > size) {
-            err = "A section is longer than the file";
-            break;
-        }
-        uint8_t *dst = NULL;
-        switch (id) {
-        case SEC_BLOCK:  dst = blk; if (len != BLOCK_SEC_BYTES) err = "Bad block section"; have_block = true; break;
-        case SEC_RAM:    dst = ram; if (len != 65536) err = "Bad RAM section"; have_ram = true; break;
-        case SEC_COLOR:  dst = col; if (len != 1024) err = "Bad colour RAM section"; have_col = true; break;
-        case SEC_DRIVE:
-            if (len != sizeof(TrxDriveState)) {
-                err = "Bad drive section";
-            } else if (!(drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState)))) {
-                err = "Out of memory";
-            }
-            dst = (uint8_t *)drive;
-            break;
-        case SEC_CARTRAM:
-            if (len != TRX_CART_RAM_BYTES) {
-                err = "Bad cartridge RAM section";
-            } else if (!(cartram = (uint8_t *)r_malloc(len))) {
-                err = "Out of memory";
-            }
-            dst = cartram;
-            break;
-        case SEC_CARTROM: rom_off = off; rom_len = len; break;     // streamed into DDR2 while the machine stands
-        case SEC_EEPROM:
-            if (len != TRX_EEPROM_BYTES) {
-                err = "Bad EEPROM section";
-            } else if (!(eeprom = (uint8_t *)r_malloc(len))) {
-                err = "Out of memory";
-            }
-            dst = eeprom;
-            break;
-        default: break;
-        }
-        if (!err && dst && (!rf_seek(file, off) || !rf_read(file, dst, len))) {
-            err = "The file could not be read";
-        }
-        off += padded;
-    }
-    if (!err && !(have_block && have_ram && have_col)) {
-        err = "The file has no chip block, RAM or colour RAM";
-    }
-    uint32_t w[TRX_BLOCK_WORDS];
-    int x = 0;
-    if (!err) {
-        for (int i = 0; i < TRX_BLOCK_WORDS; i++) {
-            w[i] = le32(blk + 4 * i);
-        }
-        x = blk[4 * TRX_BLOCK_WORDS] | blk[4 * TRX_BLOCK_WORDS + 1] << 8;
-        if (x < 96 || x > 504) {
-            err = "Bad snap position";
-        } else if (blk[4 * TRX_BLOCK_WORDS + 2] & 1) {
-            trx_ring_set_turbo(le32(blk + 4 * TRX_BLOCK_WORDS + 4));      // one shot, taken by the load below (a no-op on a machine without the turbo engine)
-        }
-    }
-    // the cartridge the state needs goes into the port first, without a reset (FW trx_c64re_apply: build_machine before the state; U9 D2): the .crt the file
-    // names, or an empty port when the state had none. What the file holds of the cartridge goes in with the state.
-    // FW build_machine_mode: the video standard first, it drives the PLL and the colour timing the chip block that follows was running at
-    if (!err && machine >= 0 && g_src_on && g_src.machine_set && g_src.machine_set(g_src.rom_ctx, machine) != 0) {
-        note_missed(missed, sizeof(missed), "the video standard");
-    }
-    bool cart_ok = false;
-    if (!err && has_ms) {
-        if (g_src_on && g_src.cart_for_state) {
-            cart_ok = g_src.cart_for_state(g_src.rom_ctx, cart_type > 0 ? cart_src : NULL) == 0;
-        }
-        if (!cart_ok && cart_type > 0) {
-            note_missed(missed, sizeof(missed), "the cartridge");
-        }
-    } else if (!err && (cartram || rom_len || eeprom)) {
-        note_missed(missed, sizeof(missed), "the cartridge");           // a file that does not name its machine
-    }
-    if (!err && has_ms) {                                                   // FW build_machine: cartridge, then drive A's image, then the registers; all before the state
-        build_drive(ms_at, missed, sizeof(missed));
-        build_settings(ms_at, missed, sizeof(missed));
-    }
-    if (!err) {
-        bool cart_in = cart_ok && cart_type > 0;
-        g_rom.file = file;
-        g_rom.off = rom_off;
-        g_rom.len = cart_in && g_src.rom_write ? rom_len : 0;
-        g_rom.chunk = chunk;
-        TrxLoadMem mem = { ram, col, cart_in ? cartram : NULL, g_rom.len ? rom_put_cb : NULL, NULL };
-        int e = trx_ring_load_state(&mem, w, uint16_t(x));
-        if (e) {
-            err = trx_ring_error(e);
-        } else if (cart_in && eeprom && g_src.eeprom_put) {
-            g_src.eeprom_put(g_src.rom_ctx, eeprom);                 // after the block: replay_cart's $DE00 write drives the 93C86's lines on its way past
-        }
-    }
-    if (!err && drive) {
-        // drive A after the machine: the stub runs on the drive's own CPU and is stepped, so the C64's state does not matter (FW trx_c64re_apply)
-        const char *derr = drive_write(drive);
-        if (derr) {
-            r_log("[C64RE] drive A was not put back: %s\n", derr);
-            note_missed(missed, sizeof(missed), "drive A");
-        }
-    }
-    r_free(chunk);
-    r_free(ram);
-    r_free(col);
-    r_free(blk);
-    r_free(drive);
-    return err;
-}
-
 #define MAX_RING_ENTRIES 64
 
 const char *trx_c64rering_dump_ex(const char *path, int seconds, int stride, uint32_t *bytes, int *entries,
@@ -1934,7 +1771,9 @@ const char *trx_c64rering_dump_ex(const char *path, int seconds, int stride, uin
             g.num("\",\"frame\":", frame);
             g.num(",\"cycles\":", int64_t(f->cycles));
             g.str(",\"pinned\":false,\"byte_size\":96000,\"created_at_ms\":0,\"payload\":");
-            write_checkpoint(g, *f, rams[k], cols[k]);
+            // no cartridge RAM per entry: that would be a 64 KB read and 87 KB
+            // of base64 for every one of them (T66 part 5)
+            write_checkpoint(g, *f, rams[k], cols[k], NULL, NULL);
             g.str("}");
             if (progress) {
                 progress(k + 1, n, ctx);
@@ -1968,163 +1807,705 @@ const char *trx_c64rering_dump(const char *path, int seconds, int stride, uint32
 }
 
 // ---- load ------------------------------------------------------------------------
-// The body of a gzip member made of stored blocks (what trx_c64re_dump writes).
-static char *gunzip_stored(const uint8_t *p, uint32_t len, uint32_t *out_len, const char **err)
+// The body of a gzip member: stored blocks, as this board writes them, or a
+// real deflate stream, as TRX64 writes them (T66 part 4, trx_inflate.c).
+// Returns the JSON, zero-terminated, for the caller to free.
+static char *gunzip(const uint8_t *p, uint32_t len, uint32_t *out_len, const char **err)
 {
-    if (len < 18 || p[0] != 0x1F || p[1] != 0x8B || p[2] != 8) {
+    uint32_t isize = trx_gzip_isize(p, len);
+    if (len < 18 || p[0] != 0x1F || p[1] != 0x8B || p[2] != 8 || !isize) {
         *err = "Not a gzip body";
         return NULL;
     }
-    uint32_t i = 10;
-    uint8_t flg = p[3];
-    if (flg & 4) {
-        i += 2 + (p[i] | p[i + 1] << 8);
-    }
-    if (flg & 8) {
-        while (i < len && p[i]) i++;
-        i++;
-    }
-    if (flg & 16) {
-        while (i < len && p[i]) i++;
-        i++;
-    }
-    if (flg & 2) {
-        i += 2;
-    }
-    uint32_t isize = p[len - 4] | p[len - 3] << 8 | p[len - 2] << 16 | uint32_t(p[len - 1]) << 24;
     char *out = (char *)r_malloc(isize + 1);
     if (!out) {
-        *err = "Out of memory";
+        static char msg[64];
+        r_snprintf(msg, sizeof(msg), "The file unpacks to %u KB, which did not fit", (unsigned)(isize >> 10));
+        *err = msg;
         return NULL;
     }
-    uint32_t o = 0;
-    for (;;) {
-        if (i + 5 > len) {
-            *err = "Truncated gzip body";
-            r_free(out);
-            return NULL;
-        }
-        uint8_t h = p[i];
-        if (h & 6) {
-            *err = "Compressed .c64re (only the board's own uncompressed files load)";
-            r_free(out);
-            return NULL;
-        }
-        uint32_t n = p[i + 1] | p[i + 2] << 8;
-        i += 5;
-        if (i + n > len || o + n > isize) {
-            *err = "Bad stored block";
-            r_free(out);
-            return NULL;
-        }
-        memcpy(out + o, p + i, n);
-        o += n;
-        i += n;
-        if (h & 1) {
-            break;
-        }
+    uint32_t got = 0;
+    int e = trx_gunzip(p, len, (uint8_t *)out, isize, &got);
+    if (e) {
+        r_free(out);
+        *err = trx_inflate_error(e);
+        return NULL;
     }
-    out[o] = 0;
-    *out_len = o;
+    out[got] = 0;
+    *out_len = got;
     return out;
 }
 
-static bool tok_eq(const char *js, const jsmntok_t &t, const char *s)
-{
-    int n = t.end - t.start;
-    return t.type == JSMN_STRING && int(strlen(s)) == n && !strncmp(js + t.start, s, n);
-}
+// U9 D1: the machine the file says its state needs. Filled while the header is
+// still parsed and carried into the staged state, because the token array is
+// gone by the time trx_c64re_apply() runs.
+struct TrxMachineWant {
+    bool     present;               // the file carries a machineState at all
+    int      cart_type;             // C64_CARTRIDGE_TYPE at the freeze, -1 for none
+    uint16_t cart_require;          // the cartridge definition's flags, so a rebuild without
+    uint16_t cart_prohibit;         // the .crt does not have to guess them
+    char     cart_src[144];         // the .crt it came from, "" when unknown
+    char     drive_img[144];        // what was in drive A, "" for nothing
+    uint8_t  drive_mode;            // 0 read/write, 1 read-only, 2 unlinked
+    bool     has_settings;
+    bool     uci, sampler;
+    uint8_t  reu, reu_size;
+    int      machine;               // the video standard the file is of, -1 unknown
+};
 
-// the value token of key in object o, or -1
-static int key(const char *js, const jsmntok_t *t, int n, int o, const char *k)
+// The state of a file, read and checked, waiting to go into the machine. Its
+// buffers are the ones trx_ring_load_state() wants. The cartridge image of a
+// format 2 file is not held: it is read from the file again while the machine
+// stands (rom_put), so the file's path and the image's offset are kept.
+struct TrxC64reStaged {
+    uint8_t *ram;                   // 65536, the RAM under the I/O already in place
+    uint8_t *col;                   // 1024, the colour RAM's low nibbles
+    uint8_t *cart;                  // TRX_CART_RAM_BYTES of cartridge RAM, or NULL (T66 part 5)
+    uint8_t *rom;                   // the cartridge's ROM / flash window of a format 1 file (cartFlash), or NULL
+    uint32_t rom_len;               // the image's length, held in rom or at rom_off of the file at path
+    uint32_t rom_off;
+    char     path[192];
+    TrxDriveState *drive;           // drive A's own state, or NULL (T66 part 8)
+    uint32_t w[TRX_BLOCK_WORDS];    // the chip block
+    uint16_t x;                     // the snap position it belongs on
+    bool     turbo;                 // a turbo word goes in with it (T29)
+    uint32_t turbo_pack;
+    uint8_t *eeprom;                // TRX_EEPROM_BYTES of the 93C86 (GMod2), or NULL
+    TrxMachineWant want;            // the machine to build before the state goes in
+    TrxC64reSrc src;                // the source when the file was staged: the hooks the apply builds the machine with
+    bool     src_on;
+};
+
+static TrxC64reStaged *pending_state;   // the menu's choice, taken at its close
+
+// Which of the six System Modes a header names, or -1 for a machine this build is not.
+static int machine_index(const char *js, const jsmntok_t &t)
 {
-    if (o < 0 || t[o].type != JSMN_OBJECT) {
-        return -1;
-    }
-    for (int i = o + 1; i < n && t[i].start < t[o].end; i++) {
-        if (t[i].parent == o && tok_eq(js, t[i], k)) {
-            return i + 1;
+    for (int i = 0; i < 6; i++) {
+        if (tok_eq(js, t, machine_names[i])) {
+            return i;
         }
     }
     return -1;
 }
 
-static int64_t tok_int(const char *js, const jsmntok_t *t, int i)
+// Is the whole string a decimal number (so it can mean a frame)?
+static bool all_digits(const char *s)
 {
-    if (i < 0) {
-        return -1;
-    }
-    return r_strtoll(js + t[i].start);
-}
-
-static int b64val(char c)
-{
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-// a {"$ta":..,"b64":..} node into out (exactly len bytes), false otherwise
-static bool tok_ta(const char *js, const jsmntok_t *t, int n, int i, uint8_t *out, int len)
-{
-    int b = key(js, t, n, i, "b64");
-    if (b < 0) {
+    if (!s || !*s) {
         return false;
     }
-    const char *s = js + t[b].start;
-    int sl = t[b].end - t[b].start;
-    int o = 0;
-    uint32_t acc = 0;
-    int nb = 0;
-    for (int k = 0; k < sl; k++) {
-        int v = b64val(s[k]);
-        if (v < 0) {
-            continue;
-        }
-        acc = (acc << 6) | v;
-        nb += 6;
-        if (nb >= 8) {
-            nb -= 8;
-            if (o < len) {
-                out[o] = uint8_t(acc >> nb);
-            }
-            o++;
+    for (const char *p = s; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return false;
         }
     }
-    return o == len;
+    return true;
 }
 
-// A .c64re, or the current entry of a .c64rering (checkpoint_ring.current_id;
-// the entry's payload is the same checkpoint node), written by this board.
-
-const char *trx_c64re_load(const char *path)
+// Which entry of a `.c64rering` to load (T66 part 3): the cursor when want is
+// NULL or empty - that is what the file calls `current_id` - or the entry whose
+// `id` ("cp_<frame>_<seq>") or `label` is want, or whose `frame` is want read as
+// a number, or, written as "#N", the Nth entry in the file (0 = oldest, the
+// order §10.1 writes them in). Returns the payload token, or -1 with *err set.
+static int ring_pick(const char *js, const jsmntok_t *t, int n, const char *want, const char **err)
 {
-    RFile file_o;
-    RFile *file = &file_o;
-    g_missed = "";
-    r_snprintf(g_load_path, sizeof(g_load_path), "%s", path);
-    if (trx_trxring_is_one(path)) {
-        // one way in for every file the ring can load (FW trx_c64re_load_entry): a .trxring brings the ring back as well
-        return trx_trxring_load(path);
+    int cr = json_key(js, t, n, 0, "checkpoint_ring");
+    int cur = json_key(js, t, n, cr, "current_id");
+    int ents = json_key(js, t, n, cr, "entries");
+    bool cursor = !want || !*want;
+    if (ents < 0 || t[ents].type != JSMN_ARRAY || (cursor && cur < 0)) {
+        *err = "No checkpoint_ring entries";
+        return -1;
     }
+    bool by_index = !cursor && want[0] == '#';
+    int64_t idx_want = by_index ? r_strtoll(want + 1) : -1;
+    int at = 0;
+    for (int i = ents + 1; i < n && t[i].start < t[ents].end; i++) {
+        if (t[i].parent != ents) {
+            continue;
+        }
+        int this_one = at++;
+        int id = json_key(js, t, n, i, "id");
+        bool hit;
+        if (by_index) {
+            hit = this_one == idx_want;
+        } else if (cursor) {
+            hit = id >= 0 && t[id].end - t[id].start == t[cur].end - t[cur].start &&
+                  !strncmp(js + t[id].start, js + t[cur].start, t[cur].end - t[cur].start);
+        } else {
+            int lb = json_key(js, t, n, i, "label");
+            int fr = json_key(js, t, n, i, "frame");
+            hit = (id >= 0 && tok_eq(js, t[id], want)) ||
+                  (lb >= 0 && tok_eq(js, t[lb], want)) ||
+                  (fr >= 0 && all_digits(want) && tok_int(js, t, fr) == r_strtoll(want));
+        }
+        if (hit) {
+            int pl = json_key(js, t, n, i, "payload");
+            if (pl < 0) {
+                *err = "That entry carries no payload";
+            }
+            return pl;
+        }
+    }
+    *err = cursor ? "The current entry is not in the file" : "No such entry in the file";
+    return -1;
+}
+
+// The chip block of the machine as it runs now: the newest timeline entry that
+// carries a whole one. A node-built block keeps every flip-flop no file names
+// (above all the CPU's instruction sequencer) from it, so it must come from
+// this machine and this bitstream, not from a table of constants.
+static bool base_block(uint32_t *w, uint16_t *x)
+{
+    trx_ring_poll();
+    for (int i = trx_ring_count() - 1; i >= 0; i--) {
+        TrxFrame f;
+        if (trx_ring_frame(i, &f) && f.block && f.x >= 96 && f.x <= 504) {
+            memcpy(w, f.w, sizeof(f.w));
+            *x = f.x;
+            return true;
+        }
+    }
+    return false;
+}
+
+// manifest.machine.model: only a PAL C64 state fits this machine (T20 §9.4).
+static const char *model_refusal(const char *js, const jsmntok_t *t, int n)
+{
+    int m = json_key(js, t, n, json_key(js, t, n, json_key(js, t, n, 0, "manifest"), "machine"), "model");
+    if (m < 0) {
+        return NULL;                // a ring entry has no manifest of its own
+    }
+    if (tok_eq(js, t[m], "c64-pal")) {
+        return NULL;
+    }
+    static char msg[80];
+    char name[41];
+    r_copy(name, sizeof(name), js + t[m].start, size_t(t[m].end - t[m].start));
+    r_snprintf(msg, sizeof(msg), "The file is for machine \"%s\", not c64-pal", name);
+    return msg;
+}
+
+// What the coarse load took and what it could not take, in the log: the
+// user is told the load is not exact, and by how much.
+static void say_coarse(const TrxNodeState *ns)
+{
+    r_log("[C64RE] coarse load (no trx64Hw node): cpu%s%s%s%s%s%s%s%s\n",
+          (ns->have & TRX_NODE_PORT) ? " port" : "", (ns->have & TRX_NODE_CIA1) ? " cia1" : "",
+          (ns->have & TRX_NODE_CIA2) ? " cia2" : "", (ns->have & TRX_NODE_VIC) ? " vic" : "",
+          (ns->have & TRX_NODE_COLOR) ? " colour" : "", (ns->have & TRX_NODE_RAM) ? " ram" : "",
+          (ns->have & TRX_NODE_CART) ? " cart-banking" : "",
+          (ns->have & TRX_NODE_CARTRAM) ? " cart-ram" : "");
+    r_log("[C64RE] not restored: the VIC's raster position (file line %d cycle %d) and pixel pipeline, "
+          "the SID, the drive\n", ns->line, ns->cycle);
+    if (ns->keys_pressed) {
+        r_log("[C64RE] %d key(s) were held down in the file; they are not pressed here\n", ns->keys_pressed);
+    }
+}
+
+// The file's "media" node against what the source has on drive A (T66 part 5).
+// Nothing is mounted or unmounted here: a load puts the machine's state back,
+// and which disk is in the drive is the user's. A mismatch is said once,
+// because the program in the snapshot will read sectors that are no longer
+// under the head.
+static void say_media(const char *js, const jsmntok_t *t, int n, int cp)
+{
+    int md = json_key(js, t, n, cp, "media");
+    int dp = json_key(js, t, n, md, "diskPath");
+    if (dp < 0) {
+        return;
+    }
+    int len = t[dp].end - t[dp].start;
+    const char *want = js + t[dp].start;
+    const char *name = (g_src_on && g_src.disk_path) ? strrchr(g_src.disk_path, '/') : NULL;
+    name = name ? name + 1 : (g_src_on && g_src.disk_path ? g_src.disk_path : "");
+    int nl = int(strlen(name));
+    bool same = false;
+    if (nl && len > nl) {
+        same = !strncmp(want + len - nl, name, nl);
+    }
+    if (!same) {
+        char w[96];
+        r_copy(w, sizeof(w), want, size_t(len));
+        r_log("[C64RE] the snapshot was taken with \"%s\" in drive A; now it is \"%s\"\n", w, nl ? name : "nothing");
+    }
+}
+
+// ---- format 2: the reader (U8 §4) -----------------------------------------------
+// Streamed: the section table says where every payload is and how long, so each one
+// is read once, straight into the buffer the hardware is handed. The peak is the
+// sum of those buffers - never the file, and never a second representation; the
+// cartridge image is hashed on the way past and read again at the load.
+
+static inline uint32_t le32(const uint8_t *p)
+{
+    return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+}
+static inline uint16_t le16(const uint8_t *p) { return uint16_t(p[0]) | (uint16_t(p[1]) << 8); }
+
+// Reads and hashes in step, so the digest covers exactly the bytes of the body.
+class Rd {
+    RFile *f;
+public:
+    TrxSha256 sha;
+    bool failed;
+    uint32_t pos;                   // the file position of the next byte
+    void init(RFile *file, uint32_t at)     // no constructor (R3)
+    {
+        f = file;
+        failed = false;
+        pos = at;
+        trx_sha_init(&sha);
+    }
+    bool get(void *p, uint32_t len)
+    {
+        if (failed || !len) {
+            return !failed;
+        }
+        if (!rf_read(f, p, len)) {
+            failed = true;
+            return false;
+        }
+        trx_sha_add(&sha, (const uint8_t *)p, len);
+        pos += len;
+        return true;
+    }
+    // an id this reader does not keep, or the padding: read it so the digest is
+    // right, then throw it away
+    bool eat(uint32_t len, uint8_t *scratch, uint32_t cap)
+    {
+        while (len && !failed) {
+            uint32_t want = len > cap ? cap : len;
+            if (!get(scratch, want)) {
+                return false;
+            }
+            len -= want;
+        }
+        return !failed;
+    }
+};
+
+#define HDR_JSON_LIMIT 4096      // a header is a few hundred bytes; this is the refusal
+#define SEC_LIMIT        64      // sections one file may declare
+
+// A string token into a fixed buffer. An absent key or one that does not fit
+// leaves the buffer empty, which every caller reads as "the file does not say".
+static void tok_copy(const char *js, const jsmntok_t *t, int i, char *dst, int cap)
+{
+    dst[0] = 0;
+    if (i < 0 || t[i].type != JSMN_STRING) {
+        return;
+    }
+    int n = t[i].end - t[i].start;
+    if (n <= 0 || n >= cap) {
+        return;
+    }
+    memcpy(dst, js + t[i].start, n);
+    dst[n] = 0;
+}
+
+static trx_progress_fn g_stage_progress;    // the load's bar (U9): set for one stage_v2()
+static void *g_stage_ctx;
+static TrxC64reMissing *g_stage_miss;       // U9 D3d: filled when the medium is why it failed
+static const char *g_stage_medium;          // the answer to the last refusal, tried first
+
+static const char *base_of(const char *path)
+{
+    const char *cut = strrchr(path, '/');
+    return cut ? cut + 1 : path;
+}
+
+static bool is_there(const char *path)
+{
+    return path && path[0] && rf_exists(path);
+}
+
+// dir + name, with exactly one '/' between them. False when it does not fit,
+// which is a path that could not be opened anyway.
+static bool join(char *dst, int cap, const char *dir, int dirlen, const char *name)
+{
+    while ((dirlen > 0) && (dir[dirlen - 1] == '/')) {
+        dirlen--;
+    }
+    int need = dirlen + 1 + int(strlen(name));
+    if (need >= cap) {
+        return false;
+    }
+    memcpy(dst, dir, dirlen);
+    dst[dirlen] = '/';
+    strcpy(dst + dirlen + 1, name);
+    return true;
+}
+
+// U9 D3c (Alex, 2026-11-08): a file written on another machine names its medium
+// by that machine's path - TRX64 writes "/Users/...", which no board has. Three
+// places are looked at, in this order: what the user last answered a refusal
+// with (D3d), the path in the file, and the same file name beside the .c64re -
+// that last one is how the two reach the board, in one folder. Nothing wider is
+// searched on its own: that would insert an image of that name rather than the
+// image. The path that holds replaces the one from the file, because
+// build_cartridge() and build_drive() mount by that string later, after the
+// header's tokens are gone. Only the cartridge is asked about, so only it reads
+// the answer and only it records what was missing.
+static bool resolve_medium(char *want, int cap, const char *self, bool cartridge)
+{
+    const char *base = base_of(want);
+    char tmp[192];
+
+    if (cartridge && g_stage_medium && g_stage_medium[0]) {
+        const char *chosen = g_stage_medium;
+        int clen = int(strlen(chosen));
+        bool folder = (clen > 0) && (chosen[clen - 1] == '/');
+        if (!folder && is_there(chosen) && (clen < cap)) {
+            r_log("[C64RE] '%s' is used, as chosen\n", chosen);
+            strcpy(want, chosen);
+            return true;
+        }
+        // A folder was chosen, or a file that is gone again: the name from the
+        // state in the folder that was chosen.
+        if (base[0] && join(tmp, int(sizeof(tmp)), chosen, clen, base) &&
+            is_there(tmp) && (int(strlen(tmp)) < cap)) {
+            r_log("[C64RE] '%s' is used, from the chosen folder\n", tmp);
+            strcpy(want, tmp);
+            return true;
+        }
+    }
+    if (want[0] && is_there(want)) {
+        return true;
+    }
+    const char *cut = self ? strrchr(self, '/') : NULL;
+    if (base[0] && cut && join(tmp, int(sizeof(tmp)), self, int(cut - self) + 1, base) &&
+        is_there(tmp) && (int(strlen(tmp)) < cap)) {
+        r_log("[C64RE] '%s' is not there; '%s' is used instead\n", want, tmp);
+        strcpy(want, tmp);
+        return true;
+    }
+    if (cartridge && g_stage_miss) {
+        r_snprintf(g_stage_miss->want, sizeof(g_stage_miss->want), "%s", want);
+        r_snprintf(g_stage_miss->base, sizeof(g_stage_miss->base), "%s", base);
+    }
+    return false;
+}
+
+static const char *stage_v2(RFile *file, const uint8_t *head, uint32_t size, const char *self,
+                            TrxC64reStaged **out)
+{
+    Rd rd;
+    rd.init(file, 41);
+    uint8_t buf[8];
+    const char *err = NULL;
+    char *hdr = NULL;
+    uint8_t *tab = NULL;
+    uint8_t *blk = NULL;
+    uint8_t *ram = NULL, *col = NULL, *cart = NULL, *drv = NULL, *eeprom = NULL;
+    uint8_t *scratch = (uint8_t *)r_malloc(RAW_CHUNK);  // what is read past (the cartridge image among it) goes through here
+    uint32_t rom_len = 0, rom_off = 0;
+    bool have_rom = false;
+    uint32_t hl = 0;
+    int ns = 0;
+    TrxMachineWant mw;              // `want` below is the section loop's own length
+    memset(&mw, 0, sizeof(mw));
+    mw.cart_type = -1;
+    mw.machine = -1;
+
+    if (!scratch) {
+        err = "Out of memory";
+    } else if (!rd.get(buf, 4)) {
+        err = "The file could not be read";
+    } else if ((hl = le32(buf)) < 2 || hl > HDR_JSON_LIMIT) {
+        err = "Not a .c64re (format 2): the header does not fit";
+    } else if (!(hdr = (char *)r_malloc(hl + 1))) {
+        err = "Out of memory";
+    } else if (!rd.get(hdr, hl) || !rd.eat((4 - (hl & 3)) & 3, scratch, RAW_CHUNK)) {
+        err = "The file could not be read";
+    }
+    if (!err) {
+        hdr[hl] = 0;
+        // what the header has to agree on: the block layout, because the words go
+        // onto the state bus by position, and the machine
+        jsmn_parser p;
+        jsmn_init(&p);
+        int need = jsmn_parse(&p, hdr, hl, NULL, 0);
+        jsmntok_t *t = (need > 0) ? (jsmntok_t *)r_malloc(sizeof(jsmntok_t) * need) : NULL;
+        if (!t) {
+            err = need > 0 ? "Out of memory" : "Bad header";
+        } else {
+            jsmn_init(&p);
+            int n = jsmn_parse(&p, hdr, hl, t, need);
+            int bw = (n > 0) ? json_key(hdr, t, n, 0, "blockWords") : -1;
+            int mk = (n > 0) ? json_key(hdr, t, n, 0, "machine") : -1;
+            if (n < 1) {
+                err = "Bad header";
+            } else if (bw >= 0 && tok_int(hdr, t, bw) != TRX_BLOCK_WORDS) {
+                err = "The file's chip block is not this machine's";
+            } else if (mk >= 0 && (mw.machine = machine_index(hdr, t[mk])) < 0) {
+                static char msg[96];
+                char name[41];
+                r_copy(name, sizeof(name), hdr + t[mk].start, size_t(t[mk].end - t[mk].start));
+                r_snprintf(msg, sizeof(msg), "The file is for machine \"%s\", which this build does not run", name);
+                err = msg;
+            }
+            // U9 D1: the machine this state needs. A file written before U9 has
+            // no machineState; then the flat cartridgeType is all there is, and
+            // the machine has to be the one it was taken on (D5, the check
+            // format 1 had and format 2 lost).
+            int ms = (!err && n > 0) ? json_key(hdr, t, n, 0, "machineState") : -1;
+            if (!err && ms >= 0 && t[ms].type == JSMN_OBJECT) {
+                mw.present = true;
+                int ct = json_key(hdr, t, n, ms, "cartridge");
+                if (ct >= 0) {
+                    mw.cart_type = int(tok_int_or(hdr, t, json_key(hdr, t, n, ct, "type"), -1));
+                    mw.cart_require  = uint16_t(tok_int_or(hdr, t, json_key(hdr, t, n, ct, "require"), 0));
+                    mw.cart_prohibit = uint16_t(tok_int_or(hdr, t, json_key(hdr, t, n, ct, "prohibit"), 0));
+                    tok_copy(hdr, t, json_key(hdr, t, n, ct, "source"), mw.cart_src, sizeof(mw.cart_src));
+                }
+                int dr = json_key(hdr, t, n, ms, "drive");
+                if (dr >= 0) {
+                    tok_copy(hdr, t, json_key(hdr, t, n, dr, "image"), mw.drive_img, sizeof(mw.drive_img));
+                    int md = json_key(hdr, t, n, dr, "mode");
+                    mw.drive_mode = (md >= 0 && tok_eq(hdr, t[md], "unlinked")) ? 2 :
+                                    (md >= 0 && tok_eq(hdr, t[md], "ro")) ? 1 : 0;
+                }
+                int se = json_key(hdr, t, n, ms, "settings");
+                if (se >= 0) {
+                    mw.has_settings = true;
+                    mw.uci     = tok_true(hdr, t, json_key(hdr, t, n, se, "uci"));
+                    mw.sampler = tok_true(hdr, t, json_key(hdr, t, n, se, "sampler"));
+                    mw.reu      = uint8_t(tok_int_or(hdr, t, json_key(hdr, t, n, se, "reu"), 0));
+                    mw.reu_size = uint8_t(tok_int_or(hdr, t, json_key(hdr, t, n, se, "reuSize"), 0));
+                }
+            } else if (!err && n > 0) {
+                mw.cart_type = int(tok_int_or(hdr, t, json_key(hdr, t, n, 0, "cartridgeType"), -1));
+            }
+            r_free(t);
+        }
+    }
+    // U9 D5: the cartridge, before a byte is put anywhere. Two cases, and they
+    // are different questions. With a machineState the load builds the machine,
+    // so what matters is whether this build can build it at all. Without one -
+    // a file from before U9 - nothing will be inserted, so the machine has to
+    // already be the one the file was taken on, which is format 1's check.
+    if (!err && mw.present && mw.cart_type > 0 &&
+        !trx_ring_cart_state_ok(uint8_t(mw.cart_type), NULL)) {
+        static char msg[80];
+        r_snprintf(msg, sizeof(msg), "This build cannot put back a cartridge of type %02x", mw.cart_type);
+        err = msg;
+    }
+    // The cartridge is inserted from its own .crt, which supplies the geometry
+    // the cartridge's definition is made of. That cannot be rebuilt from the
+    // type and a byte count, so without the file this build would insert a
+    // cartridge it could not describe, and the next save would write a cartridge
+    // machine with no medium. D0 says refuse, and refuse before anything moves.
+    if (!err && mw.present && mw.cart_type > 0) {
+        if (!resolve_medium(mw.cart_src, sizeof(mw.cart_src), self, true)) {
+            static char msg[352];
+            if (!mw.cart_src[0]) {
+                r_snprintf(msg, sizeof(msg), "The cartridge image is needed and the file does not name one");
+            } else {
+                r_snprintf(msg, sizeof(msg), "The cartridge image is needed and was not found:\n%s\nnor '%s' beside this file",
+                           mw.cart_src, base_of(mw.cart_src));
+            }
+            err = msg;
+        }
+    }
+    // The disk is not a refusal: build_drive() reports an image it could not
+    // mount once the machine runs again (D6), so this only widens where it looks.
+    if (!err && mw.present && mw.drive_img[0]) {
+        (void)resolve_medium(mw.drive_img, sizeof(mw.drive_img), self, false);
+    }
+    if (!err && !mw.present && mw.cart_type >= 0 && mw.cart_type != int(c64_cartridge_type())) {
+        static char msg[80];
+        r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", mw.cart_type, (int)c64_cartridge_type());
+        err = msg;
+    }
+    if (!err && (!rd.get(buf, 4) || (ns = le16(buf)) < 1 || ns > SEC_LIMIT)) {
+        err = rd.failed ? "The file could not be read" : "Bad section table";
+    }
+    if (!err && !(tab = (uint8_t *)r_malloc(uint32_t(ns) * SEC_ENTRY))) {
+        err = "Out of memory";
+    }
+    if (!err && !rd.get(tab, uint32_t(ns) * SEC_ENTRY)) {
+        err = "The file could not be read";
+    }
+    // the bar counts the same steps the writer counts: one per RAW_CHUNK of
+    // payload plus one per section, so a load and a save of the same file move
+    // at the same rate
+    int steps = 0, step = 0;
+    for (int i = 0; !err && i < ns; i++) {
+        uint32_t l = le32(tab + i * SEC_ENTRY + 4);
+        steps += int((l + RAW_CHUNK - 1) / RAW_CHUNK);   // the chunks the loop below takes
+        if (!l) {
+            steps++;
+        }
+    }
+    if (g_stage_progress) {
+        g_stage_progress(0, steps, g_stage_ctx);
+    }
+    for (int i = 0; !err && i < ns; i++) {
+        uint8_t id = tab[i * SEC_ENTRY];
+        uint32_t len = le32(tab + i * SEC_ENTRY + 4);
+        uint8_t **dst = NULL;
+        uint32_t want = 0;
+        switch (id) {
+        case SEC_BLOCK:   dst = &blk;  want = 4 * TRX_BLOCK_WORDS + 8;  break;
+        case SEC_RAM:     dst = &ram;  want = 65536;                    break;
+        case SEC_COLOR:   dst = &col;  want = 1024;                     break;
+        case SEC_CARTRAM: dst = &cart; want = TRX_CART_RAM_BYTES;       break;
+        case SEC_DRIVE:   dst = &drv;  want = sizeof(TrxDriveState);    break;
+        case SEC_EEPROM:  dst = &eeprom; want = TRX_EEPROM_BYTES;       break;
+        default:          break;      // an id from a later writer: skipped by its length
+        }
+        if (id == SEC_CARTROM && !have_rom) {
+            // the medium: hashed on the way past, its place kept for the load
+            have_rom = true;
+            rom_off = rd.pos;
+            rom_len = len;
+            for (uint32_t left = len; left && !err;) {
+                uint32_t take = left > RAW_CHUNK ? RAW_CHUNK : left;
+                if (!rd.get(scratch, take)) {
+                    err = "The file could not be read";
+                }
+                left -= take;
+                if (g_stage_progress) {
+                    g_stage_progress(++step, steps, g_stage_ctx);
+                }
+            }
+        } else if (!dst || len != want || *dst) {
+            if (!rd.eat(len, scratch, RAW_CHUNK)) {
+                err = "The file could not be read";
+            }
+        } else if (!(*dst = (uint8_t *)r_malloc(len ? len : 1))) {
+            err = "Out of memory";
+        } else {
+            // in RAW_CHUNK pieces, the size the writer writes in, so the bar moves
+            // through the medium instead of jumping between sections
+            uint32_t left = len;
+            uint8_t *p = *dst;
+            while (left && !err) {
+                uint32_t take = left > RAW_CHUNK ? RAW_CHUNK : left;
+                if (!rd.get(p, take)) {
+                    err = "The file could not be read";
+                    break;
+                }
+                p += take;
+                left -= take;
+                if (g_stage_progress) {
+                    g_stage_progress(++step, steps, g_stage_ctx);
+                }
+            }
+        }
+        if (!err && !rd.eat((4 - (len & 3)) & 3, scratch, RAW_CHUNK)) {
+            err = "The file could not be read";
+        }
+    }
+    if (!err && (!blk || !ram || !col)) {
+        err = "The file has no machine state";
+    }
+    if (!err) {
+        // the body's digest, over everything behind the 41 byte head. Checked
+        // before anything is put into the machine.
+        uint8_t digest[32];
+        trx_sha_final(&rd.sha, digest);
+        if (memcmp(digest, head + 9, 32)) {
+            err = "Hash mismatch";
+        }
+    }
+    TrxC64reStaged *st = NULL;
+    if (!err && !(st = (TrxC64reStaged *)r_calloc(1, sizeof(TrxC64reStaged)))) {
+        err = "Out of memory";
+    }
+    if (!err) {
+        for (int i = 0; i < TRX_BLOCK_WORDS; i++) {
+            st->w[i] = le32(blk + i * 4);
+        }
+        st->x = le16(blk + 4 * TRX_BLOCK_WORDS);
+        uint16_t flags = le16(blk + 4 * TRX_BLOCK_WORDS + 2);
+        uint32_t pack = le32(blk + 4 * TRX_BLOCK_WORDS + 4);
+        if ((flags & 1) && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO)) {
+            st->turbo = true;
+            st->turbo_pack = pack;
+        } else if (flags & 1) {
+            r_log("[C64RE] the file's turbo state is not applied: this bitstream has no turbo\n");
+        }
+        st->ram = ram;
+        st->col = col;
+        st->cart = cart;
+        st->rom_len = rom_len;
+        st->rom_off = rom_off;
+        r_snprintf(st->path, sizeof(st->path), "%s", self);
+        st->drive = (TrxDriveState *)drv;
+        st->eeprom = eeprom;
+        st->want = mw;
+        r_log("[C64RE] .c64re format 2: %u bytes, %d sections, medium %u, drive %s, eeprom %s\n",
+              (unsigned)size, ns, (unsigned)rom_len, drv ? "yes" : "no", eeprom ? "yes" : "no");
+        if (mw.present) {
+            r_log("[C64RE] the file's machine: cartridge type %02x from '%s', drive A '%s'\n",
+                  mw.cart_type, mw.cart_src[0] ? mw.cart_src : "-", mw.drive_img[0] ? mw.drive_img : "-");
+        }
+        *out = st;
+    } else {
+        r_free(ram);
+        r_free(col);
+        r_free(cart);
+        r_free(drv);
+        r_free(eeprom);
+    }
+    r_free(scratch);
+    r_free(hdr);
+    r_free(tab);
+    r_free(blk);
+    return err;
+}
+
+const char *trx_c64re_stage(const char *path, TrxC64reStaged **out)
+{
+    return trx_c64re_stage_entry(path, NULL, out);
+}
+
+const char *trx_c64re_stage_ex(const char *path, TrxC64reStaged **out, trx_progress_fn progress, void *ctx)
+{
+    return trx_c64re_stage_ask(path, out, progress, ctx, NULL, NULL);
+}
+
+const char *trx_c64re_stage_ask(const char *path, TrxC64reStaged **out, trx_progress_fn progress, void *ctx,
+                                TrxC64reMissing *miss, const char *medium)
+{
+    if (miss) {
+        miss->want[0] = 0;
+        miss->base[0] = 0;
+    }
+    g_stage_progress = progress;
+    g_stage_ctx = ctx;
+    g_stage_miss = miss;
+    g_stage_medium = medium;
+    const char *err = trx_c64re_stage_entry(path, NULL, out);
+    g_stage_progress = NULL;
+    g_stage_ctx = NULL;
+    g_stage_miss = NULL;
+    g_stage_medium = NULL;
+    return err;
+}
+
+static const char *stage_entry(const char *path, const char *want, TrxC64reStaged **out)
+{
+    RFile file_o = { 0, 0 };
+    RFile *file = &file_o;
     if (!rf_open(file, path)) {
         return "The file could not be opened";
     }
-    uint32_t size = fs_size32(rf_size(file));
-    uint8_t magic[9];
-    if (size >= 41 && rf_read(file, magic, 9) && !memcmp(magic, "C64RESNP", 8) && magic[8] == C64RE_FORMAT) {
-        const char *e2 = load_v2(file, size);               // format 2 is read in sections, never held whole
+    uint32_t size = uint32_t(rf_size(file));
+    // format 2 is read where it stands, section by section (U8 §4); only format 1
+    // needs the whole file plus its unpacked document in the heap at once, which
+    // is what "Out of memory" on a 2.9 MB file was (U8 §1).
+    uint8_t head[41];
+    if (size >= sizeof(head) && rf_read(file, head, sizeof(head)) && !memcmp(head, "C64RESNP", 8) && head[8] == C64RE_FORMAT) {
+        const char *e2 = stage_v2(file, head, size, path, out);
         rf_close(file);
         return e2;
     }
-    if (!rf_seek(file, 0)) {
-        rf_close(file);
-        return "The file could not be read";
-    }
-    uint8_t *raw = (uint8_t *)r_malloc(size);
+    rf_seek(file, 0);
+    uint8_t *raw = (uint8_t *)r_malloc(size ? size : 1);
     const char *err = NULL;
     if (!raw) {
         err = "Out of memory";
@@ -2134,14 +2515,14 @@ const char *trx_c64re_load(const char *path)
     rf_close(file);
     bool ring = !err && size >= 9 + 18 && !memcmp(raw, "C64RERNG", 8) && raw[8] == 1;
     if (!err && !ring && (size < 41 + 18 || memcmp(raw, "C64RESNP", 8) || raw[8] != 1)) {
-        err = "Not a .c64re (format 1 or 2) or .c64rering";
+        err = "Not a .c64re or .c64rering (format 1)";
     }
     if (!err && !ring) {
-        Sha256 s;
+        TrxSha256 s;
         uint8_t d[32];
-        sha_init(&s);
-        sha_add(&s, raw + 41, size - 41);
-        sha_final(&s, d);
+        trx_sha_init(&s);
+        trx_sha_add(&s, raw + 41, size - 41);
+        trx_sha_final(&s, d);
         if (memcmp(d, raw + 9, 32)) {
             err = "Hash mismatch";
         }
@@ -2150,7 +2531,7 @@ const char *trx_c64re_load(const char *path)
     uint32_t jl = 0;
     if (!err) {
         uint32_t hdr = ring ? 9 : 41;
-        js = gunzip_stored(raw + hdr, size - hdr, &jl, &err);
+        js = gunzip(raw + hdr, size - hdr, &jl, &err);
     }
     r_free(raw);
     jsmntok_t *t = NULL;
@@ -2176,396 +2557,523 @@ const char *trx_c64re_load(const char *path)
     }
     int cp = -1;
     if (!err && !ring) {
-        cp = key(js, t, n, 0, "checkpoint");
+        cp = json_key(js, t, n, 0, "checkpoint");
     } else if (!err) {
-        // checkpoint_ring.entries[k].payload where entries[k].id == current_id
-        int cr = key(js, t, n, 0, "checkpoint_ring");
-        int cur = key(js, t, n, cr, "current_id");
-        int ents = key(js, t, n, cr, "entries");
-        if (cur < 0 || ents < 0 || t[ents].type != JSMN_ARRAY) {
-            err = "No checkpoint_ring entries";
-        } else {
-            for (int i = ents + 1; i < n && t[i].start < t[ents].end; i++) {
-                if (t[i].parent != ents) {
-                    continue;
-                }
-                int id = key(js, t, n, i, "id");
-                if (id >= 0 && t[id].end - t[id].start == t[cur].end - t[cur].start &&
-                    !strncmp(js + t[id].start, js + t[cur].start, t[cur].end - t[cur].start)) {
-                    cp = key(js, t, n, i, "payload");
-                    break;
-                }
-            }
-            if (cp < 0) {
-                err = "The current entry is not in the file";
-            }
-        }
+        // checkpoint_ring.entries[k].payload - the cursor's entry, or the one
+        // `want` names (T66 part 3)
+        cp = ring_pick(js, t, n, want, &err);
     }
-    uint8_t *ram = NULL, *col = NULL;
+    uint8_t *ram = NULL, *col = NULL, *cart = NULL, *rom = NULL;
+    TrxDriveState *drive = NULL;
+    uint32_t rom_len = 0;
     uint32_t w[TRX_BLOCK_WORDS];
     int x = 0;
+    bool have_turbo = false;
+    uint32_t turbo_pack = 0;
     if (!err) {
-        // a file from a turbo-capable machine (TRX64 or a later board): this core runs at 1 MHz
-        int tb = key(js, t, n, cp, "turbo");
-        if (tb >= 0 && (tok_int(js, t, key(js, t, n, tb, "menuIndex")) > 0 ||
-                        (tok_int(js, t, key(js, t, n, tb, "d031")) & 0x0F) > 0)) {
+        // a file from a turbo-capable machine (TRX64 or a later board)
+        int tb = json_key(js, t, n, cp, "turbo");
+        if (tb >= 0 && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO)) {
+            // T29: the file's turbo state goes in with the machine (state bus chip 0 word 1)
+            uint32_t en = tok_int(js, t, json_key(js, t, n, tb, "enable")) & 7;
+            uint32_t mi = tok_int(js, t, json_key(js, t, n, tb, "menuIndex")) & 15;
+            int ms = json_key(js, t, n, tb, "menuStalls");
+            bool stalls = ms < 0 || strncmp(js + t[ms].start, "false", 5) != 0;
+            uint32_t d031 = tok_int(js, t, json_key(js, t, n, tb, "d031")) & 0xFF;
+            uint32_t d030 = tok_int(js, t, json_key(js, t, n, tb, "d030")) & 1;
+            uint32_t hold = tok_int(js, t, json_key(js, t, n, tb, "resetHold")) & 0x7FFFFF;
+            turbo_pack = ((hold >> 8) << 17) | (d031 << 9) | (d030 << 8) | (en << 5) |
+                         ((stalls ? 1u : 0u) << 4) | mi;
+            have_turbo = true;
+        } else if (tb >= 0 && (tok_int(js, t, json_key(js, t, n, tb, "menuIndex")) > 0 ||
+                               (tok_int(js, t, json_key(js, t, n, tb, "d031")) & 0x0F) > 0)) {
             r_log("[C64RE] the file's turbo state (speed index %d) is not applied: this bitstream has no turbo\n",
-                   (int)tok_int(js, t, key(js, t, n, tb, "menuIndex")));
+                  (int)tok_int(js, t, json_key(js, t, n, tb, "menuIndex")));
         }
-        int hw = key(js, t, n, cp, "trx64Hw");
+        int hw = json_key(js, t, n, cp, "trx64Hw");
         ram = (uint8_t *)r_malloc(65536);
         col = (uint8_t *)r_malloc(1024);
+        // cartridge RAM rides in the cartState node of both file kinds; a file
+        // without it leaves the window as it is (T66 part 5)
+        if (json_key(js, t, n, json_key(js, t, n, cp, "cartState"), "cartRam") >= 0) {
+            cart = (uint8_t *)r_malloc(TRX_CART_RAM_BYTES);
+        }
+        // A cartridge snapshot only fits the cartridge that is on: the banking
+        // registers, the RAM window and the ROM image all belong to that type.
+        int ft = trx_c64re_cart_type(js, t, n, cp);
+        if (ft >= 0 && ft != int(c64_cartridge_type())) {
+            static char msg[80];
+            r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", ft, (int)c64_cartridge_type());
+            err = msg;
+        }
+        // cartFlash: the ROM / flash window as the file has it. It goes back
+        // into DDR2 with the load, because no log carries flash writes. The
+        // firmware caps it at the ROM window; here the cap is the image the
+        // cartridge in the port has (the source's rom_bytes), when it says one.
+        uint32_t fl = err ? 0 : trx_c64re_cart_flash_len(js, t, n, cp);
+        if (fl) {
+            if (g_src_on && g_src.rom_bytes && fl > g_src.rom_bytes) {
+                fl = g_src.rom_bytes;
+            }
+            rom = (uint8_t *)r_malloc(fl);
+            if (rom && trx_c64re_cart_flash(js, t, n, cp, rom, fl) == fl) {
+                rom_len = fl;
+            } else {
+                r_free(rom);        // short or no memory: the window stays as it is
+                rom = NULL;
+                r_log("[C64RE] the file's cartFlash node (%u KB) could not be read: the cartridge "
+                      "image in memory stays as it is\n", (unsigned)(fl >> 10));
+            }
+        }
+        // drive A (T66 part 8): both kinds of file carry the node the same way
+        if (!err && json_key(js, t, n, cp, "trx64Drive") >= 0 && trx_drive_present()) {
+            drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState));
+            if (drive && !trx_c64re_drive_from_node(js, t, n, cp, drive)) {
+                r_free(drive);
+                drive = NULL;
+                r_log("[C64RE] the file's drive node could not be read: drive A stays as it is\n");
+            }
+        }
         static uint8_t blk[TRX_BLOCK_WORDS * 4];
         static uint8_t under[1024];
-        if (hw < 0) {
-            err = "No trx64Hw node (not written by this board)";
-        } else if (tok_int(js, t, key(js, t, n, hw, "layout")) != LAYOUT) {
-            err = "Unknown trx64Hw layout";
+        bool exact = hw >= 0 && tok_int(js, t, json_key(js, t, n, hw, "layout")) == LAYOUT;
+        if (err) {
+            // refused above (the cartridge type): nothing more to read
         } else if (!ram || !col) {
             err = "Out of memory";
-        } else if (!tok_ta(js, t, n, key(js, t, n, cp, "ram"), ram, 65536) ||
-                   !tok_ta(js, t, n, key(js, t, n, hw, "block"), blk, sizeof(blk)) ||
-                   !tok_ta(js, t, n, key(js, t, n, hw, "ramUnderIo"), under, 1024) ||
-                   !tok_ta(js, t, n, key(js, t, n, hw, "colorRam"), col, 1024)) {
+        } else if (!exact) {
+            // A file from TRX64, or one from a board with another block layout:
+            // the coarse load of T20 §9.4, the block built from the nodes on top
+            // of the machine's own newest frame (T66 part 4).
+            if (hw >= 0) {
+                r_log("[C64RE] trx64Hw layout %d is not this build's %d: the nodes are used instead\n",
+                      (int)tok_int(js, t, json_key(js, t, n, hw, "layout")), LAYOUT);
+            }
+            err = model_refusal(js, t, n);
+            TrxNodeState ns;
+            ns.cart = cart;
+            if (!err && !base_block(ns.w, &ns.x)) {
+                err = "No frame of this machine to build on: let Timewarp run first";
+            }
+            if (!err) {
+                ns.ram = ram;
+                ns.col = col;
+                err = trx_c64re_from_nodes(js, t, n, cp, &ns);
+            }
+            if (!err) {
+                say_media(js, t, n, cp);
+                memcpy(w, ns.w, sizeof(w));
+                x = ns.x;
+                if (!ns.cart) {
+                    r_free(cart);
+                    cart = NULL;
+                }
+                say_coarse(&ns);
+            }
+        } else if (!tok_ta(js, t, n, json_key(js, t, n, cp, "ram"), ram, 65536) ||
+                   !tok_ta(js, t, n, json_key(js, t, n, hw, "block"), blk, sizeof(blk)) ||
+                   !tok_ta(js, t, n, json_key(js, t, n, hw, "ramUnderIo"), under, 1024) ||
+                   !tok_ta(js, t, n, json_key(js, t, n, hw, "colorRam"), col, 1024)) {
             err = "Missing or short arrays";
         } else {
             memcpy(ram + 0xD800, under, 1024);
             for (int i = 0; i < TRX_BLOCK_WORDS; i++) {
                 w[i] = blk[4 * i] | blk[4 * i + 1] << 8 | blk[4 * i + 2] << 16 | uint32_t(blk[4 * i + 3]) << 24;
             }
-            x = int(tok_int(js, t, key(js, t, n, hw, "x")));
+            x = int(tok_int(js, t, json_key(js, t, n, hw, "x")));
             if (x < 96 || x > 504) {
                 err = "Bad snap position";
+            }
+            if (!err) {
+                say_media(js, t, n, cp);
+            }
+            if (!err && cart &&
+                trx_c64re_cart_ram(js, t, n, cp, cart, TRX_CART_RAM_BYTES) != TRX_CART_RAM_BYTES) {
+                r_free(cart);               // a short cartRam node: leave the window alone
+                cart = NULL;
             }
         }
     }
     r_free(t);
     r_free(js);
+    TrxC64reStaged *st = NULL;
     if (!err) {
-        TrxLoadMem mem = { ram, col, NULL, NULL, NULL };
-        int e = trx_ring_load_state(&mem, w, uint16_t(x));
-        if (e) {
-            err = trx_ring_error(e);
-        }
-    }
-    r_free(ram);
-    r_free(col);
-    return err;
-}
-
-// ---- the .trxring: the whole frame ring in a file (FW io/c64/trx_trxring.cc, load side) ---------------------------
-//   0..7 "TRXRING1", 8..11 u32 header length, then the JSON header, then in this order the parts its "lengths" give: the timeline (TrxFrame entries,
-//   oldest first, the newest entry's counts rebased to 0), C64 RAM, colour RAM, cartridge RAM, the records of streams 0 and 1. sha256State covers the
-//   first four parts and is checked before anything is put back; sha256Log covers the records, a mismatch is a message, not a refusal.
-#define TRXRING_HDR_MAX    2048
-#define TRXRING_VERSION    1
-#define TRXRING_CHUNK      0x8000
-
-struct TrxRingBuf {
-    uint8_t *raw, *p;
-};
-
-static bool trb_alloc(TrxRingBuf *b, uint32_t n)
-{
-    b->raw = (uint8_t *)r_malloc(n + 15);
-    b->p = b->raw ? (uint8_t *)(((uintptr_t)b->raw + 15) & ~(uintptr_t)15) : NULL;
-    return b->p != NULL;
-}
-
-static void trb_free(TrxRingBuf *b)
-{
-    r_free(b->raw);
-    b->raw = NULL;
-    b->p = NULL;
-}
-
-static bool tr_hexeq(const char *hex, const uint8_t *d, int n)
-{
-    static const char h[] = "0123456789abcdef";
-    for (int i = 0; i < n; i++) {
-        if (hex[2 * i] != h[d[i] >> 4] || hex[2 * i + 1] != h[d[i] & 15]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-struct TrxRingLoad {
-    RFile *f;
-    char *hdr;
-    jsmntok_t *tok;
-    int ntok;
-    TrxRingBuf buf, stage;
-    uint32_t s0_bytes, s1_bytes, s0_first, s1_first;
-    uint8_t digest_log[32];
-};
-
-static int64_t tr_hget(const TrxRingLoad *j, const char *a, const char *b, int64_t dflt)
-{
-    int o = key(j->hdr, j->tok, j->ntok, 0, a);
-    if (b) {
-        o = key(j->hdr, j->tok, j->ntok, o, b);
-    }
-    return o < 0 ? dflt : tok_int(j->hdr, j->tok, o);
-}
-
-static void tr_area_rd(void *ctx, uint32_t off, uint8_t *p, uint32_t len)
-{
-    trx_ring_area_read(*(int *)ctx, off, p, len);
-}
-
-static void tr_area_wr(void *ctx, uint32_t off, const uint8_t *p, uint32_t len)
-{
-    trx_ring_area_write(*(int *)ctx, off, p, len);
-}
-
-// Moves a run of records back into one of the engine's areas (FW trx_ring_recs.h trx_recs_out): an area is a ring, a run starts at
-// (count * record size) & (size - 1) and wraps at its end; the mover takes 16-byte aligned addresses and whole 16-byte groups, so the group at each
-// end is read first and written back with the new bytes in it, and the records beside it keep what they have.
-static void tr_recs_out(int s, uint32_t from, const uint8_t *src, uint32_t n, uint8_t *stage)
-{
-    uint32_t size = trx_ring_area_size(s);
-    uint32_t off = (from * trx_ring_rec_size(s)) & (size - 1);
-    uint32_t done = 0;
-    uint8_t edge[16];
-    while (done < n) {
-        uint32_t want = n - done;
-        if (off + want > size) {
-            want = size - off;              // the rest goes on at the area's start
-        }
-        uint32_t pre = off & 15u;
-        if (pre) {
-            uint32_t take = 16 - pre;
-            if (take > want) {
-                take = want;
-            }
-            tr_area_rd(&s, off - pre, edge, 16);
-            memcpy(edge + pre, src + done, take);
-            tr_area_wr(&s, off - pre, edge, 16);
-            done += take;
-            off += take;
-        } else if (want >= 16) {
-            uint32_t whole = want & ~15u;
-            if (whole > TRXRING_CHUNK) {
-                whole = TRXRING_CHUNK;
-            }
-            memcpy(stage, src + done, whole);
-            tr_area_wr(&s, off, stage, whole);
-            done += whole;
-            off += whole;
-        } else {
-            tr_area_rd(&s, off, edge, 16);
-            memcpy(edge, src + done, want);
-            tr_area_wr(&s, off, edge, 16);
-            done += want;
-            off += want;
-        }
-        if (off >= size) {
-            off = 0;
-        }
-    }
-}
-
-// the install's callback: the records out of the file and into the areas, at the offsets the rebased counts give
-static int tr_areas_back(void *ctx)
-{
-    TrxRingLoad *j = (TrxRingLoad *)ctx;
-    Sha256 sh;
-    sha_init(&sh);
-    for (int s = 0; s < 2; s++) {
-        uint32_t left = s ? j->s1_bytes : j->s0_bytes;
-        uint32_t rec = trx_ring_rec_size(s);
-        uint32_t cnt = s ? j->s1_first : j->s0_first;
-        while (left) {
-            uint32_t want = left > TRXRING_CHUNK ? uint32_t(TRXRING_CHUNK) : left;
-            want = (want / rec) * rec;
-            if (!want || !rf_read(j->f, j->buf.p, want)) {
-                return -1;
-            }
-            sha_add(&sh, j->buf.p, want);
-            tr_recs_out(s, cnt, j->buf.p, want, j->stage.p);
-            cnt = (cnt + want / rec) & 0x0FFFFFFFu;
-            left -= want;
-        }
-    }
-    sha_final(&sh, j->digest_log);
-    return 0;
-}
-
-// the header into hdr/tok (FW's first half of trx_trxring_load and of trx_trxring_check): NULL, or what is wrong
-static const char *tr_open(TrxRingLoad *j)
-{
-    uint8_t head[12];
-    if (!rf_read(j->f, head, 12) || memcmp(head, "TRXRING1", 8)) {
-        return "Not a .trxring";
-    }
-    uint32_t hl = uint32_t(head[8]) | (uint32_t(head[9]) << 8) | (uint32_t(head[10]) << 16) | (uint32_t(head[11]) << 24);
-    if (hl < 2 || hl > TRXRING_HDR_MAX) {
-        return "The header's length is not right";
-    }
-    j->hdr = (char *)r_malloc(hl + 1);
-    if (!j->hdr || !rf_read(j->f, j->hdr, hl)) {
-        return "The header could not be read";
-    }
-    j->hdr[hl] = 0;
-    jsmn_parser p;
-    jsmn_init(&p);
-    int need = jsmn_parse(&p, j->hdr, hl, NULL, 0);
-    if (need < 1) {
-        return "The header is not JSON";
-    }
-    j->tok = (jsmntok_t *)r_malloc(sizeof(jsmntok_t) * need);
-    jsmn_init(&p);
-    j->ntok = j->tok ? jsmn_parse(&p, j->hdr, hl, j->tok, need) : -1;
-    if (j->ntok < 1) {
-        return "The header is not JSON";
-    }
-    if (tr_hget(j, "version", NULL, -1) != TRXRING_VERSION) {
-        return "A .trxring of another version";
-    }
-    if (tr_hget(j, "blockWords", NULL, -1) != TRX_BLOCK_WORDS || tr_hget(j, "frameBytes", NULL, -1) != int64_t(sizeof(TrxFrame))) {
-        return "A .trxring of another build (the timeline's shape differs)";
-    }
-    if (uint32_t(tr_hget(j, "bitstreamId", NULL, 0)) != trx_io_read32(TRX_ID)) {
-        return "A .trxring of another bitstream";
-    }
-    return NULL;
-}
-
-bool trx_trxring_is_one(const char *path)
-{
-    RFile fo;
-    RFile *f = &fo;
-    if (!rf_open(f, path)) {
-        return false;
-    }
-    char magic[8];
-    bool ok = rf_read(f, magic, 8) && !memcmp(magic, "TRXRING1", 8);
-    rf_close(f);
-    return ok;
-}
-
-// Is this a .trxring this build can load (the header only, nothing is kept)? NULL, or what is wrong with it.
-const char *trx_trxring_check(const char *path)
-{
-    TrxRingLoad j;
-    memset(&j, 0, sizeof(j));
-    RFile fo;
-    j.f = &fo;
-    if (!rf_open(j.f, path)) {
-        return "The file could not be opened";
-    }
-    const char *err = tr_open(&j);
-    if (!err && tr_hget(&j, "frames", NULL, 0) < 1) {
-        err = "The .trxring holds no frame";
-    }
-    if (!err) {
-        err = trx_ring_reu_refusal();
-    }
-    r_free(j.hdr);
-    r_free(j.tok);
-    rf_close(j.f);
-    return err;
-}
-
-// Reads it and puts the ring and the machine back.
-const char *trx_trxring_load(const char *path)
-{
-    TrxRingLoad j;
-    memset(&j, 0, sizeof(j));
-    RFile fo;
-    j.f = &fo;
-    if (!rf_open(j.f, path)) {
-        return "The file could not be opened";
-    }
-    int frames = 0;
-    uint32_t tl_bytes = 0, ram_bytes = 0, col_bytes = 0, cart_bytes = 0;
-    TrxFrame *ents = NULL;
-    uint8_t *ram = NULL, *col = NULL, *cart = NULL;
-    const char *err = tr_open(&j);
-    if (!err) {
-        int rb = key(j.hdr, j.tok, j.ntok, 0, "recBytes");
-        bool recs_ok = rb >= 0 && j.tok[rb].type == JSMN_ARRAY && j.tok[rb].size == 2 &&
-                       tok_int(j.hdr, j.tok, rb + 1) == int64_t(trx_ring_rec_size(0)) &&
-                       tok_int(j.hdr, j.tok, rb + 2) == int64_t(trx_ring_rec_size(1));
-        if (!recs_ok) {
-            err = "A .trxring whose records are not this engine's size";
-        }
-    }
-    if (!err) {
-        frames = int(tr_hget(&j, "frames", NULL, 0));
-        tl_bytes = uint32_t(tr_hget(&j, "lengths", "timeline", 0));
-        ram_bytes = uint32_t(tr_hget(&j, "lengths", "ram", 0));
-        col_bytes = uint32_t(tr_hget(&j, "lengths", "color", 0));
-        cart_bytes = uint32_t(tr_hget(&j, "lengths", "cart", 0));
-        j.s0_bytes = uint32_t(tr_hget(&j, "lengths", "s0", 0));
-        j.s1_bytes = uint32_t(tr_hget(&j, "lengths", "s1", 0));
-        j.s0_first = uint32_t(tr_hget(&j, "s0First", NULL, 0));
-        j.s1_first = uint32_t(tr_hget(&j, "s1First", NULL, 0));
-        if (frames < 1 || tl_bytes != uint32_t(frames) * sizeof(TrxFrame) || ram_bytes != 65536 || col_bytes != 1024 ||
-            (cart_bytes && cart_bytes != TRX_CART_RAM_BYTES)) {
-            err = "The header's lengths do not fit";
-        }
-    }
-    if (!err) {
-        ents = (TrxFrame *)r_malloc(tl_bytes);
-        ram = (uint8_t *)r_malloc(ram_bytes);
-        col = (uint8_t *)r_malloc(col_bytes);
-        cart = cart_bytes ? (uint8_t *)r_malloc(cart_bytes) : NULL;
-        trb_alloc(&j.buf, TRXRING_CHUNK + 32);
-        trb_alloc(&j.stage, TRXRING_CHUNK + 32);
-        if (!ents || !ram || !col || !j.buf.p || !j.stage.p || (cart_bytes && !cart)) {
+        st = (TrxC64reStaged *)r_calloc(1, sizeof(TrxC64reStaged));
+        if (!st) {
             err = "Out of memory";
         }
     }
-    if (!err) {
-        Sha256 sh;
-        sha_init(&sh);
-        struct {
-            uint8_t *p;
-            uint32_t len;
-        } state[4] = { { (uint8_t *)ents, tl_bytes }, { ram, ram_bytes }, { col, col_bytes }, { cart, cart_bytes } };
-        for (int i = 0; !err && i < 4; i++) {
-            if (!state[i].len) {
-                continue;
-            }
-            if (!rf_read(j.f, state[i].p, state[i].len)) {
-                err = "The file ends inside the state";
-            } else {
-                sha_add(&sh, state[i].p, state[i].len);
-            }
-        }
-        uint8_t d[32];
-        sha_final(&sh, d);
-        int sd = key(j.hdr, j.tok, j.ntok, 0, "sha256State");
-        if (!err && (sd < 0 || !tr_hexeq(j.hdr + j.tok[sd].start, d, 32))) {
-            err = "The ring's state does not match its hash";
-        }
+    if (err) {
+        r_free(ram);
+        r_free(col);
+        r_free(cart);
+        r_free(rom);
+        r_free(drive);
+        return err;
     }
-    if (!err) {
-        int ld = key(j.hdr, j.tok, j.ntok, 0, "sha256Log");
-        const char *log_hex = ld >= 0 ? j.hdr + j.tok[ld].start : NULL;
-        TrxLoadMem mem = { ram, col, cart, NULL, NULL };
-        int e = trx_ring_install(ents, frames, &mem, tr_areas_back, &j);
-        if (e == -1) {
-            err = "The file ends inside the log";
-        } else if (e) {
-            err = trx_ring_error(e);
-        } else {
-            if (log_hex && !tr_hexeq(log_hex, j.digest_log, 32)) {
-                r_log("[RING] the .trxring's log does not match its hash: the machine is where the file says, but a rewind may not be\n");
-            }
-            r_log("[RING] .trxring loaded: %d frames, %u + %u record bytes\n", frames, (unsigned)j.s0_bytes, (unsigned)j.s1_bytes);   // T251
-        }
+    st->ram = ram;
+    st->col = col;
+    st->cart = cart;
+    st->rom = rom;
+    st->rom_len = rom_len;
+    st->drive = drive;
+    memcpy(st->w, w, sizeof(st->w));
+    st->x = uint16_t(x);
+    st->turbo = have_turbo;
+    st->turbo_pack = turbo_pack;
+    st->want.cart_type = -1;        // a format 1 file builds no machine (it has no machineState)
+    st->want.machine = -1;
+    *out = st;
+    return NULL;
+}
+
+const char *trx_c64re_stage_entry(const char *path, const char *want, TrxC64reStaged **out)
+{
+    *out = NULL;
+    const char *err = stage_entry(path, want, out);
+    if (!err && *out) {
+        (*out)->src = g_src;        // the hooks the apply builds the machine with, also after the source is gone
+        (*out)->src_on = g_src_on;
     }
-    rf_close(j.f);
-    r_free(j.hdr);
-    r_free(j.tok);
-    r_free(ents);
-    r_free(ram);
-    r_free(col);
-    r_free(cart);
-    trb_free(&j.buf);
-    trb_free(&j.stage);
     return err;
+}
+
+void trx_c64re_discard(TrxC64reStaged *st)
+{
+    if (!st) {
+        return;
+    }
+    r_free(st->ram);
+    r_free(st->col);
+    r_free(st->cart);
+    r_free(st->rom);
+    r_free(st->drive);
+    r_free(st->eeprom);
+    r_free(st);
+}
+
+// ---- U9: the machine the state needs, built before the state goes in --------------
+
+static char g_missed[160];      // what the last load could not do, for the message (D6)
+
+static void note(char *buf, int cap, const char *what)
+{
+    int n = int(strlen(buf));
+    if (n + int(strlen(what)) + 3 >= cap) {
+        return;
+    }
+    if (n) {
+        buf[n++] = ',';
+        buf[n++] = ' ';
+    }
+    strcpy(buf + n, what);
+}
+
+// D2: insert, never boot: the source's cart_for_state puts the cartridge of the
+// .crt into the port without a reset, or empties the port (NULL).
+//
+// The machine's own state is not consulted: whatever is in the port now, the
+// state's cartridge is what the machine gets (Alex, 2026-11-08: "ich will den
+// state wiederherstellen, egal was gerade der zustand ist"). Re-inserting the
+// same cartridge is not a waste - it is what makes the result independent of
+// what came before.
+static void build_cartridge(const TrxMachineWant &mw, char *missed, int cap)
+{
+    if (!g_src_on || !g_src.cart_for_state) {
+        if (mw.cart_type > 0 || c64_cart_active()) {
+            note(missed, cap, "the cartridge");     // no hook to insert or take out a cartridge with
+        }
+        return;
+    }
+    if (mw.cart_type <= 0) {
+        // the state had no cartridge, so neither does the machine now
+        if (g_src.cart_for_state(g_src.rom_ctx, NULL) != 0) {
+            note(missed, cap, "the cartridge");
+        } else {
+            r_log("[C64RE] no cartridge in this state: the port is empty\n");
+        }
+        return;
+    }
+    if (g_src.cart_for_state(g_src.rom_ctx, mw.cart_src) != 0) {
+        // stage_v2() has already proved the file is there and readable, so this
+        // is a .crt that is there but broken: nothing was inserted
+        r_log("[C64RE] '%s' could not be read: no cartridge was inserted\n", mw.cart_src);
+        note(missed, cap, "the cartridge");
+        return;
+    }
+    r_log("[C64RE] cartridge type %02x inserted from %s, now type %02x\n", mw.cart_type, mw.cart_src, (int)c64_cartridge_type());
+    if (int(c64_cartridge_type()) != mw.cart_type) {
+        note(missed, cap, "the cartridge");
+    }
+}
+
+// The image drive A had. Mounted before the drive's own state goes in, because
+// a mount resets the drive and would overwrite it.
+static void build_drive(const TrxMachineWant &mw, char *missed, int cap)
+{
+    if (!mw.drive_img[0]) {
+        return;
+    }
+    if (!g_src_on || !g_src.drive_mount) {
+        note(missed, cap, "the disk in drive A");
+        return;
+    }
+    // mounted unconditionally, for the same reason the cartridge is inserted
+    // unconditionally: the state decides, not what happens to be in the drive
+    const char *name = base_of(mw.drive_img);
+    const char *dot = strrchr(name, '.');
+    if (name == mw.drive_img || !dot || (r_strcasecmp(dot, ".g64") && r_strcasecmp(dot, ".d71") &&
+                                         r_strcasecmp(dot, ".d81") && r_strcasecmp(dot, ".d64"))) {
+        r_log("[C64RE] drive A: '%s' is not an image this can mount\n", mw.drive_img);
+        note(missed, cap, "the disk in drive A");
+        return;
+    }
+    char spec[160];
+    r_snprintf(spec, sizeof(spec), "%s%s", mw.drive_mode == 2 ? "unlinked " : mw.drive_mode == 1 ? "ro " : "", mw.drive_img);
+    if (g_src.drive_mount(g_src.rom_ctx, spec) != 0) {
+        r_log("[C64RE] drive A: '%s' was not mounted\n", mw.drive_img);
+        note(missed, cap, "the disk in drive A");
+    } else {
+        r_log("[C64RE] drive A: '%s' mounted\n", mw.drive_img);
+    }
+}
+
+// D4: the registers, directly, for as long as this state runs. The settings
+// are not written, so nothing reaches the flash.
+static void build_settings(const TrxMachineWant &mw, char *missed, int cap)
+{
+    if (!mw.has_settings) {
+        return;
+    }
+    if (fpga_capabilities() & CAPAB_COMMAND_INTF) {
+        cmd_if_set_slot_enable(mw.uci ? 1 : 0);
+        if (mw.uci) {
+            cmd_if_set_slot_base(0x47);     // $DF1C
+        }
+    } else if (mw.uci) {
+        note(missed, cap, "UCI");
+    }
+    if (fpga_capabilities() & CAPAB_SAMPLER) {
+        c64_set_sampler_enable(mw.sampler ? 1 : 0);
+    } else if (mw.sampler) {
+        note(missed, cap, "the sampler");
+    }
+    // the REU is off in every state a ring can produce (A08); this only puts
+    // back an "off" that the machine may currently contradict
+    c64_set_reu_enable(mw.reu ? 1 : 0);
+    c64_set_reu_size(mw.reu_size);
+}
+
+// The video standard, before anything else: it drives the PLL and the colour
+// timing, and the chip block that follows is of a machine running at that rate.
+// The source's machine_set puts it in for this run only, so the user's own
+// setting never reaches the flash - the same bargain as the other settings (U9 D4).
+static void build_machine_mode(const TrxMachineWant &mw, char *missed, int cap)
+{
+    if (mw.machine < 0 || (g_src_on && mw.machine == g_src.machine)) {
+        return;
+    }
+    if (!g_src_on || !g_src.machine_set || g_src.machine_set(g_src.rom_ctx, mw.machine) != 0) {
+        note(missed, cap, "the video standard");
+        return;
+    }
+    r_log("[C64RE] system mode %d -> %d (%s)\n", g_src_on ? g_src.machine : -1, mw.machine, machine_names[mw.machine]);
+}
+
+static void build_machine(TrxC64reStaged *st, char *missed, int cap)
+{
+    build_machine_mode(st->want, missed, cap);   // also for a file from before U9
+    if (!st->want.present) {
+        return;                     // nothing else in it to build
+    }
+    build_cartridge(st->want, missed, cap);
+    build_drive(st->want, missed, cap);
+    build_settings(st->want, missed, cap);
+}
+
+// Breaks text into lines that fit cols: at a space or a '/' (or '-', '_') where
+// there is one near the end, and hard where there is not.
+void trx_c64re_wrap(char *dst, int cap, const char *text, int cols)
+{
+    int n = 0;
+    if (cols < 8) {
+        cols = 8;
+    }
+    while (*text && n < cap - 1) {
+        const char *eol = strchr(text, '\n');
+        int left = eol ? int(eol - text) : int(strlen(text));
+        while (left > cols && n < cap - 1) {
+            int cut = cols;
+            for (int i = cols; i > cols / 2; i--) {
+                // a break the eye expects: the separator starts the next line, so
+                // a name breaks as "wasteland_ef_v1.0.1-20261108" / "-152059.c64re"
+                if (text[i] == ' ' || text[i] == '/' || text[i] == '-' || text[i] == '_') {
+                    cut = i;
+                    break;
+                }
+            }
+            for (int i = 0; i < cut && n < cap - 1; i++) {
+                dst[n++] = text[i];
+            }
+            text += cut;
+            left -= cut;
+            while (*text == ' ') {
+                text++;
+                left--;
+            }
+            if (n < cap - 1) {
+                dst[n++] = '\n';
+            }
+        }
+        for (int i = 0; i < left && n < cap - 1; i++) {
+            dst[n++] = text[i];
+        }
+        text += left;
+        if (*text == '\n') {
+            text++;
+            if (n < cap - 1) {
+                dst[n++] = '\n';
+            }
+        }
+    }
+    dst[n < cap ? n : cap - 1] = 0;
+}
+
+const char *trx_c64re_missed(void)
+{
+    return g_missed[0] ? g_missed : NULL;
+}
+
+// The cartridge image into DDR2 through the source's rom_write while the machine stands (TrxLoadMem::rom_put): from the staged buffer of a format 1
+// file, or from the format 2 file again, piece by piece (a cartridge is megabytes).
+static void rom_put(void *ctx)
+{
+    TrxC64reStaged *st = (TrxC64reStaged *)ctx;
+    if (st->rom) {
+        for (uint32_t k = 0; k < st->rom_len; k += RAW_CHUNK) {
+            uint32_t want = st->rom_len - k > RAW_CHUNK ? RAW_CHUNK : st->rom_len - k;
+            g_src.rom_write(g_src.rom_ctx, k, st->rom + k, want);
+        }
+        return;
+    }
+    RFile f;
+    uint8_t *chunk = (uint8_t *)r_malloc(RAW_CHUNK);
+    if (!chunk || !rf_open(&f, st->path)) {
+        r_free(chunk);
+        r_log("[C64RE] the cartridge image could not be read back from %s\n", st->path);
+        return;
+    }
+    for (uint32_t k = 0; k < st->rom_len; k += RAW_CHUNK) {
+        uint32_t want = st->rom_len - k > RAW_CHUNK ? RAW_CHUNK : st->rom_len - k;
+        if (!rf_seek(&f, uint64_t(st->rom_off) + k) || !rf_read(&f, chunk, want)) {
+            r_log("[C64RE] the cartridge image could not be read back from %s\n", st->path);
+            break;
+        }
+        g_src.rom_write(g_src.rom_ctx, k, chunk, want);
+    }
+    rf_close(&f);
+    r_free(chunk);
+}
+
+const char *trx_c64re_apply(TrxC64reStaged *st)
+{
+    if (!st) {
+        return "Nothing staged";
+    }
+    // the hooks of the source the file was staged with
+    TrxC64reSrc keep = g_src;
+    bool keep_on = g_src_on;
+    g_src = st->src;
+    g_src_on = st->src_on;
+    // U9 D2, and the order is the whole of it: build the machine the state needs
+    // before the state goes into it, and never through a reset. What each step
+    // could not do is collected for D6 rather than stopping the load - the state
+    // itself is what the user came for.
+    char missed[160];
+    missed[0] = 0;
+    build_machine(st, missed, sizeof(missed));
+
+    if (st->turbo) {
+        trx_ring_set_turbo(st->turbo_pack);     // one shot, taken by the load below
+    }
+    bool rom = st->rom_len && g_src_on && g_src.rom_write;
+    if (st->rom_len && !rom) {
+        note(missed, sizeof(missed), "the cartridge image");
+    }
+    TrxLoadMem mem = { st->ram, st->col, st->cart, rom ? rom_put : NULL, st };
+    int e = trx_ring_load_state(&mem, st->w, st->x);
+    if (!e && st->eeprom) {
+        // U9 D3a: after the block, because replay_cart()'s $DE00 write drives the
+        // 93C86's lines on its way past
+        if (g_src_on && g_src.eeprom_put) {
+            g_src.eeprom_put(g_src.rom_ctx, st->eeprom);
+        } else {
+            note(missed, sizeof(missed), "the cartridge's EEPROM");
+        }
+    }
+    if (!e && st->drive) {
+        // drive A after the machine, and after the mount above: the stub runs on
+        // the drive's own CPU and is stepped, so the C64's state does not matter
+        // (T66 part 8), but a mount would overwrite what the stub just wrote
+        const char *derr = trx_drive_write(st->drive);
+        if (derr) {
+            r_log("[C64RE] drive A was not put back: %s\n", derr);
+            note(missed, sizeof(missed), "drive A");
+        }
+    }
+    if (!e && missed[0]) {
+        r_log("[C64RE] the state is in, but not: %s\n", missed);
+    }
+    r_snprintf(g_missed, sizeof(g_missed), "%s", missed);
+    g_src = keep;
+    g_src_on = keep_on;
+    trx_c64re_discard(st);
+    return e ? trx_ring_error(e) : NULL;
+}
+
+const char *trx_c64re_load(const char *path)
+{
+    return trx_c64re_load_entry(path, NULL);
+}
+
+const char *trx_c64re_load_entry(const char *path, const char *entry)
+{
+    if (trx_trxring_is_one(path)) {
+        // one way in for every file the ring can load: a .trxring brings the
+        // ring back as well, and has no entries to choose from (T66 part 6)
+        if (entry && *entry) {
+            return "A .trxring holds the whole ring; it has no entry to choose";
+        }
+        return trx_trxring_load(path);
+    }
+    TrxC64reStaged *st = NULL;
+    const char *err = trx_c64re_stage_entry(path, entry, &st);
+    return err ? err : trx_c64re_apply(st);
+}
+
+void trx_c64re_set_pending(TrxC64reStaged *st)
+{
+    TrxC64reStaged *old = pending_state;
+    pending_state = st;
+    trx_c64re_discard(old);                     // a second choice replaces the first
+}
+
+bool trx_c64re_pending(void)
+{
+    return pending_state != NULL;
+}
+
+void trx_c64re_unfreeze(void)
+{
+    TrxC64reStaged *st = pending_state;
+    pending_state = NULL;
+    if (!st) {
+        return;
+    }
+    const char *err = trx_c64re_apply(st);
+    if (err) {
+        // The menu is gone: nothing can be shown any more. The machine is
+        // released either way (put_back or the early exit in load_state).
+        r_log("[C64RE] loading the snapshot failed: %s\n", err);
+    }
 }

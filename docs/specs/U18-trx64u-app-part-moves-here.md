@@ -283,3 +283,16 @@ Nothing decided yet.
     while `lib_register` runs; the library reads them at each use. Play MOD is gone from the menu (T239.3 D5). Found
     while porting: MultiCore's `u64cfg` passed the range index instead of the number for "UltiSID n 6581 Offset/Base"
     (the offset was off by 1024 in `resid8_plan`), and `uci_drive_do` printed an uninitialised message; both fixed here.
+  - **Ring library brought to the firmware's state (D6):** 64 sections, the format 2 header parsed whole (jsmn, up to
+    4096 bytes), `load_entry` (format 1 with gzip/deflate, picking a `.c64rering` entry), `save_native` (`.trxring`, port
+    of `trx_trxring.cc`), `whowrote`'s I/O scan, the REU gate, U9's cartridge search on load, the missing `.c64rering`
+    nodes; all 18 members of the exported table are implemented. The header's cartridge type is now the machine's number
+    as the firmware writes it (MultiCore's copy wrote the .crt hardware type). Link open only on `pending_api.h` (47:
+    `c64_cart_require` / `prohibit` / `writable` added). Not run yet, no file cross-loaded with the firmware. Open: calls
+    through the exported table have no machine info (a dump names no media; a load rebuilds no machine); `op_load` loads
+    at once where the firmware defers to menu close.
+  - **Found in the firmware's frozen ring (D6: fixes go into both):** `trx_trxring.cc` prints the `.trxring` header with
+    `%lu` / `%llu`, which the firmware's `small_printf.cc` does not know (no length modifier; it prints `%l` and takes no
+    argument), so the firmware writes `.trxring` files its own loader refuses; the library prints the numbers. The format
+    1 stage path leaves `want` and `eeprom` uninitialised (`malloc`); the library uses `calloc`. `.c64re` load has no REU
+    check; the library refuses. Firmware fixes are the maintainer's call.
