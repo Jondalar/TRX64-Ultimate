@@ -1,6 +1,6 @@
 // The ring library's entry (U18 D5): its operations and state values (ringops.cc), its poll (ring.poll every TRX_RING_POLL_MS, not while the
-// machine is frozen) and the ring table it exports (ring_api.cc). lib_register starts the engine (trx_ring_engine_init: its buffers on the
-// library's own account); the log starts from the poll.
+// machine is frozen) and the ring table it exports (ring_api.cc). The engine does not start here: the api's groups (sync, io, ctx, ...) are null while
+// lib_register runs, so the core's start hook starts it through the operation ring.start; the log starts from the poll.
 #include "ringsys.h"
 #include "ringops.h"
 #include "trx_ring.h"
@@ -27,6 +27,5 @@ extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
     out->poll.period_ms = TRX_RING_POLL_MS;
     out->poll.when_frozen = false;
     out->exports = ring_exports(&out->exports_size);
-    trx_ring_engine_init();
     return 0;
 }

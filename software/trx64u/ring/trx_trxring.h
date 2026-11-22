@@ -16,8 +16,8 @@
 #include <stdint.h>
 #include "trx_c64re.h"      // trx_progress_fn
 
-// Writes the ring as it is now. *bytes gets the file's size. The media it names (and copies beside the file) are the disk on drive A and the
-// cartridge's .crt of the source trx_c64re_set_source() set; without one it names none.
+// Writes the ring as it is now. *bytes gets the file's size. The media it names (and copies beside the file) are the disk in drive A's slot and the
+// cartridge's .crt, from the source the call builds (ringmachine.cc) or the one set (trx_c64re_set_source).
 const char *trx_trxring_save(const char *path, uint32_t *bytes, trx_progress_fn progress, void *ctx);
 
 // Is this a .trxring at all, and one this build can load? NULL, or what is

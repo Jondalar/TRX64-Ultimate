@@ -261,18 +261,33 @@ void trx_wr8(uint32_t reg, uint8_t v)
     }
 }
 
+// Without the sync group (a base before 3.3) the four accesses are made all the same, without the critical section.
+static void crit_enter(void)
+{
+    if (const SvcSync *s = b33_sync()) {
+        s->enter();
+    }
+}
+
+static void crit_leave(void)
+{
+    if (const SvcSync *s = b33_sync()) {
+        s->leave();
+    }
+}
+
 uint32_t trx_io_read32(uint32_t reg)
 {
     if (!g_api->trx) {
         return 0;
     }
     volatile uint8_t *r = g_api->trx->regs + reg;
-    sync_enter();
+    crit_enter();
     uint32_t v = r[0];
     v |= uint32_t(r[1]) << 8;
     v |= uint32_t(r[2]) << 16;
     v |= uint32_t(r[3]) << 24;
-    sync_leave();
+    crit_leave();
     return v;
 }
 
@@ -282,12 +297,12 @@ void trx_io_write32(uint32_t reg, uint32_t v)
         return;
     }
     volatile uint8_t *r = g_api->trx->regs + reg;
-    sync_enter();
+    crit_enter();
     r[0] = uint8_t(v);
     r[1] = uint8_t(v >> 8);
     r[2] = uint8_t(v >> 16);
     r[3] = uint8_t(v >> 24);
-    sync_leave();
+    crit_leave();
 }
 
 bool trx_io_slim(void)
@@ -297,6 +312,74 @@ bool trx_io_slim(void)
         slim = (trx_io_caps() & TRX_CAPS_VIDEO) && (trx_io_read32(TRX_IO_BASE + 0x60C0) >> 24) >= 2;   // TX_CTRL: the text layer's version
     }
     return slim != 0;
+}
+
+// ---- the C64 machine's registers -------------------------------------------------------------------------------------------------------------------------
+uint8_t io_cart_rd(uint32_t reg)
+{
+    const SvcIo *io = b33_io();
+    return io ? io->cart_rd(reg) : 0;
+}
+
+void io_cart_wr(uint32_t reg, uint8_t v)
+{
+    if (const SvcIo *io = b33_io()) {
+        io->cart_wr(reg, v);
+    }
+}
+
+uint8_t io_bus_rd(uint32_t off)
+{
+    const SvcIo *io = b33_io();
+    return io ? io->bus_rd(off) : 0;
+}
+
+void io_stop(bool on)
+{
+    if (const SvcIo *io = b33_io()) {
+        io->stop(on);
+    }
+}
+
+void io_memonly(bool on)
+{
+    if (const SvcIo *io = b33_io()) {
+        io->ram_memonly(on);
+    }
+}
+
+// ---- time ------------------------------------------------------------------------------------------------------------------------------------------------
+uint16_t r_ms_timer(void)
+{
+    const SvcSysAdd *s = b33_sys();
+    return s ? s->ms_timer() : uint16_t(g_api->sys->ms());
+}
+
+// ---- the exports of the shared libraries -----------------------------------------------------------------------------------------------------------------
+static const char *const rx_name[RX_COUNT] = { "c64cart", "cbm1541", "uci" };
+static const void *rx_table[RX_COUNT];
+static uint32_t rx_size[RX_COUNT];
+
+const void *r_export(RExportId id, uint32_t off, uint32_t len)
+{
+    if (unsigned(id) >= unsigned(RX_COUNT)) {
+        return 0;
+    }
+    if (!rx_table[id] && g_api->lib) {
+        uint32_t size = 0;
+        const void *t = g_api->lib->find(rx_name[id], 1, &size);
+        if (t && size >= sizeof(uint32_t)) {
+            rx_size[id] = size;
+            rx_table[id] = t;
+        }
+    }
+    const uint8_t *t = (const uint8_t *)rx_table[id];
+    if (!t || rx_size[id] < off + len) {
+        return 0;
+    }
+    uintptr_t member = 0;                           // a function pointer in every table this library uses
+    memcpy(&member, t + off, len < sizeof(member) ? len : sizeof(member));
+    return member ? t : 0;
 }
 
 // ---- files -----------------------------------------------------------------------------------------------------------------------------------------------

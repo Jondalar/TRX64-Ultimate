@@ -1,6 +1,6 @@
 // PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_trxring.cc, ported for the ring library (U18 D6: this copy is the master). Changes:
-// files through api->fs (RFile), memory through api->mem, text through r_snprintf, the media from the source trx_c64re_set_source() set (the firmware
-// asks drive A and the cartridge itself).
+// files through api->fs (RFile), memory through api->mem, text through r_snprintf, the media from the source of the call (trx_c64re_source_begin,
+// ringmachine.cc: the descriptor's slots; the firmware asks drive A and the cartridge itself).
 // See trx_trxring.h. The file:
 //
 //   0..7    "TRXRING1"
@@ -213,7 +213,17 @@ struct Parts {
     uint32_t timeline, ram, color, cart, s0, s1;
 };
 
+static const char *save_body(const char *path, uint32_t *bytes, trx_progress_fn progress, void *ctx);
+
 const char *trx_trxring_save(const char *path, uint32_t *bytes, trx_progress_fn progress, void *ctx)
+{
+    bool built = trx_c64re_source_begin(false);
+    const char *err = save_body(path, bytes, progress, ctx);
+    trx_c64re_source_end(built);
+    return err;
+}
+
+static const char *save_body(const char *path, uint32_t *bytes, trx_progress_fn progress, void *ctx)
 {
     TrxRingStatus st;
     trx_ring_status(&st);

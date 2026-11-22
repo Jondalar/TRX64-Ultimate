@@ -1,5 +1,6 @@
-// What the ring library's files share of the base (U18): the LibApi pointer, memory on the library's own account, text without a C library, the TRX IO
-// block's registers, the C64's memory window and files. ringsys.cc.
+// What the ring library's files share of the base (U18): the LibApi pointer, the base 3.3 groups (base33.h), the exports of MultiCore's shared
+// libraries, memory on the library's own account, text without a C library, the TRX IO block's registers, the C64 machine's registers and memory
+// window, and files. ringsys.cc.
 #ifndef RING_RINGSYS_H
 #define RING_RINGSYS_H
 
@@ -8,10 +9,27 @@
 #include <stdarg.h>
 #include <string.h>
 #include "libapi.h"
-#include "pending_api.h"
+#include "base33.h"
+#include "c64cart_api.h"
+#include "cbm1541_api.h"
+#include "uci_api.h"
+#include "c64u_regs.h"
 
 // Set by lib_register (lib_ring.cc) before anything else runs.
 extern const LibApi *g_api;
+
+// ---- the exports of MultiCore's shared libraries (SvcLib::find(name, 1, &size)) -----------------------------------------------------------------------
+// Looked up at their first use and kept once found; while one is not loaded every use asks again.
+enum RExportId { RX_C64CART, RX_CBM1541, RX_UCI, RX_COUNT };
+// The table of export `id` when it is loaded, its size covers the member at `off` (`len` bytes) and that member is set; else null.
+const void *r_export(RExportId id, uint32_t off, uint32_t len);
+// The table, typed, when `member` can be called through it; null otherwise.
+#define R_TABLE(Type, id, member) ((const Type *)r_export((id), uint32_t(offsetof(Type, member)), uint32_t(sizeof(((Type *)0)->member))))
+
+// ---- time ------------------------------------------------------------------------------------------------------------------------------------------------
+// The 1 ms counter the engine's busy waits time themselves by (sys.ms_timer, 16 bit): spans are `uint16_t(r_ms_timer() - then)`, under 65 s, never
+// compared as readings. Without the 3.3 member it is the low half of sys.ms (5 ms steps), which wraps the same way.
+uint16_t r_ms_timer(void);
 
 // ---- memory: api->mem, the library's own account ---------------------------------------------------------------------------------------------------------
 static inline void *r_malloc(uint32_t n) { return g_api->mem->malloc(n); }
@@ -55,19 +73,23 @@ uint8_t trx_io_caps(void);                     // CAPS, 0 without the block
 uint8_t trx_rd8(uint32_t reg);
 void trx_wr8(uint32_t reg, uint8_t v);
 // The 32-bit registers over the byte bus: writing byte 3 commits bytes 0-2, reading byte 0 takes bytes 1-3; the four accesses are one critical section
-// (sync_enter), as the firmware's trx_io_read32 / trx_io_write32 make them.
+// (sync.enter / sync.leave), as the firmware's trx_io_read32 / trx_io_write32 make them.
 uint32_t trx_io_read32(uint32_t reg);
 void trx_io_write32(uint32_t reg, uint32_t v);
 // The slim core: TX_CTRL (page 6, +0C0) b31:24 reads 2 or more; false without page 6.
 bool trx_io_slim(void);
 
-// ---- the C64's memory window (api->c64: C64_MEMORY_BASE, what C64_DMA_MEMONLY makes it show) -------------------------------------------------------------
+// ---- the C64 machine's registers (c64u_regs.h) through the io group (base33.h); without the group a read gives 0 and a write is dropped --------------
+uint8_t io_cart_rd(uint32_t reg);                // the cartridge-port control block
+void io_cart_wr(uint32_t reg, uint8_t v);
+uint8_t io_bus_rd(uint32_t off);                 // the bus bridge's block
+void io_stop(bool on);                           // C64_STOP: the app's stop holds the machine
+void io_memonly(bool on);                        // C64_DMA_MEMONLY: the memory window sees RAM only (true) or the C64's memory map
+
+// ---- the C64's memory window (api->c64) ------------------------------------------------------------------------------------------------------------------
 static inline uint8_t c64_peek(uint32_t a) { return g_api->c64->peek(uint16_t(a)); }
 static inline void c64_poke(uint32_t a, uint8_t v) { g_api->c64->poke(uint16_t(a), v); }
-#define C64_MODE_ULTIMAX   0x02
-#define MODE_NORMAL        0
-static inline void c64_set_mode(uint8_t m) { g_api->c64->cart_mode(m); }   // C64_MODE (C64_CARTREGS_BASE + 0)
-#define VIDEO_FMT_60_HZ    0x02                // C64_VIDEOFORMAT b1
+static inline void c64_set_mode(uint8_t m) { g_api->c64->cart_mode(m); }   // C64_MODE: C64U_MODE_NORMAL, C64U_MODE_ULTIMAX
 
 // ---- files: api->fs with a position, as the firmware's File reads and writes ----------------------------------------------------------------------------
 struct RFile {

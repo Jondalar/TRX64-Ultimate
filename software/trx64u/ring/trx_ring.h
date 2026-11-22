@@ -22,7 +22,7 @@
 
 #include <stdint.h>
 
-#define TRX_CART_RAM_BYTES 65536  // the cartridge RAM window in DDR2 (cart_slot.v: 0xEF0000)
+#define TRX_CART_RAM_BYTES 65536  // the cartridge RAM (c64cart.ram_size; the file formats carry 64 KB)
 
 #define TRX_BLOCK_WORDS 58   // the capture table's reset value (c64_core.v map)
 
@@ -107,11 +107,12 @@ struct TrxRestoreStats {
     bool     vic_latches;    // the VIC's IRQ and collision latches at the load equal the block's
 };
 
-// lib_register starts the engine once (allocates its buffers); the library's poll (ring.poll, every TRX_RING_POLL_MS) calls trx_ring_engine_poll(), which
-// starts the log 6 s after the engine when ring_autostart is set and then reads the markers.
+// The operation ring.start (ringops.cc, called by the core's start hook) starts the engine (allocates its buffers, makes its mutex); only the first call
+// does anything. NULL, or why there is no ring although the bitstream has the engine (no memory). The library's poll (ring.poll, every TRX_RING_POLL_MS)
+// calls trx_ring_engine_poll(), which starts the log 6 s after the engine when ring_autostart is set and then reads the markers.
 #define TRX_RING_POLL_MS 100
 extern bool ring_autostart;
-void trx_ring_engine_init(void);
+const char *trx_ring_engine_init(void);
 void trx_ring_engine_poll(void);
 // The log's delayed start is past: a setting that turns the ring on starts it at once.
 bool trx_ring_engine_started(void);

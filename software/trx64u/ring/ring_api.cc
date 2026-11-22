@@ -97,9 +97,8 @@ static const char *api_ring_save_native(const char *path, uint32_t *bytes)
     return err;
 }
 
-// dump, save, load, load_entry and save_native as the firmware's table has them. The source of a dump and the hooks of a load (System Mode, cartridge,
-// drive A) are set only by the menu's operations (ringops.cc), so through this table a .c64re names no medium and a load puts none back; the
-// .trxring of save_native names the media it finds through the same source, so through this table it names none.
+// dump, save, load, load_entry and save_native as the firmware's table has them. Each builds the machine its file describes (System Mode, cartridge,
+// drive A, their media) and a load's hooks itself (ringmachine.cc), as the menu's operations do: the same file through either way in.
 static const u2p_ring_api_t s_ring = {
     sizeof(u2p_ring_api_t),
     api_ring_status,

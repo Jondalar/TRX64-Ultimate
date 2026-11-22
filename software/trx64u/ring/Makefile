@@ -3,7 +3,12 @@
 LIB_NAME = ring
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.1 trx64u>=1
-LIB_SRCS = lib_ring.cc ring.cc ringfile.cc trxring.cc trx_c64re_nodes.cc trx_sha256.c trx_inflate.c ringops.cc ring_api.cc ringsys.cc
+LIB_SRCS = lib_ring.cc ring.cc ringfile.cc trxring.cc trx_c64re_nodes.cc trx_sha256.c trx_inflate.c ringops.cc ring_api.cc ringsys.cc ringmachine.cc
 LIB_INC = -I$(APPLOADER) $(TRX_INC)
 LIB_LIBC = 1
 include $(SDK)/mk/lib.mk
+
+# lib.mk gives hidden.h (every declaration hidden) only to the C files. A C++ file that reads a variable of another file (g_api, ring_autostart) would then
+# reach it through the global offset table, which lib.ld discards and the loader does not fill: the link fails on `.got.plt`. (MultiCore: lib.mk will
+# force-include it for C++ too.)
+LIB_CXXFLAGS += -include $(SDK_HIDDEN)

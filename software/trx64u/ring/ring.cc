@@ -1,8 +1,10 @@
 // PROVENANCE: copied from TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring.cc (the frame ring's driver: timeline, restore, scrub, land, trace; GPL-3.0, see
-// that file's own header below). Changes here: the InitFunction is gone (lib_register starts the engine with trx_ring_engine_init(), T104.2 UI), the log's start
-// is the setting "Timewarp Ring" (ring_autostart). The menu is declarative (menu.toml, ring.* operations in ringops.cc); no screen code comes along.
-// U18 (the ring library on the SDK): the TRX registers through api->trx and the C64's memory window through api->c64 (ringsys.h), memory on the
-// library's own account, the poll task replaced by the library's poll (trx_ring_engine_poll); what base 3.1 does not have is pending_api.h.
+// that file's own header below). Changes here: the InitFunction is gone (the operation ring.start starts the engine with trx_ring_engine_init(), called
+// by the core's start hook), the log's start is the setting "Timewarp Ring" (ring_autostart). The menu is declarative (menu.toml, ring.* operations in
+// ringops.cc); no screen code comes along.
+// U18 (the ring library on the SDK): the TRX registers through api->trx and the C64's memory window through api->c64 (ringsys.h), the C64 machine's
+// registers through the io group (c64u_regs.h), the engine's lock through the sync group, the cartridge RAM through the export "c64cart", memory on the
+// library's own account, the poll task replaced by the library's poll (trx_ring_engine_poll).
 // U18 D6 (2026-11-22): brought to the firmware's state - the whowrote I/O address scan, the REU gate of trx_ring_reu.h, trx_ring_stream2_pos(),
 // C64_STOP let go before a restore's RAM load. Kept from MultiCore's copy: a .c64re load (trx_ring_load_state) refuses while the REU is on; the
 // cartridge image of a load goes in through TrxLoadMem::rom_put.
@@ -119,7 +121,7 @@ static const uint32_t rec_size[3]  = { 4, 8, 8 };
 #define W_CIA1H        34
 #define W_CIA2H        46
 
-static SyncMutex *mutex;
+static SvcMutex *mutex;            // the engine's lock (sync.mutex_new), made by trx_ring_engine_init
 static bool present;
 static bool log_on;
 static uint8_t *bounce;             // 16-byte aligned
@@ -142,7 +144,7 @@ static volatile bool scrubbing;     // a Timewarp scrub holds the machine (§16.
 static TrxReuGate reu_gate;         // A08: the REU is on, the ring is off
 // A08: the REU's enable, as the machine has it now. The ring does not record the REU's contents, so
 // while it is on there is no ring (trx_ring_reu_sync) and no way into it (E_REU).
-static inline bool reu_on(void) { return c64_reu_enable() != 0; }
+static inline bool reu_on(void) { return io_cart_rd(C64U_CART_REU_ENABLE) != 0; }
 static bool trace_on = true;       // the trace former runs with the log (trace_ctl)
 
 // LOG_CTRL as the log runs: every tap, the trace, and with flush the machine's flow cut (a
@@ -176,13 +178,13 @@ static bool lock(void)
     if (!present) {
         return false;
     }
-    sync_mutex_lock(mutex, SYNC_FOREVER);
+    b33_sync()->mutex_lock(mutex, SYNC_FOREVER);       // present: the sync group made the mutex
     return true;
 }
 
 static void unlock(void)
 {
-    sync_mutex_unlock(mutex);
+    b33_sync()->mutex_unlock(mutex);
 }
 
 // ---- the mover -------------------------------------------------------------------
@@ -192,9 +194,9 @@ static void eng_copy(uint32_t src, void *dst, uint32_t len)
     w32(ENG_DST, (uint32_t)dst);
     w32(ENG_LEN, len);
     w32(ENG_CMD, 1);
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     while (r32(ENG_CMD) & 1) {
-        if (uint16_t(sys_ms_timer() - t0) > 200) {
+        if (uint16_t(r_ms_timer() - t0) > 200) {
             // the mover never answered: the data is not there, but the CPU must not wait forever
             r_log("[RING] COPY did not finish: %u bytes from 0x%07x\n", (unsigned)len, (unsigned)src);
             break;
@@ -524,7 +526,7 @@ static bool dbg_handover(void)
         return false;
     }
     w32(GATE_CTRL, 1);
-    c64_stop(1);
+    io_stop(true);
     w32(DBG_OWNER, 0);
     w32(DBG_CMD, DBG_RUN);
     return true;
@@ -533,9 +535,9 @@ static bool dbg_handover(void)
 // ---- machine control -------------------------------------------------------------
 static bool wait_reg(uint32_t addr, uint32_t mask, uint32_t want, int ms)
 {
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     while ((r32(addr) & mask) != want) {
-        if (uint16_t(sys_ms_timer() - t0) > ms) {
+        if (uint16_t(r_ms_timer() - t0) > ms) {
             return false;
         }
     }
@@ -571,7 +573,7 @@ static void stop_machine(Saved *sv, bool at_line0)
     }
     w32(SH_CTRL, 0);                // ends a freeze session, no new one
     w32(GATE_CTRL, 1);              // the app's stop = machine pause
-    c64_stop(1);
+    io_stop(true);
     wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
 }
 
@@ -682,6 +684,55 @@ template <typename F> static uint32_t each(const uint8_t *tch, int len, const ui
         }
     }
     return n;
+}
+
+// The cartridge's RAM (64 KB in DDR2) is reached through the export "c64cart" (ram_read, ram_write: a write is complete when the call returns).
+// Puts the marked bytes of `val` back, one ram_write per run of neighbouring marks. pg: the pages to look at, cleared with their marks (null: every
+// page, the marks stay). The bytes written; 0 without the export.
+static uint32_t cart_ram_put(uint8_t *pg, uint8_t *tch, const uint8_t *val)
+{
+    const C64CartApi *cc = R_TABLE(C64CartApi, RX_C64CART, ram_write);
+    uint32_t n = 0;
+    int run = -1;                       // where the open run starts
+    for (int p = 0; p < 256; p++) {
+        if (pg && !pg[p]) {
+            if (run >= 0) {
+                if (cc) {
+                    cc->ram_write(uint32_t(run), val + run, uint32_t(256 * p - run));
+                }
+                run = -1;
+            }
+            continue;
+        }
+        if (pg) {
+            pg[p] = 0;
+        }
+        uint32_t *w = (uint32_t *)(tch + 256 * p);
+        for (int i = 0; i < 64; i++) {
+            uint32_t m = w[i];
+            for (int b = 0; b < 4; b++) {
+                int a = 256 * p + 4 * i + b;
+                if (m & (0xFFu << (8 * b))) {
+                    if (run < 0) {
+                        run = a;
+                    }
+                    n++;
+                } else if (run >= 0) {
+                    if (cc) {
+                        cc->ram_write(uint32_t(run), val + run, uint32_t(a - run));
+                    }
+                    run = -1;
+                }
+            }
+            if (pg && m) {
+                w[i] = 0;
+            }
+        }
+    }
+    if (run >= 0 && cc) {
+        cc->ram_write(uint32_t(run), val + run, uint32_t(65536 - run));
+    }
+    return cc ? n : 0;
 }
 
 // ---- restore ---------------------------------------------------------------------
@@ -822,7 +873,7 @@ static bool replay_cart(const uint32_t *w, uint32_t *count)
     if (!(w[W_GLUE] & GLUE_CART)) {
         return true;
     }
-    const TrxCartRow *r = cart_row(c64_cartridge_type());
+    const TrxCartRow *r = cart_row(io_cart_rd(C64U_CART_TYPE));
     if (!r) {
         return false;
     }
@@ -939,9 +990,9 @@ static bool apply_run(uint32_t start, uint32_t count, bool undo)
     w32(AP_COUNT, count);
     w32(AP_CMD, undo ? 1 : 0);
     uint32_t ms = 50 + count / 10000;       // the engine does 20 records per us and more
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     while (r32(AP_CMD) & 1) {
-        if (uint16_t(sys_ms_timer() - t0) > ms) {
+        if (uint16_t(r_ms_timer() - t0) > ms) {
             r_log("[RING] APPLY did not finish: %u records from %u\n", (unsigned)count, (unsigned)start);
             return false;
         }
@@ -1022,8 +1073,8 @@ static void clear_vic_latches(const uint32_t *w)
     }
     uint8_t clr = ~uint8_t(w[W_VIC + 6] >> 8) & 0x0F;
     bool c1e = uint8_t(w[W_VIC + 7] >> 16) == 0, c1f = uint8_t(w[W_VIC + 7] >> 24) == 0;
-    uint16_t t0 = sys_ms_timer();
-    while (!(r32(STOP_POS) & POS_HOLDING) && uint16_t(sys_ms_timer() - t0) < 60) {
+    uint16_t t0 = r_ms_timer();
+    while (!(r32(STOP_POS) & POS_HOLDING) && uint16_t(r_ms_timer() - t0) < 60) {
         int raster = c64_peek(0xD012) | ((c64_peek(0xD011) & 0x80) << 1);
         if (raster >= 300) {
             break;
@@ -1043,18 +1094,18 @@ static void clear_vic_latches(const uint32_t *w)
 static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn busmem, ram_fn ram,
                     void *ctx, uint32_t *bus_writes, uint16_t *pos_ms = NULL, bool *latch_ok = NULL)
 {
-    uint8_t memonly = c64_dma_memonly();
-    c64_set_dma_memonly(0);
-    c64_set_mode(C64_MODE_ULTIMAX);
+    bool memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    io_memonly(false);
+    c64_set_mode(C64U_MODE_ULTIMAX);
     if (!replay_cart(w, bus_writes)) {
-        r_log("[RING] cartridge type %02x: banking registers not replayed\n", c64_cartridge_type());
+        r_log("[RING] cartridge type %02x: banking registers not replayed\n", io_cart_rd(C64U_CART_TYPE));
     }
     if (busmem) {
         busmem(ctx);
     }
     replay_vic(w, bus_writes);
     replay_cia(w, bus_writes);
-    c64_set_mode(MODE_NORMAL);
+    c64_set_mode(C64U_MODE_NORMAL);
 
     // hold the CPU (CPU-only pause), let the machine run to the snap position
     w32(GATE_CTRL, 0);
@@ -1072,7 +1123,7 @@ static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn b
         *latch_ok = ((v6 >> 8) & 0x0F) == ((w[W_VIC + 6] >> 8) & 0x0F) && (v7 >> 16) == (w[W_VIC + 7] >> 16);
     }
     if (pos_ms) {
-        *pos_ms = sys_ms_timer();
+        *pos_ms = r_ms_timer();
     }
 
     // C64 RAM through the second port (the CPU is held at a read: no more
@@ -1082,13 +1133,13 @@ static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn b
     // snap position the block is loaded on. The CPU walk's undo of the KERNAL IRQ's STA $01
     // did that (T20: $01F2 differed from the engine's APPLY, which only writes RAM).
     if (!err) {
-        c64_stop(0);
+        io_stop(false);
     }
-    c64_set_dma_memonly(1);
+    io_memonly(true);
     if (ram) {
         ram(ctx);
     }
-    c64_set_dma_memonly(memonly);
+    io_memonly(memonly);
 
     if (!err && !stage_and_load(w)) {
         err = E_STAGE;
@@ -1098,7 +1149,7 @@ static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn b
     }
 
     // release: the hold of the stop position keeps the machine until b9
-    c64_stop(0);
+    io_stop(false);
     w32(GATE_CTRL, sv.gate & 1);
     w32(SH_CTRL, sv.sh);
     return err;
@@ -1109,8 +1160,7 @@ struct RestoreCtx {
     TrxRestoreStats *st;
 };
 
-// colour RAM as bus cycles (stopped, Ultimax); cartridge RAM in DDR2
-// (cart_slot.v: 0xEF0000 + address), then the cartridge drops its cached lines
+// colour RAM as bus cycles (stopped, Ultimax); cartridge RAM through c64cart, then the cartridge drops its cached lines
 static void restore_bus(void *ctx)
 {
     RestoreCtx *c = (RestoreCtx *)ctx;
@@ -1119,10 +1169,8 @@ static void restore_bus(void *ctx)
     c->st->rec1 = cl.n1;
     c->st->other = cl.other;
     c->st->bus_writes += each(col_tch, 1024, col_val, [](int a, uint8_t v) { c64_poke(0xD800 + a, v); });
-    volatile uint8_t *cr = c64_cart_ram();
-    c->st->cart_bytes = each(cart_tch, 65536, cart_val, [cr](int a, uint8_t v) { cr[a] = v; });
+    c->st->cart_bytes = cart_ram_put(NULL, cart_tch, cart_val);
     if (c->st->cart_bytes) {
-        __asm__ volatile ("fence" ::: "memory");
         trx_wr8(CART_CMD, CART_INVAL);
     }
 }
@@ -1152,7 +1200,7 @@ static void restore_ram(void *ctx)
 
 static int restore_locked(int idx, TrxRestoreStats *st)
 {
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     memset(st, 0, sizeof(*st));
     if (idx < 0 || idx >= tl_n) {
         return E_INDEX;
@@ -1166,7 +1214,7 @@ static int restore_locked(int idx, TrxRestoreStats *st)
     // One bus cycle with the log still on: the first DMA holds the CPU at its
     // next read, and the writes it still makes before that (a push sequence,
     // a read-modify-write) are logged and undone with the rest.
-    c64_set_dma_memonly(0);
+    io_memonly(false);
     (void)c64_peek(0x0002);
     drain();
     parse_locked();                 // up to the stop (trim() may drop from the front)
@@ -1186,7 +1234,7 @@ static int restore_locked(int idx, TrxRestoreStats *st)
         err = E_GONE;
     }
     if (err) {
-        c64_stop(0);
+        io_stop(false);
         w32(GATE_CTRL, sv.gate & 1);
         w32(SH_CTRL, sv.sh);
         if (r32(STOP_POS) & POS_HOLDING) {
@@ -1200,7 +1248,7 @@ static int restore_locked(int idx, TrxRestoreStats *st)
 
     TrxFrame f = ent(idx);
     st->frames = tl_n - 1 - idx;
-    st->ms_stop = uint16_t(sys_ms_timer() - t0);
+    st->ms_stop = uint16_t(r_ms_timer() - t0);
     RestoreCtx rc;
     rc.idx = idx;
     rc.st = st;
@@ -1226,7 +1274,7 @@ static int restore_locked(int idx, TrxRestoreStats *st)
     w32(LOG_CTRL, logctl(true));
     log_on = true;
     w32(STOP_POS, POS_RELEASE);     // go on: the load is the first edge
-    st->ms = uint16_t(sys_ms_timer() - t0);
+    st->ms = uint16_t(r_ms_timer() - t0);
     st->next_seq = next_seq;
     r_log("[RING] restore to entry %d (seq %u): %u frames, %u + %u records, %u RAM / %u bus writes, "
            "%u ms (stopped at %u, at the position %u), %s\n",
@@ -1252,7 +1300,8 @@ static int restore_locked(int idx, TrxRestoreStats *st)
 
 static struct {
     Saved sv;               // the freeze's gate and sessions, for the final release
-    uint8_t mode, memonly;  // the menu's DMA mode, put back after every step
+    uint8_t mode;           // C64_MODE and the DMA mode of the menu, put back after every step
+    bool memonly;
     bool d_now;             // D is the freeze point (the closed head's end)
     uint32_t d_seq;         // else D's entry
     uint32_t mark[2];       // stream 0/1 counts since which the log holds writes not undone
@@ -1360,7 +1409,7 @@ struct ScrubCtx {
     const uint32_t *w;      // the block being put in
 };
 
-// colour RAM as bus cycles, cartridge RAM in DDR2 (as restore_bus)
+// colour RAM as bus cycles, cartridge RAM through c64cart (as restore_bus)
 static void scrub_bus(void *ctx)
 {
     TrxRestoreStats *st = ((ScrubCtx *)ctx)->st;
@@ -1386,10 +1435,8 @@ static void scrub_bus(void *ctx)
         (void)c64_peek(0xD01F);
     }
     st->bus_writes += 3;
-    volatile uint8_t *cr = c64_cart_ram();
-    st->cart_bytes = each_pg(cart_pg, cart_tch, cart_val, [cr](int a, uint8_t v) { cr[a] = v; });
+    st->cart_bytes = cart_ram_put(cart_pg, cart_tch, cart_val);
     if (st->cart_bytes) {
-        __asm__ volatile ("fence" ::: "memory");
         trx_wr8(CART_CMD, CART_INVAL);
     }
 }
@@ -1415,12 +1462,12 @@ static void scrub_keyboard_io(void)
     if (trx_io_slim()) {
         return;
     }
-    c64_set_dma_memonly(0);
-    c64_set_mode(C64_MODE_ULTIMAX);
+    io_memonly(false);
+    c64_set_mode(C64U_MODE_ULTIMAX);
     c64_poke(0xDC02, 0xFF);
     c64_poke(0xDC03, 0x00);
     c64_set_mode(scr.mode);
-    c64_set_dma_memonly(scr.memonly);
+    io_memonly(scr.memonly);
 }
 
 // The first step: the freeze session ends (the machine pause stays), the head
@@ -1432,10 +1479,10 @@ static int scrub_begin_locked(void)
     if (!tl_n) {
         return E_INDEX;
     }
-    scr.mode = c64_mode();
-    scr.memonly = c64_dma_memonly();
+    scr.mode = io_cart_rd(C64U_CART_MODE);
+    scr.memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
     stop_machine(&scr.sv, true);
-    c64_set_dma_memonly(0);
+    io_memonly(false);
     (void)c64_peek(0x0002);          // as restore_locked: the CPU's last writes logged
     drain();
     parse_locked();
@@ -1495,7 +1542,7 @@ static int scrub_walk_locked(int idx, Coll *cl)
 
 static int scrub_show_locked(int idx, TrxRestoreStats *st)
 {
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     memset(st, 0, sizeof(*st));
     if (!scrubbing) {
         int err = scrub_begin_locked();
@@ -1522,7 +1569,7 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
     if (!err) {
         err = apply_err;
     }
-    st->ms_pos = uint16_t(sys_ms_timer() - t0);
+    st->ms_pos = uint16_t(r_ms_timer() - t0);
 
     // one frame with the log on, stopped on line 0 of the next one
     uint32_t still_n = r32(STILL_STATUS) >> 8;
@@ -1532,12 +1579,12 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
         err = E_NOPOS;
     }
     w32(GATE_CTRL, 1);
-    c64_stop(1);
+    io_stop(true);
     wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
-    c64_set_dma_memonly(0);
+    io_memonly(false);
     (void)c64_peek(0x0002);          // the CPU's last writes into the log too
     c64_set_mode(scr.mode);
-    c64_set_dma_memonly(scr.memonly);
+    io_memonly(scr.memonly);
     scrub_keyboard_io();
     drain();
     p2 = r32(LOG_CNT(2)) & M28;     // the run's markers are no timeline entries
@@ -1547,11 +1594,11 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
     scr.d_seq = f.seq;
     trim();                         // the run used one frame of the areas
     // the still of that frame: complete at line 285 (60 Hz modes: line 262), long before the stop
-    uint16_t t1 = sys_ms_timer();
-    while ((r32(STILL_STATUS) >> 8) == still_n && uint16_t(sys_ms_timer() - t1) < 10)
+    uint16_t t1 = r_ms_timer();
+    while ((r32(STILL_STATUS) >> 8) == still_n && uint16_t(r_ms_timer() - t1) < 10)
         ;
     st->frames = 1;
-    st->ms = uint16_t(sys_ms_timer() - t0);
+    st->ms = uint16_t(r_ms_timer() - t0);
     r_log("[RING] scrub to seq %u: %u + %u records, %u RAM / %u bus writes, %u ms (%u to the position) %s\n",
            (unsigned)f.seq, (unsigned)st->rec0, (unsigned)st->rec1, (unsigned)st->ram_writes,
            (unsigned)st->bus_writes, (unsigned)st->ms, (unsigned)st->ms_pos, trx_ring_error(err));
@@ -1562,7 +1609,7 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
 // timeline cut after it, log and capture on, release (restore_locked's end).
 static int scrub_final_locked(int idx, TrxRestoreStats *st)
 {
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     memset(st, 0, sizeof(*st));
     int err = E_NONE;
     Coll cl = { 0, 0, 0 };
@@ -1578,8 +1625,8 @@ static int scrub_final_locked(int idx, TrxRestoreStats *st)
         w32(CAP_CTRL, 1);
         w32(LOG_CTRL, logctl(true));
         log_on = true;
-        c64_set_mode(MODE_NORMAL);
-        c64_stop(0);
+        c64_set_mode(C64U_MODE_NORMAL);
+        io_stop(false);
         w32(GATE_CTRL, scr.sv.gate & 1);
         w32(SH_CTRL, scr.sv.sh);
         w32(STOP_POS, POS_RELEASE);
@@ -1608,7 +1655,7 @@ static int scrub_final_locked(int idx, TrxRestoreStats *st)
     w32(LOG_CTRL, logctl(true));
     log_on = true;
     w32(STOP_POS, POS_RELEASE);
-    st->ms = uint16_t(sys_ms_timer() - t0);
+    st->ms = uint16_t(r_ms_timer() - t0);
     st->next_seq = next_seq;
     r_log("[RING] scrub rewind to seq %u: %u + %u records, %u ms, %s\n", (unsigned)f.seq,
            (unsigned)st->rec0, (unsigned)st->rec1, (unsigned)st->ms, trx_ring_error(err));
@@ -1625,7 +1672,7 @@ static int scrub_final_locked(int idx, TrxRestoreStats *st)
 
 static int land_locked(int idx, TrxRestoreStats *st)
 {
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     memset(st, 0, sizeof(*st));
     uint32_t gate0 = r32(GATE_CTRL) & 1;
     // The session mode of the stop this land starts from: the stop it ends in gets it back.
@@ -1635,7 +1682,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
     // C64_STOP takes the machine over from the debugger's hold
     bool owned = dbg_handover();
     w32(GATE_CTRL, 1);
-    c64_stop(1);
+    io_stop(true);
     wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
     if (scrubbing) {
         // a land from a land: the put-back's bus cycles must reach the chips, not a session's
@@ -1658,7 +1705,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
         // the machine stays where it is, held by the debugger again
         w32(DBG_OWNER, owned ? 1 : 0);
         w32(DBG_CMD, 0x01);         // PAUSE_CB: the gate is shut, a record at once
-        c64_stop(0);
+        io_stop(false);
         if (!scrubbing) {
             w32(GATE_CTRL, gate0);
         }
@@ -1676,7 +1723,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
     if (!err) {
         err = apply_err;
     }
-    st->ms_pos = uint16_t(sys_ms_timer() - t0);
+    st->ms_pos = uint16_t(r_ms_timer() - t0);
     // the machine holds one edge before the snap's phi2 fall: CYC_CMP on that edge
     uint32_t now = r32(DBG_CYCLES);
     w32(DBG_CYC_CMP, now);
@@ -1685,7 +1732,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
     w32(DBG_OWNER, 1);
     // no bus cycle from here on: it would open the clock before the release
     c64_set_mode(scr.mode);
-    c64_set_dma_memonly(scr.memonly);
+    io_memonly(scr.memonly);
     w32(LOG_CTRL, logctl(true));      // what the debugger runs from here is undone by the next land
     w32(STOP_POS, POS_RELEASE);
     if (!wait_reg(DBG_STATUS, DBG_ST_NEW, DBG_ST_NEW, 100) && !err) {
@@ -1701,7 +1748,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
     scr.d_now = false;
     scr.d_seq = f.seq;
     st->frames = tl_n - 1 - idx;
-    st->ms = uint16_t(sys_ms_timer() - t0);
+    st->ms = uint16_t(r_ms_timer() - t0);
     r_log("[RING] land on seq %u: %u + %u records, %u RAM / %u bus writes, %u ms, %s\n", (unsigned)f.seq,
            (unsigned)st->rec0, (unsigned)st->rec1, (unsigned)st->ram_writes, (unsigned)st->bus_writes,
            (unsigned)st->ms, trx_ring_error(err));
@@ -1809,24 +1856,26 @@ static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **c
     if (!was) {
         w32(SH_CTRL, 2);
         w32(GATE_CTRL, 1);
-        c64_stop(1);
+        io_stop(true);
         wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
-        c64_set_mode(C64_MODE_ULTIMAX);
+        c64_set_mode(C64U_MODE_ULTIMAX);
     }
     drain();
-    uint8_t memonly = c64_dma_memonly();
-    c64_set_dma_memonly(1);
+    bool memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    io_memonly(true);
     g_api->c64->dma_read(0, ram, 65536);
-    c64_set_dma_memonly(0);
+    io_memonly(false);
     for (int a = 0; a < 1024; a++) {
         col[a] = c64_peek(0xD800 + a) & 0x0F;
     }
-    c64_set_dma_memonly(memonly);
+    io_memonly(memonly);
     if (cart) {
-        // the cartridge's RAM window in DDR2 (cart_slot.v: 0xEF0000, 64 KB)
-        volatile uint8_t *cr = c64_cart_ram();
-        for (int a = 0; a < 65536; a++) {
-            cart[a] = cr[a];
+        // the cartridge's RAM, 64 KB, through c64cart (zeros without the export)
+        const C64CartApi *cc = R_TABLE(C64CartApi, RX_C64CART, ram_read);
+        if (cc) {
+            cc->ram_read(0, cart, 65536);
+        } else {
+            memset(cart, 0, 65536);
         }
     }
     // the parse may drop entries from the front: find the targets again
@@ -1846,8 +1895,8 @@ static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **c
         }
     }
     if (!was) {
-        c64_set_mode(MODE_NORMAL);
-        c64_stop(0);
+        c64_set_mode(C64U_MODE_NORMAL);
+        io_stop(false);
         w32(GATE_CTRL, gate & 1);
         w32(SH_CTRL, sh);
     }
@@ -1899,7 +1948,7 @@ static void start_locked(void)
 // modes: 63 x 312 at the PAL clock
 static bool fmt_60hz(void)
 {
-    return (c64_videoformat() & VIDEO_FMT_60_HZ) != 0;
+    return (io_bus_rd(C64U_BUS_VIDEOFORMAT) & C64U_VIDEO_60_HZ) != 0;
 }
 
 bool trx_ring_apply_hw(int mode)
@@ -1951,7 +2000,7 @@ const char *trx_ring_reu_refusal(void)
 // in progress holds the mutex, and the next poll looks again.
 void trx_ring_reu_sync(void)
 {
-    if (!present || !sync_mutex_lock(mutex, 0)) {
+    if (!present || !b33_sync()->mutex_lock(mutex, 0)) {
         return;
     }
     switch (trx_reu_gate_step(&reu_gate, reu_on(), scrubbing, log_on)) {
@@ -1974,7 +2023,7 @@ void trx_ring_reu_sync(void)
     default:
         break;
     }
-    sync_mutex_unlock(mutex);
+    b33_sync()->mutex_unlock(mutex);
 }
 
 void trx_ring_stop(void)
@@ -2210,12 +2259,11 @@ static void load_bus(void *ctx)
     c->bus += 1024;
     bool cart_touched = false;
     if (c->m->cart) {
-        // the cartridge RAM window in DDR2, the way restore_bus puts a ring entry's back (FW trx_ring.cc load_bus)
-        volatile uint8_t *cr = c64_cart_ram();
-        for (int a = 0; a < 65536; a++) {
-            cr[a] = c->m->cart[a];
+        // the cartridge's RAM, whole, through c64cart (FW trx_ring.cc load_bus)
+        if (const C64CartApi *cc = R_TABLE(C64CartApi, RX_C64CART, ram_write)) {
+            cc->ram_write(0, c->m->cart, 65536);
+            cart_touched = true;
         }
-        cart_touched = true;
     }
     if (c->m->rom_put) {
         // the cartridge's image, which a rewind never puts back (the log has no flash writes): a game that programmed its own flash comes back whole
@@ -2223,7 +2271,6 @@ static void load_bus(void *ctx)
         cart_touched = true;
     }
     if (cart_touched) {
-        __asm__ volatile ("fence" ::: "memory");
         trx_wr8(CART_CMD, CART_INVAL);         // the cartridge drops its cached lines
     }
 }
@@ -2291,9 +2338,9 @@ void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len)
     w32(ENG_DST, area_base[s] + off);
     w32(ENG_LEN, len);
     w32(ENG_CMD, 1);
-    uint16_t t0 = sys_ms_timer();
+    uint16_t t0 = r_ms_timer();
     while (r32(ENG_CMD) & 1) {
-        if (uint16_t(sys_ms_timer() - t0) > 200) {
+        if (uint16_t(r_ms_timer() - t0) > 200) {
             r_log("[RING] COPY back did not finish: %u bytes to area %d + 0x%x\n", (unsigned)len, s, (unsigned)off);
             break;
         }
@@ -2861,10 +2908,16 @@ void trx_ring_engine_poll(void)
     trx_ring_poll();
 }
 
-void trx_ring_engine_init(void)
+const char *trx_ring_engine_init(void)
 {
-    if (!(trx_io_caps() & CAPS_ENGINE) || !g_api->c64) {
-        return;
+    static bool tried;                  // once: a second call (or a failed first one) does nothing
+    if (tried) {
+        return NULL;
+    }
+    tried = true;
+    const SvcSync *sync = b33_sync();
+    if (!(trx_io_caps() & CAPS_ENGINE) || !g_api->c64 || !sync) {
+        return NULL;
     }
     f4_after_blocks = !(trx_rd8(TRX_CAPS2) & TRX_CAPS2_F4);
     apply_hw = (trx_rd8(TRX_CAPS2) & TRX_CAPS2_APPLY) != 0;
@@ -2875,11 +2928,12 @@ void trx_ring_engine_init(void)
     cart_val = (uint8_t *)r_malloc(65536);
     cart_tch = (uint8_t *)alloc_aligned(65536);
     tl = (TrxFrame *)r_malloc(sizeof(TrxFrame) * TL_CAP);
-    mutex = sync_mutex_create();
+    mutex = sync->mutex_new();
     if (!bounce || !tl || !mutex || !ram_val || !ram_tch || !cart_val || !cart_tch) {
         r_log("[RING] out of memory, no frame ring\n");
-        return;
+        return "Out of memory: no frame ring";
     }
     engine_t0 = g_api->sys->ms();
     present = true;
+    return NULL;
 }

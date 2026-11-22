@@ -11,19 +11,17 @@
 #include <stdint.h>
 
 
-// What the single-frame .c64re (format 2, as TRX64-Ultimate's trx_c64re.cc writes it) says of the machine beyond the chip block (the caller knows it, this
-// file does not): which of the six System Modes runs (0 PAL, 1 NTSC, 2 PAL-60, 3 NTSC-50, 4 PAL-60/L, 5 NTSC-50/L), the cartridge as it stands now (its
-// image is read through rom_read, `rom_bytes` long, never copied whole; src_name the file it came from; eeprom the 2 KB of a GMod2), the disk image on
-// drive A and whether drive A is powered (its CPU and VIA state are read through the drive debug page when it is), the REU setting. The pointers stay the
-// caller's and must live until the dump or load returns. Without a call the model is "c64-pal" and the file names no medium.
+// What the single-frame .c64re (format 2, as TRX64-Ultimate's trx_c64re.cc writes it) says of the machine beyond the chip block (ringmachine.cc reads it,
+// this file does not): which of the six System Modes runs (0 PAL, 1 NTSC, 2 PAL-60, 3 NTSC-50, 4 PAL-60/L, 5 NTSC-50/L; -1 not known), the cartridge as it
+// stands now (its image is read through rom_read, `rom_bytes` long, never copied whole; cart_src the file it came from; eeprom the 2 KB of a GMod2), the
+// disk image on drive A and whether drive A is powered (its CPU and VIA state are read through the drive debug page when it is). The pointers must live
+// until the dump or load returns. Without a source the model is "c64-pal" and the file names no medium.
 struct TrxC64reSrc {
     int machine;
     uint32_t rom_bytes;
     void (*rom_read)(void *ctx, uint32_t off, uint8_t *dst, uint32_t n);
     void *rom_ctx;
-    const char *cart_name;
     const char *cart_src;
-    int cart_type;
     uint16_t cart_require;      // the cartridge definition's require / prohibit flags (the header's machineState.cartridge carries them)
     uint16_t cart_prohibit;
     bool cart_writable;         // the C64 can change the cartridge's flash or EEPROM: a .c64rering entry carries the image (cartFlash)
@@ -31,9 +29,7 @@ struct TrxC64reSrc {
     const char *disk_path;
     bool drive_power;
     int drive_unit;
-    const char *drive_type;
-    int reu;
-    int reu_size;
+    const char *drive_type;     // "1541" or "1581"; NULL: no drive A
     // for a load: put a piece of the cartridge image into DDR2; make the cartridge in the port the one the state names (the .crt at that path) WITHOUT a
     // reset, or an empty port for NULL (0: done); put the GMod2's 2 KB EEPROM back. All get rom_ctx.
     void (*rom_write)(void *ctx, uint32_t off, const uint8_t *src, uint32_t n);
@@ -45,9 +41,15 @@ struct TrxC64reSrc {
     int (*machine_set)(void *ctx, int machine);
     int (*drive_mount)(void *ctx, const char *spec);
 };
+// Every entry below and trx_trxring_save() build the source for their own call (trx_c64re_source_begin, ringmachine.h) unless one is set. set_source sets
+// one built earlier (the dump operation builds it on its handler and writes on a job), NULL drops it.
 void trx_c64re_set_source(const TrxC64reSrc *src);
 // The source set now, or NULL (the .trxring names its media from it).
 const TrxC64reSrc *trx_c64re_source(void);
+// Builds the source for the call that starts now when none is set (load: with the hooks of a load). True when it built one; the caller then ends its call
+// with trx_c64re_source_end(true), which drops it again.
+bool trx_c64re_source_begin(bool load);
+void trx_c64re_source_end(bool built);
 
 // Writes timeline entry idx as a .c64re of format 2 (U8): a binary section table, streamed, with the cartridge image as it stands at the freeze, once.
 // NULL, or what went wrong - and then no file is left behind.

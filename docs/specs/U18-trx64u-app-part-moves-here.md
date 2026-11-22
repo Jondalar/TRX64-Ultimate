@@ -317,10 +317,20 @@ Nothing decided yet.
     `state_reu_on` and `state_port_taken` read hardware.
   - **Round 2 started** (`74a95323`): MultiCore's 3.3 contract (`t239.3-boundary` `d6afb393`: headers and a handover table
     per library mapping all 106 pending calls) is copied to `software/trx64u/contract/`; `include/base33.h` gives one
-    accessor per new `LibApi` group, undefined until an SDK carries 3.3. The engine starts in an operation `ring.start`
+    accessor per new `LibApi` group, undefined until an SDK carries 3.3. The engine starts in an operation `ring.init`
     called from our core hook `start`; `menu_closed` calls `monitor.release` and `ring.unfreeze`.
   - **Monitor on the 3.3 names:** `pending_api.h` is gone; the link is open only on `b33_sync`, `b33_sys`, `b33_ctx`.
     The F4 screen is the export "textgrid" (the menu node gets `grid = "textgrid"`); `monitor.release` is an operation;
     `plat_media` reads `ctx.media_source` for the slots "Cartridge" and "Drive A" (MultiCore's `MountSlots`, their
     c64.cc:619; no drive B) and cuts the spec to the path. S13: no permanent heap, peak 50,240 B (one RPC client while
     gated); image 204,040 B, image + bss 675,504 B (64.4 % of 1 MiB).
+  - **Ring on the 3.3 names:** all 47 rows mapped, `pending_api.h` gone; the link is open only on six `b33_*` accessors.
+    Machine registers through `io` with our offsets in one header (`ring/c64u_regs.h`, the future API TOML's content);
+    cartridge RAM and drive A's image through c64cart / cbm1541. One path builds the machine info (`ringmachine.cc`) for
+    every dump, save, load and the exported table: `ctx.media_source` for "Cartridge" / "Drive A", c64cart, `cbm1541.
+    drive_info`, System Mode from the video format bits. The engine starts in the new operation `ring.init` (the name
+    `ring.start` stays the log's start, as in MultiCore's golden list). The dump job keeps its 76,800-byte stack (the
+    contract has no rule; MultiCore's job start enforces only a minimum). S13: image 117,864 B, image + bss 136,520 B
+    (13 % of 1 MiB); permanent heap 1,486,893 B (the timeline 1,146,880 B), peak during a 64-entry `.c64rering` dump
+    4,345,344 B on top. Found: loading a format 1 `.c64rering` holds the file and its unpacked JSON at once (firmware
+    design), about 12 MB for a 30 s ring, more than trx64u's heap of 0x950000.
