@@ -14,11 +14,13 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 ## State
 
 The three libraries compile against base 3.1 (SDK 0.1.0); each link is open only on the calls in its `pending_api.h`
-(base 3.2 / 3.3 calls and MultiCore's shared libraries; ring 44, monitor 3, base 59). The sources of `base/`, `ring/` and `monitor/` are MultiCore's, copied unchanged from TRX64U-MultiCore
-commit `3b8e2955` (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from), `coreapp/src` and
-`coreapp/cores/trx64u/menu.toml`. They were written for MultiCore's app core and call its internals; the move onto the
-SDK's public API (`include/` of the package) is the open work, U18 §5. What they take from outside the SDK is measured in
-`BOUNDARY.md` (`tools/boundary.py`).
+(base 3.2 / 3.3 calls and MultiCore's shared libraries; ring 44, monitor 3, base 59).
+
+The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
+(branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from; `coreapp/src` and `coreapp/cores/trx64u/menu.toml`), and
+were ported onto the SDK's public API on 2026-11-22. What they took from outside the SDK before the port is measured in
+`BOUNDARY.md` (`tools/boundary.py`). MultiCore's ring files are an older copy of the firmware's `trx_c64re` / `trxring`
+code; moving the ring library onto the firmware's current files (as trxmon already is) is open.
 
 ## Build
 
