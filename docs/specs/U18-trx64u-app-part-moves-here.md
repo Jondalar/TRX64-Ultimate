@@ -229,3 +229,14 @@ Nothing decided yet.
     `lib_register`; `ringfile` onto `SvcFs`; every allocation through `api->mem` (the library's own account, S14); no
     objects with constructors or destructors (D19). The ring library is named "ring", so `find("ring", 1)` works on 3.1
     already; trx stays `api->trx` until the cut. What needs calls that do not exist yet is kept as a list.
+  - **The boundary map (MultiCore, by Alex's delegation; their T239.3 §5, map `docs/dev/boundary-trx64u.md` on
+    `t239.3-boundary`):** `c64.cc` (the TRX2 descriptor) and `c64_go.cc` come to us, data as TOML, hooks from the base
+    library; `c64_cart.cc` and `cbm_run.cc` stay theirs as shared libraries. The base API takes a call only when more
+    than one core uses it or it belongs to the generic app: UI look, name squeeze and keyboard-joystick become settings
+    of the generic app (our code stops calling them); no raw I2C (asked: `u64cfg`'s only I2C is the SID socket
+    expander 0x40 on the 1.8 V bus, proposed as one call `board.sid_sockets(ctrl)`). Base 3.3 appends `sync.enter` /
+    `leave`, mutexes, `sys.yield`, `sys.ms_timer`; `net.gated` and the settings are read as states
+    (`ops->state("net.gated")`, `ops->state("set.<key>")`). S14: everything a library holds is on its own account.
+    `trx_io` read32 / write32 / slim are ours (D20), each 4-byte access inside `sync.enter` / `leave`.
+  - Three agents port base, ring and monitor against 3.1; calls that do not exist yet go into a `pending_api.h` per
+    library under the 3.3 names.
