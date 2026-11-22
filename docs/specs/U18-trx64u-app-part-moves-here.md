@@ -345,3 +345,20 @@ Nothing decided yet.
     have no TOML format yet; `u2a_pack.py` refuses `--menu` for a core's menu, which our Makefile sets; the base library
     still reads `api->trx` / `api->c64` and must export "trx" and "c64" itself (D20; one export per library in 3.1);
     the U64 block, mixers, palettes and resampler registers have no `io` member and are still written directly.
+  - **Round 2's open points (MultiCore, by Alex's delegation; contract `0aff1a3b`):**
+    - A ring dump is a stepped operation (the UI node attribute `job`, T228 R21, as "Save frame"): the menu calls it
+      again while it answers `more`, each step holds the core lock, the menu stays open and the machine frozen; no
+      `api->job` and no 76,800-byte stack for it (`api->job` is for work that never touches the machine). Not a job with
+      io calls: `ram_read` / `ram_memonly` depend on a mode other lock holders change, and the base may release the stop
+      at menu close.
+    - The key table (KS_MONITOR, KS_TIMELINE) is `[[key]]` rows in the UI TOML (layout / node, key, op, pass_key,
+      directive, direct; MultiCore's handover, "The key table of the UI TOML").
+    - A core's menu is its description, record 6 of the `.cor` (`cor_pack.py pack --desc` with `desc.toml`), not a
+      library's menu: our libraries drop `LIB_MENU`; `menu.toml` and `desc.toml` are delivered with them and MultiCore's
+      pipeline packs `trx64u.cor`.
+    - "trx", "c64" and "corehooks" become named exports of our base library with base 3.2 (SDK 0.2.0, `c64_api.h`).
+    - Our register blocks outside the core window (U64 block, mixers, palettes, resampler) are windows declared in our
+      API TOML (name, address, size); `io.window(name, &size)` hands out the base address after checking it against the
+      core's address map; offsets stay in our constants header. No absolute addresses remain.
+    - CoreHooks gets `base_setting_changed(key)` (after the base applies one of its own settings, and once after start;
+      lock task): ours sets C64_PADDLE_SWAP from "Joystick Input" bit 0; the base sets the keyboard part.
