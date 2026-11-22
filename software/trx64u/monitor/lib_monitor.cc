@@ -250,11 +250,14 @@ const char *plat_firmware_version(void)
 
 // ---- the engine, one task at a time -----------------------------------------------------------------------------------------------------------------------------
 // trxmon's state, the session and the RPC holder are used from two tasks: the library's poll (monitor.serve), which the base runs on a task of its own
-// under the core lock, with the menu open too (when_frozen), and the menu's task, which calls the monitor's operations (monitor.key runs there without the
-// core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and draws the export "textgrid". The poll and the
-// textgrid's render skip their pass while another task has the engine; the operations sleep until it is free. sync.enter / sync.leave guard only the
-// flag; a base without the group (before 3.3) has no critical section to offer, and the flag is then tested and set unguarded.
+// under the core lock, with the menu open too (when_frozen), and the menu task, which calls the monitor's operations (monitor.key runs there without the
+// core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and every call of the export "textgrid" (textgrid.h:
+// enter, tick and the drawing calls, one after the other). The poll and the textgrid's calls skip their pass while the other task has the engine, so the
+// menu never waits in them; the operations sleep until it is free. sync.enter / sync.leave guard only the flag; a base without the group (before 3.3)
+// has no critical section to offer, and the flag is then tested and set unguarded.
 static volatile bool s_engine;
+// The textgrid's enter found the engine taken: the session opens at the next tick or render that gets it. Read and written on the menu task only.
+static bool s_open_due;
 
 static bool engine_try(void)
 {
@@ -318,30 +321,12 @@ static int op_key(CoreCtx *, const OpArgs &a, OpOut &o)
 }
 static const ArgSpec key_arg[] = { ARG_INT("key", 0, 0x1FFF) };
 
-// The pump's look at the monitor while its screen is shown (stops, finished run-tos, the live log): `more` says the screen changed.
-static int op_tick(CoreCtx *, const OpArgs &, OpOut &o)
-{
-    o.msg[0] = 0;
-    engine_take();
-    o.more = mon_tick();
-    engine_give();
-    return OPE_OK;
-}
-
-static int op_open(CoreCtx *, const OpArgs &, OpOut &o)
-{
-    o.msg[0] = 0;
-    engine_take();
-    mon_open();                                     // the monitor tab is shown: its session starts (once, until mon_release())
-    engine_give();
-    return OPE_OK;
-}
-
 // The menu closed (any way): the base library's core hook menu_closed calls this, where MultiCore's run.cc called mon_release. It runs on the menu task
 // without the core lock while the poll (when_frozen) may be in a pass: it waits for the engine like the other operations.
 static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
+    s_open_due = false;                             // the screen is gone: an open still due is not wanted any more
     engine_take();
     mon_release();
     engine_give();
@@ -366,8 +351,6 @@ static const char *st_wants_stop(CoreCtx *) { return mon_wants_stop() ? "yes" : 
 static const LibOpDecl s_ops[] = {
     { "mon.run", line_arg, 1, op_run },
     { "monitor.key", key_arg, 1, op_key },
-    { "monitor.open", 0, 0, op_open },
-    { "monitor.tick", 0, 0, op_tick },
     { "monitor.serve", 0, 0, op_serve },
     { "monitor.release", 0, 0, op_release },
 };
@@ -376,19 +359,52 @@ static const LibStateDecl s_states[] = {
 };
 
 // ---- the export "textgrid" (major 1, textgrid.h): the F4 screen ----------------------------------------------------------------------------------------------
-// The base draws it on its UI task, the menu's: render builds the rows from the engine and the other calls read what it built (s_scr of monitor.cc, which
-// only render and monitor.tick write, both on that task). render must not block: while the poll has the engine it builds nothing, the rows and sig stay
-// those of the last build, and the next redraw tries again. The row attributes are trxmon's UA_* (ui.h), the same numbers as TG_*.
+// Every call runs on the base's menu task, one after the other: enter and tick drive the session, render builds the rows from the engine and the other calls
+// read what it built (s_scr of monitor.cc, which only render and tick write). None of them may block: while the poll has the engine, enter leaves the open
+// due (s_open_due), tick reports no change and render builds nothing (the rows and sig stay those of the last build); the next pass of the menu loop tries
+// again. The row attributes are trxmon's UA_* (ui.h), the same numbers as TG_*.
+static void open_due(void)
+{
+    if (s_open_due) {
+        s_open_due = false;
+        mon_open();
+    }
+}
+
+// The node was entered (what the operation monitor.open did): the session starts, once until mon_release().
+static void tg_enter(void)
+{
+    s_open_due = true;
+    if (engine_try()) {
+        open_due();
+        engine_give();
+    }
+}
+
+// A pass of the menu loop while the screen is shown (what the operation monitor.tick did): stops, finished run-tos, the live log. True: redraw.
+static bool tg_tick(void)
+{
+    if (!engine_try()) {
+        return false;
+    }
+    bool opened = s_open_due;
+    open_due();
+    bool d = mon_tick() || opened;
+    engine_give();
+    return d;
+}
+
 static void tg_render(void)
 {
     if (engine_try()) {
+        open_due();
         mon_render();
         engine_give();
     }
 }
 
 static const TextGrid s_grid = {
-    sizeof(TextGrid), tg_render, mon_cols, mon_rows, mon_line, mon_attr, mon_blank_rows, mon_cursor, mon_sig,
+    sizeof(TextGrid), tg_render, mon_cols, mon_rows, mon_line, mon_attr, mon_blank_rows, mon_cursor, mon_sig, tg_enter, tg_tick,
 };
 
 // lib.ld puts this section first, so the entry is at offset 0 of the image

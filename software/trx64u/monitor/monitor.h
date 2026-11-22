@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-// The monitor tab is shown: the session starts (once, until mon_release()).
+// The monitor's screen is entered (the textgrid's enter, lib_monitor.cc): the session starts (once, until mon_release()).
 void mon_open(void);
 // A key typed while the monitor has the focus (every key is the monitor's). True when the monitor took it.
 bool mon_key(int k);
@@ -22,7 +22,8 @@ bool mon_diag_requested(void);
 void mon_serve(void);
 // An RPC client sent a command: the engine is needed now (monsrv.cc calls this before rpc_request). False: the debug block is not there.
 bool mon_claim(void);
-// Called each pass of the menu loop (monitor.tick): the stops that came, the run-tos that finished, the live log. True when the screen changed.
+// Called each pass of the menu loop while the screen is shown (the textgrid's tick): the stops that came, the run-tos that finished, the live log. True
+// when the screen changed.
 bool mon_tick(void);
 // The menu closes (any way): the debugger's hold is given back, breakpoints and observers are disarmed, the next open starts a new session. The
 // operation monitor.release (lib_monitor.cc), which the base library's core hook menu_closed calls.
