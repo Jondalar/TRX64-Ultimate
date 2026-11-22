@@ -6,6 +6,7 @@
 #include "monitor.h"
 #include "monlib.h"
 #include "monsrv.h"
+#include "ring_steps.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -14,11 +15,14 @@ extern "C" {
 #include "trxmon/hw.h"
 #include "trxmon/mach.h"
 #include "trxmon/mon.h"
+#include "trxmon/ring.h"
 #include "trxmon/rpc.h"
 #include "trxmon/ui.h"
 }
 
 static_assert(sizeof(u2p_video_t) == 20, "u2p_video_t: the layout lib_monitor.cc hands over from svctab.h");
+static_assert(int(RING_JOB_FRAME) == int(RING_STEPS_FRAME) && int(RING_JOB_RING) == int(RING_STEPS_RING),
+              "trxmon's kinds of a dump in steps are the ring library's");
 
 // ---- trxmon's trx table ------------------------------------------------------------------------------------------------------------------------------------
 // What the firmware's app loader gave trxmon (app_api.h u2p_trx_api_t), made of the base's trx table (api->trx) and the ring library's table. detach,
@@ -27,9 +31,33 @@ static u2p_trx_api_t s_trx;
 
 static int trx_video(u2p_video_t *v) { return monlib_trx_video(v); }
 
+// The ring library's dumps in steps (ring_steps.h), right after its ring table at the offset that table's size states, handed to trxmon (ring.h): the
+// screen's file verbs then run from the poll (mon_serve), one step per pass under the core lock. n: the bytes of the export.
+static ring_steps_t s_steps;
+
+static void steps_table(const u2p_ring_api_t *r, uint32_t n)
+{
+    uint32_t at = r->size;
+    if ((at & 3) || n < at + sizeof(uint32_t)) {
+        return;
+    }
+    const RingSteps *x = (const RingSteps *)((const char *)r + at);
+    if (x->size < offsetof(RingSteps, drop) + sizeof(x->drop) || n - at < x->size) {
+        return;
+    }
+    s_steps.begin = x->begin;
+    s_steps.step = x->step;
+    s_steps.pct = x->pct;
+    s_steps.bytes = x->bytes;
+    s_steps.entries = x->entries;
+    s_steps.drop = x->drop;
+    ring_set_steps(&s_steps);
+}
+
 static void trx_table(void)
 {
     memset(&s_trx, 0, sizeof(s_trx));
+    ring_set_steps(0);
     s_trx.size = sizeof(s_trx);
     MonTrxBase b;
     if (!monlib_trx(&b)) {
@@ -50,6 +78,7 @@ static void trx_table(void)
         r->status(&st);
         if (st.present) {
             s_trx.ring = r;
+            steps_table(r, n);
         }
     }
 }
@@ -118,7 +147,11 @@ void mon_serve(void)
         g_try = plat_ms() | 1;
         monsrv_start();
     }
-    monsrv_poll();
+    // The screen's ring file job (ring.h) runs below, one step per pass. Between two of its steps the machine stays as it is: the RPC's requests wait in
+    // their socket while it is queued or running.
+    if (ring_job_state() != 1) {
+        monsrv_poll();
+    }
     if (g_open && g_ok) {
         rpc_poll();
         if (rpc_quit_requested()) {                 // /quit over the RPC: the holder goes, as the application's end took it
@@ -127,6 +160,7 @@ void mon_serve(void)
                 g_leave = true;
             }
         }
+        ring_job_poll();
     }
     if (g_open && !g_menu && !monsrv_has_client()) {
         session_end();
@@ -138,6 +172,7 @@ void mon_release(void)
     if (!g_open) {
         return;
     }
+    ring_job_drop();                            // the screen's ring file job goes with the screen (a dump's partial file is removed)
     g_menu = false;
     if (monsrv_has_client()) {                  // an RPC client still holds the session (breakpoints, observers)
         return;
@@ -145,7 +180,8 @@ void mon_release(void)
     session_end();
 }
 
-bool mon_wants_stop(void) { return g_open && g_ok && M.running; }
+// RUN/STOP pauses the running machine, and cancels the screen's ring file job while one is on (ui.c)
+bool mon_wants_stop(void) { return g_open && g_ok && (M.running || ring_job_state() != 0); }
 
 bool mon_key(int k)
 {
@@ -199,11 +235,11 @@ bool mon_tick(void)
     rpc_poll();
     bool d = ui_tick(&s_ui) != 0;
     uint32_t now = plat_ms();
-    if (now - g_last >= 250) {                  // the status rows follow the machine
+    if (now - g_last >= 250) {                  // the status rows follow the machine, the command row a ring file job's progress
         g_last = now;
+        uint32_t was = g_hash;                  // the screen as last built (mon_sig after the base's render, or this tick's)
         mon_render();
-        uint32_t h = mon_sig();
-        d |= h != g_hash;
+        d |= mon_sig() != was;
     }
     return d;
 }

@@ -254,7 +254,8 @@ const char *plat_firmware_version(void)
 // core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and every call of the export "textgrid" (textgrid.h:
 // enter, tick and the drawing calls, one after the other). The poll and the textgrid's calls skip their pass while the other task has the engine, so the
 // menu never waits in them; the operations sleep until it is free. sync.enter / sync.leave guard only the flag; a base without the group (before 3.3)
-// has no critical section to offer, and the flag is then tested and set unguarded.
+// has no critical section to offer, and the flag is then tested and set unguarded. The ring's file verbs typed on the screen (dump, ringdump, ringsave,
+// undump, ringload) do not run in monitor.key: it queues them and the poll runs them, a dump one step per pass (trxmon's ring.h, monitor.cc mon_serve).
 static volatile bool s_engine;
 // The textgrid's enter found the engine taken: the session opens at the next tick or render that gets it. Read and written on the menu task only.
 static bool s_open_due;
@@ -333,9 +334,9 @@ static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
     return OPE_OK;
 }
 
-// The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass).
-// It is declared when_frozen, so a base that honours the flag (3.3) runs it with the menu open too; the base of SDK 0.1.0 runs it only while the machine
-// is not frozen.
+// The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass),
+// and the steps of a ring file verb the screen queued. It is declared when_frozen, so a base that honours the flag (3.3) runs it with the menu open too;
+// the base of SDK 0.1.0 runs it only while the machine is not frozen, and a queued verb then waits until the menu closes, which drops it.
 static int op_serve(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;

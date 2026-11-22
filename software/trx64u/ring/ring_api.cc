@@ -1,11 +1,13 @@
 // The ring table the library exports (LibRecord::exports, lib_ring.cc): the firmware's u2p_ring_api_t (software/ultimate-app/software/app_loader/
-// app_api.h), filled as the firmware fills it (app_api_net.cc s_ring). The monitor and trex_crt get it with api->lib->find("ring", 1, &size); agreed
-// with MultiCore: the export "ring", major 1, the size first, appended to only.
+// app_api.h), filled as the firmware fills it (app_api_net.cc s_ring), and after it the dumps in steps (ring_steps.h). The monitor and trex_crt get it
+// with api->lib->find("ring", 1, &size); agreed with MultiCore: the export "ring", major 1, the size first, appended to only.
 // A file of its own: app_api.h and the SDK's svctab.h both define u2p_ring_status_t and the other record types, so the two never meet in one file.
 #include "app_api.h"
+#include "ring_steps.h"
 #include "trx_ring.h"
 #include "trx_c64re.h"
 #include "trx_trxring.h"
+#include <stddef.h>
 #include <string.h>
 
 static int api_ring_status(u2p_ring_status_t *st)
@@ -97,33 +99,56 @@ static const char *api_ring_save_native(const char *path, uint32_t *bytes)
     return err;
 }
 
+// The dumps in steps (ring_steps.h): trx_dump_* with the dump as an untyped pointer.
+static_assert(int(RING_STEPS_FRAME) == int(TRX_DUMP_FRAME) && int(RING_STEPS_RING) == int(TRX_DUMP_RING) &&
+                  int(RING_STEPS_MACHINE) == int(TRX_DUMP_MACHINE),
+              "RingSteps kinds");
+
+static void *steps_begin(int kind, const char *path, int arg, int stride, const char **err) { return trx_dump_begin(kind, path, arg, stride, err); }
+static int steps_step(void *d, const char **err) { return trx_dump_step((TrxDump *)d, err); }
+static int steps_pct(const void *d) { return trx_dump_pct((const TrxDump *)d); }
+static uint32_t steps_bytes(const void *d) { return trx_dump_bytes((const TrxDump *)d); }
+static int steps_entries(const void *d) { return trx_dump_entries((const TrxDump *)d); }
+static void steps_drop(void *d) { trx_dump_drop((TrxDump *)d); }
+
+// The export: the firmware's table, then the steps at the offset its `size` states (ring_steps.h).
+struct RingExport {
+    u2p_ring_api_t ring;
+    RingSteps steps;
+};
+static_assert(offsetof(RingExport, steps) == sizeof(u2p_ring_api_t), "the steps start where the ring table's size says it ends");
+
 // dump, save, load, load_entry and save_native as the firmware's table has them: each writes or reads the whole file in the one call (dump and save run
-// every step of the menu's stepped dump, trx_dump_*, in a loop) and returns NULL or what went wrong. They read and write registers, so the caller holds
-// the core lock: an operation or a poll of its library. Each builds the machine its file describes (System Mode, cartridge, drive A, their media) and a
-// load's hooks itself (ringmachine.cc), as the menu's operations do: the same file through either way in.
-static const u2p_ring_api_t s_ring = {
-    sizeof(u2p_ring_api_t),
-    api_ring_status,
-    api_ring_frame,
-    trx_ring_find,
-    api_ring_land,
-    trx_ring_commit,
-    trx_ring_error,
-    trx_c64re_dump,
-    trx_c64rering_dump,
-    trx_c64re_load,
-    trx_ring_trace_ctl,
-    api_trace_status,
-    api_trace_read,
-    api_trace_writes,
-    api_trace_whowrote,
-    api_log_read,
-    trx_c64re_load_entry,
-    api_ring_save_native,
+// every step of trx_dump_* in a loop) and returns NULL or what went wrong. They read and write registers, so the caller holds the core lock: an
+// operation or a poll of its library. Each builds the machine its file describes (System Mode, cartridge, drive A, their media) and a load's hooks
+// itself (ringmachine.cc), as the menu's operations do: the same file through either way in. The steps write the same bytes as dump and save, one
+// piece per call.
+static const RingExport s_export = {
+    {
+        sizeof(u2p_ring_api_t),
+        api_ring_status,
+        api_ring_frame,
+        trx_ring_find,
+        api_ring_land,
+        trx_ring_commit,
+        trx_ring_error,
+        trx_c64re_dump,
+        trx_c64rering_dump,
+        trx_c64re_load,
+        trx_ring_trace_ctl,
+        api_trace_status,
+        api_trace_read,
+        api_trace_writes,
+        api_trace_whowrote,
+        api_log_read,
+        trx_c64re_load_entry,
+        api_ring_save_native,
+    },
+    { sizeof(RingSteps), steps_begin, steps_step, steps_pct, steps_bytes, steps_entries, steps_drop },
 };
 
 const void *ring_exports(uint32_t *size)
 {
-    *size = sizeof(s_ring);
-    return &s_ring;
+    *size = sizeof(s_export);
+    return &s_export;
 }

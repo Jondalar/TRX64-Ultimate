@@ -11,14 +11,16 @@
 void mon_open(void);
 // A key typed while the monitor has the focus (every key is the monitor's). True when the monitor took it.
 bool mon_key(int k);
-// Does RUN/STOP belong to the monitor now? While the machine runs it pauses it (trxmon's ui.c); when it stands, RUN/STOP closes the menu.
+// Does RUN/STOP belong to the monitor now? While the machine runs it pauses it, while a ring file job of the screen is on it cancels that (trxmon's
+// ui.c); else RUN/STOP closes the menu.
 bool mon_wants_stop(void);
 // `x` ran (resume and leave): read once.
 bool mon_leave_requested(void);
 // The line `diag` was typed: the menu goes to Diagnostics (read once; the monitor session ends).
 bool mon_diag_requested(void);
-// The library's poll (monitor.serve): the RPC server on TCP 4312 (monsrv.h) and what its clients ask. The session is claimed only when a client sends a
-// command.
+// The library's poll (monitor.serve): the RPC server on TCP 4312 (monsrv.h) and what its clients ask, and one step of a ring file verb the screen queued
+// (dump, ringdump, ringsave, undump, ringload: trxmon's ring.h), which reaches the ring only here, under the core lock. The session is claimed only when a
+// client sends a command.
 void mon_serve(void);
 // An RPC client sent a command: the engine is needed now (monsrv.cc calls this before rpc_request). False: the debug block is not there.
 bool mon_claim(void);

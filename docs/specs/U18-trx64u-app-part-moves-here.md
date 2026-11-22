@@ -405,3 +405,18 @@ Nothing decided yet.
     TOML: the core's data, `[[window]]`) stay two files (D7); with 3.3 `cor_pack.py pack` takes `--desc` more than once
     and compiles both into record 6, refusing a table or key in both. The three u64 runs and `speaker_enable` are
     grantable (only u64cfg writes them); `speaker_enable` reads back as the board revision, and our code only writes it.
+  - **F4 ring commands in the poll (waits for Alex):** the terminal key only queues dump / snapshot / ringdump /
+    ringsave / undump / ringload / loadsnapshot; the poll `monitor.serve` runs the line under the lock, a dump one step
+    per pass (progress in the command row, RUN/STOP cancels and removes the partial file, closing the menu drops it),
+    loads and `ringsave` in one pass; RPC waits while a terminal job runs. The ring's export carries a second table,
+    `RingSteps` (`ring/ring_steps.h`: size, begin, step, pct, bytes, entries, drop), behind `u2p_ring_api_t` at the offset
+    of its `size`; the firmware layout and `app_api.h` are unchanged. trxmon registers the step table at run time
+    (`ring_set_steps`); the firmware registers none and keeps today's path. Fixed on the way: `mon_tick`'s 250 ms
+    redraw check compared after `mon_sig()` had overwritten the hash, so status rows never refreshed between keys. The
+    trxmon part is a firmware change: it stays uncommitted in the submodule, saved as
+    `software/trx64u/pending/trxmon-ring-steps.patch`, until Alex has read it. The firmware builds with it (about 3 KB
+    more, 177,720 B RAM above the image; `app_space.py` not run), trxmon's host tests pass (1131 / 74 / 29), a scratch
+    harness compares stepped against whole-call results (100 checks). Board test for Alex: in F4 `dump /usb0/t.c64re`
+    and `ringdump /usb0/t.c64rering 4 5`, watch the progress row, RUN/STOP mid-dump removes the file, the same frame
+    over RPC (`monitor/exec dump`) is byte-identical. Open: the info row (`trx_ring_status`, register reads) and
+    `rstep` / `frame` / `goto` / `mark` still reach the ring on the menu task.

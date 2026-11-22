@@ -21,6 +21,9 @@ trxmon/%.o: trxmon/%.c
 	$(CC_RV) $(TRXMON_CFLAGS) -MMD -MP -c $< -o $@
 
 # monitor.cc builds trxmon's trx table and reads the same ABI; it includes no header of the SDK (svctab.h defines u2p_video_t and the ring records again).
-MONITOR_CXXFLAGS = -I$(APPSDK) -I$(APPLOADER) $(LIB_CXXFLAGS)
+# It also reads the ring library's ring_steps.h (what that library exports after the ring table): build.sh builds each library in build/<name>/, two
+# levels below software/trx64u/, where the ring library's sources are.
+RING_SRC = $(abspath $(CURDIR)/../../ring)
+MONITOR_CXXFLAGS = -I$(APPSDK) -I$(APPLOADER) -I$(RING_SRC) $(LIB_CXXFLAGS)
 monitor.o: monitor.cc
 	$(CXX_RV) $(MONITOR_CXXFLAGS) -MMD -MP -c $< -o $@
