@@ -1,21 +1,33 @@
 // Timewarp as operations and state values (T104.2 UI, Alex 2026-10-28: everything declarative). The engine is ring.cc (TRX64-Ultimate's frame ring driver); this file is what
 // the menu says to it: start and stop, scrub a frame or a second, back to live, mark, resume here, write and load a .c64re. menu.toml F2 draws it (screens.cc layout
 // "timeline"), the keys of that layout call these operations (menuctl.cc).
+// U18 (the ring library on the SDK): the registrations are the static tables of ringops_record() (lib_ring.cc hands them out), settings are read
+// through api->ops->state("set.<Key>"), the dump's task is a job (api->job); ring.poll is the library's poll and ring.unfreeze the menu's rewind
+// at its close (both were calls of the core application's main loop). What base 3.1 does not have is pending_api.h.
 #include "ringops.h"
-#include "trx64u_ops.h"
 #include "trx_ring.h"
 #include "trx_c64re.h"
-#include "ops_glue.h"
-#include "c64_cart.h"
-#include "cbm1541.h"
-#include "d1541_drive.h"
-#include "filemanager.h"
-#include "regset.h"
-#include "settings.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include <stdio.h>
+#include "ringsys.h"
 #include <string.h>
+
+// A setting's value as the index of its label (api->ops->state("set.<Key>"): the label of the value, spaces in the key written as '_'); def when the core
+// has no such setting or the label is not one of these.
+static int cfg_index(const char *state, const char *const *labels, int n, int def)
+{
+    const char *v = g_api->ops ? g_api->ops->state(state, 0) : 0;
+    for (int i = 0; v && i < n; i++) {
+        if (!strcmp(v, labels[i])) {
+            return i;
+        }
+    }
+    return def;
+}
+// the label lists of base/menu.toml: sysmodes, geo, reusize, onoff
+static const char *const l_sysmodes[] = { "PAL", "NTSC", "PAL-60", "NTSC-50" };
+static const char *const l_geo[] = { "Disabled", "Enabled" };
+static const char *const l_reusize[] = { "128 KB", "256 KB", "512 KB", "1 MB", "2 MB", "4 MB", "8 MB", "16 MB" };
+static const char *const l_onoff[] = { "Off", "On" };
+#define NLAB(l) int(sizeof(l) / sizeof((l)[0]))
 
 static int g_glyph;                             // the bar's glyph after the last move: 0 pause, 1 back, 2 forward, 3 oldest, 4 newest
 static int g_sel = -1;                          // the timeline entry the paused machine shows; -1 the live end
@@ -32,7 +44,7 @@ static int go_to(int idx, char *msg, int msglen)
 {
     int n = trx_ring_count();
     if (n <= 0) {
-        snprintf(msg, msglen, "The ring holds no frame yet");
+        r_snprintf(msg, msglen, "The ring holds no frame yet");
         return OPE_FAILED;
     }
     idx = clampi(idx, 0, n - 1);
@@ -47,14 +59,14 @@ static int go_to(int idx, char *msg, int msglen)
             k -= dir;
         }
         if (k < 0 || k >= n) {
-            snprintf(msg, msglen, "No frame the ring can go back to");
+            r_snprintf(msg, msglen, "No frame the ring can go back to");
             return OPE_FAILED;
         }
     }
     TrxRestoreStats st;
     int err = trx_ring_scrub_show(k, &st);
     if (err) {
-        snprintf(msg, msglen, "%s", trx_ring_error(err));
+        r_snprintf(msg, msglen, "%s", trx_ring_error(err));
         return OPE_FAILED;
     }
     g_glyph = k == shown() ? g_glyph : (dir < 0 ? 1 : 2);
@@ -76,7 +88,7 @@ static int op_oldest(CoreCtx *, const OpArgs &, OpOut &o) { return go_to(0, o.ms
 static int op_live(CoreCtx *, const OpArgs &, OpOut &o)
 {
     if (trx_ring_count() <= 0) {
-        snprintf(o.msg, o.msglen, "The ring holds no frame yet");
+        r_snprintf(o.msg, o.msglen, "The ring holds no frame yet");
         return OPE_FAILED;
     }
     if (g_sel < 0) {
@@ -103,9 +115,9 @@ static int op_resume(CoreCtx *, const OpArgs &, OpOut &o)
 {
     if (g_sel >= 0) {
         trx_ring_set_pending(g_sel);
-        snprintf(o.msg, o.msglen, "Running on from %s", "the shown frame");
+        r_snprintf(o.msg, o.msglen, "Running on from %s", "the shown frame");
     } else {
-        snprintf(o.msg, o.msglen, "Live");
+        r_snprintf(o.msg, o.msglen, "Live");
     }
     return OPE_OK;
 }
@@ -115,16 +127,16 @@ static int op_resume(CoreCtx *, const OpArgs &, OpOut &o)
 static int op_monitor(CoreCtx *, const OpArgs &, OpOut &o)
 {
     if (trx_ring_count() <= 0) {
-        snprintf(o.msg, o.msglen, "The ring holds no frame yet");
+        r_snprintf(o.msg, o.msglen, "The ring holds no frame yet");
         return OPE_FAILED;
     }
     int err = trx_ring_land(shown(), NULL);
     if (err) {
-        snprintf(o.msg, o.msglen, "%s", trx_ring_error(err));
+        r_snprintf(o.msg, o.msglen, "%s", trx_ring_error(err));
         return OPE_FAILED;
     }
     g_sel = -1;
-    snprintf(o.msg, o.msglen, "goto F1/monitor");
+    r_snprintf(o.msg, o.msglen, "goto F1/monitor");
     return OPE_OK;
 }
 
@@ -132,19 +144,19 @@ static int op_start(CoreCtx *, const OpArgs &, OpOut &o)
 {
     if (!trx_ring_start()) {
         const char *why = trx_ring_reu_refusal();
-        snprintf(o.msg, o.msglen, "%s", why ? why : "This bitstream has no frame ring");
+        r_snprintf(o.msg, o.msglen, "%s", why ? why : "This bitstream has no frame ring");
         return OPE_FAILED;
     }
     g_sel = -1;
     g_nmark = 0;
-    snprintf(o.msg, o.msglen, "Timewarp is recording");
+    r_snprintf(o.msg, o.msglen, "Timewarp is recording");
     return OPE_OK;
 }
 
 static int op_stop(CoreCtx *, const OpArgs &, OpOut &o)
 {
     trx_ring_stop();
-    snprintf(o.msg, o.msglen, "Timewarp stopped: the frames stay until it starts again");
+    r_snprintf(o.msg, o.msglen, "Timewarp stopped: the frames stay until it starts again");
     return OPE_OK;
 }
 
@@ -152,7 +164,7 @@ static int op_mark(CoreCtx *, const OpArgs &, OpOut &o)
 {
     TrxFrame f;
     if (!trx_ring_frame(shown(), &f)) {
-        snprintf(o.msg, o.msglen, "No frame to mark");
+        r_snprintf(o.msg, o.msglen, "No frame to mark");
         return OPE_FAILED;
     }
     if (g_nmark >= MARKS) {
@@ -162,7 +174,7 @@ static int op_mark(CoreCtx *, const OpArgs &, OpOut &o)
         g_nmark = MARKS - 1;
     }
     g_mark[g_nmark++] = f.seq;
-    snprintf(o.msg, o.msglen, "Marker %d set at frame %u", g_nmark, (unsigned)f.marker);
+    r_snprintf(o.msg, o.msglen, "Marker %d set at frame %u", g_nmark, (unsigned)f.marker);
     return OPE_OK;
 }
 
@@ -182,7 +194,7 @@ static int op_next_mark(CoreCtx *, const OpArgs &a, OpOut &o)       // value +1:
         }
     }
     if (best < 0) {
-        snprintf(o.msg, o.msglen, "No marker that way");
+        r_snprintf(o.msg, o.msglen, "No marker that way");
         return OPE_FAILED;
     }
     return go_to(best, o.msg, o.msglen);
@@ -191,7 +203,7 @@ static int op_next_mark(CoreCtx *, const OpArgs &a, OpOut &o)       // value +1:
 static int op_clear_marks(CoreCtx *, const OpArgs &, OpOut &o)
 {
     g_nmark = 0;
-    snprintf(o.msg, o.msglen, "Markers cleared");
+    r_snprintf(o.msg, o.msglen, "Markers cleared");
     return OPE_OK;
 }
 
@@ -209,27 +221,20 @@ static int cart_for_state(void *ctx, const char *path)
     char m[96];
     int rc = c64_cart_for_state((CoreCtx *)ctx, path, m, sizeof(m));
     if (rc) {
-        printf("[C64RE] the state's cartridge: %s\n", m);
+        r_log("[C64RE] the state's cartridge: %s\n", m);
     }
     return rc;
 }
 // FW build_machine_mode: the file's System Mode for this run only (u64_set_system_mode over set_oneshot: nothing reaches the config); the setting's effect applies it
 static int machine_set(void *ctx, int machine)
 {
-    CoreCtx *c = (CoreCtx *)ctx;
-    int ix = c->settings ? c->settings->find("System Mode") : -1;
-    if (ix < 0) {
-        return 1;
-    }
-    if (c->settings->value(ix) == machine) {
+    if (cfg_index("set.System_Mode", l_sysmodes, NLAB(l_sysmodes), -1) == machine) {
         return 0;
     }
-    c->settings->override_value(ix, machine);
-    if (c->settings->value(ix) != machine) {
+    if (settings_override((CoreCtx *)ctx, "System Mode", machine)) {
         return 1;
     }
-    regset_apply_setting(c, ix);
-    printf("[C64RE] system mode -> %d\n", machine);
+    r_log("[C64RE] system mode -> %d\n", machine);
     return 0;
 }
 // FW build_drive: drive A's image goes in before the drive's own state (a mount resets the drive); spec is cbm1541's own, "ro <path>" / "unlinked <path>" / "<path>"
@@ -241,41 +246,29 @@ static int drive_mount(void *ctx, const char *spec)
 static void eeprom_put(void *ctx, const uint8_t *data)           // the GMod2's 93C86 array at +2048 and its valid flag at 0 (c64_cart.cc load_eeprom)
 {
     uint8_t one = 1;
-    CoreIo *io = ((CoreCtx *)ctx)->io;
-    io->eeprom_write(2048, data, 2048);
-    io->eeprom_write(0, &one, 1);
+    core_eeprom_write((CoreCtx *)ctx, 2048, data, 2048);
+    core_eeprom_write((CoreCtx *)ctx, 0, &one, 1);
 }
 
 // The part of the file's source that does not depend on a cartridge: the System Mode, drive A (type, power, unit, image) and the REU setting.
 static void src_fill(CoreCtx *c, TrxC64reSrc *src)
 {
-    src->machine = cfg_value(c, "System Mode", 0);
-    src->reu = cfg_value(c, "RAM Expansion Unit", 0);
-    src->reu_size = cfg_value(c, "REU Size", 0);
-    CbmDrive *d = (CbmDrive *)c->drive;
-    if (d && d->type() != DT_UNSET) {
-        src->drive_type = d->type() == DT_1581 ? "1581" : "1541";      // no 1571: the drive library refuses it (T103 Q3)
-        src->drive_power = d->powered();
-        src->drive_unit = d->bus_id();
-        src->disk_path = d->image_path();
-        src->disk_mode = d->mount_mode() == MM_UNLINKED ? 2 : d->mount_mode() == MM_RO ? 1 : 0;
+    src->machine = cfg_index("set.System_Mode", l_sysmodes, NLAB(l_sysmodes), 0);
+    src->reu = cfg_index("set.RAM_Expansion_Unit", l_geo, NLAB(l_geo), 0);
+    src->reu_size = cfg_index("set.REU_Size", l_reusize, NLAB(l_reusize), 0);
+    if (!cbm1541_drive_a(c, &src->drive_type, &src->drive_power, &src->drive_unit, &src->disk_path, &src->disk_mode)) {
+        src->drive_type = 0;
     }
 }
 
 // FW's progress feedback (trx_c64re_dump_ex): the share written goes into the job's percentage (CoreCtx::job_pct, which the menu's progress display reads)
 // and the console. The op is one call, so the screen shows it when the menu next draws.
-static void dump_progress(int done, int total, void *ctx)
-{
-    CoreCtx *c = (CoreCtx *)ctx;
-    c->job_pct = total ? done * 100 / total : 0;
-    if (total && (done == 0 || done == total || (done * 10 / total) != ((done - 1) * 10 / total))) {
-        printf("[C64RE] dump %d%s\n", c->job_pct, "%");
-    }
-}
+static void dump_progress(int done, int total, void *ctx);
 
 // FW shows the progress box while trx_c64re_dump_ex writes (trx_timewarp_ui.cc:361-376); the menu draws a progress only for an operation that answers `more` and is called
 // again (CoreCtx::job_step, newdisk.cc is the pattern), so with job_step the write runs on a task of its own and the operation answers `more` until it is done, the share
-// written going into CoreCtx::job_pct. Without job_step (REST, a hotkey) the write runs on the caller as before.
+// written going into CoreCtx::job_pct. Without job_step (REST, a hotkey) the write runs on the caller as before. The task is a job of the library
+// (api->job); without a job it writes on the caller.
 struct DumpJob {
     volatile int state;                         // 0 idle, 1 the task writes, 2 it is done (result in why / bytes / entries)
     CoreCtx *c;
@@ -288,8 +281,22 @@ struct DumpJob {
     const char *why;
     TrxC64reSrc src;
     uint8_t eeprom[2048];
+    SvcJobH *job;
 };
 static DumpJob g_dj;
+
+static void dump_progress(int done, int total, void *ctx)
+{
+    CoreCtx *c = (CoreCtx *)ctx;
+    int pct = total ? done * 100 / total : 0;
+    ops_job_progress(c, pct, g_dj.path);
+    if (total && (done == 0 || done == total || (done * 10 / total) != ((done - 1) * 10 / total))) {
+        r_log("[C64RE] dump %d%s\n", pct, "%");
+    }
+}
+
+// the firmware's task had 12 * configMINIMAL_STACK_SIZE words (1600 each)
+#define DUMP_STACK (12 * 1600 * 4)
 
 static void dump_run(DumpJob *j)
 {
@@ -302,13 +309,13 @@ static void dump_run(DumpJob *j)
     trx_c64re_set_source(NULL);
 }
 
-static void dump_task(void *arg)
+static int dump_task(SvcJobH *, void *arg)
 {
     DumpJob *j = (DumpJob *)arg;
     dump_run(j);
     __asm__ volatile ("fence" ::: "memory");
     j->state = 2;
-    vTaskDelete(NULL);
+    return 0;
 }
 
 // T228 R20/R21: what the file says of the machine, as FW's trx_c64re_dump has it: the System Mode, the cartridge image as it stands in DDR2 (streamed into the file), the
@@ -325,7 +332,7 @@ static void dump_prepare(CoreCtx *c, DumpJob *j)
         j->src.cart_src = c64_cart_path();
         j->src.cart_type = c64_cart_crt_type();
         if (j->src.cart_type == 60) {                   // GMod2: the saved game is in the 93C86, outside the ROM window (io.h: the array is at +2048)
-            c->io->eeprom_read(2048, j->eeprom, sizeof(j->eeprom));
+            core_eeprom_read(c, 2048, j->eeprom, sizeof(j->eeprom));
             j->src.eeprom = j->eeprom;
         }
     }
@@ -335,13 +342,13 @@ static int dump_op(CoreCtx *c, const OpArgs &a, OpOut &o, bool ring)
 {
     DumpJob *j = &g_dj;
     o.more = false;
-    if (j->state == 1 && !c->job_step) {
-        snprintf(o.msg, o.msglen, "A save is still being written");
+    if (j->state == 1 && !ops_job_step(c)) {
+        r_snprintf(o.msg, o.msglen, "A save is still being written");
         return OPE_FAILED;
     }
     if (j->state == 0) {
         if (!trx_target_path(c, a.s(0), ring ? ".c64rering" : ".c64re", j->path, sizeof(j->path))) {
-            snprintf(o.msg, o.msglen, "No medium to save to");
+            r_snprintf(o.msg, o.msglen, "No medium to save to");
             return OPE_FAILED;
         }
         j->c = c;
@@ -358,11 +365,11 @@ static int dump_op(CoreCtx *c, const OpArgs &a, OpOut &o, bool ring)
         } else {
             dump_prepare(c, j);
         }
-        if (c->job_step) {
-            c->job_pct = 0;
-            snprintf(c->job_path, sizeof(c->job_path), "%s", j->path);
+        if (ops_job_step(c) && g_api->job) {
+            ops_job_progress(c, 0, j->path);
             j->state = 1;
-            if (xTaskCreate(dump_task, "Ring dump", 12 * configMINIMAL_STACK_SIZE, j, tskIDLE_PRIORITY + 1, NULL) == pdPASS) {
+            j->job = g_api->job->start(dump_task, j, DUMP_STACK);
+            if (j->job) {
                 o.more = true;
                 return OPE_OK;
             }
@@ -376,24 +383,26 @@ static int dump_op(CoreCtx *c, const OpArgs &a, OpOut &o, bool ring)
         return OPE_OK;
     }
     j->state = 0;
-    c->job_pct = 0;
-    c->job_path[0] = 0;
-    if (c->job_cancel) {                                // FW's write cannot be stopped half way: it ran to its end, the file goes
-        c->job_cancel = false;
+    if (j->job) {
+        g_api->job->join(j->job);
+        j->job = 0;
+    }
+    ops_job_progress(c, 0, "");
+    if (ops_job_cancelled(c)) {                         // FW's write cannot be stopped half way: it ran to its end, the file goes
         if (!j->why) {
-            FileManager::getFileManager()->delete_file(j->path);
+            rf_remove(j->path);
         }
-        snprintf(o.msg, o.msglen, "Cancelled: nothing was written.");
+        r_snprintf(o.msg, o.msglen, "Cancelled: nothing was written.");
         return OPE_OK;
     }
     if (j->why) {
-        snprintf(o.msg, o.msglen, "%s", j->why);
+        r_snprintf(o.msg, o.msglen, "%s", j->why);
         return OPE_FAILED;
     }
     if (ring) {
-        snprintf(o.msg, o.msglen, "Saved %s: %d entries, %u KB", j->path, j->entries, (unsigned)((j->bytes + 1023) >> 10));
+        r_snprintf(o.msg, o.msglen, "Saved %s: %d entries, %u KB", j->path, j->entries, (unsigned)((j->bytes + 1023) >> 10));
     } else {
-        snprintf(o.msg, o.msglen, "Saved %s (%u KB)", j->path, (unsigned)((j->bytes + 1023) >> 10));
+        r_snprintf(o.msg, o.msglen, "Saved %s (%u KB)", j->path, (unsigned)((j->bytes + 1023) >> 10));
     }
     return OPE_OK;
 }
@@ -405,7 +414,7 @@ static int op_c64re_dump(CoreCtx *c, const OpArgs &a, OpOut &o)
 {
     char p[260];
     if (!trx_target_path(c, a.s(0), ".c64re", p, sizeof(p))) {
-        snprintf(o.msg, o.msglen, "No medium to save to");
+        r_snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
     TrxC64reSrc src;
@@ -419,10 +428,10 @@ static int op_c64re_dump(CoreCtx *c, const OpArgs &a, OpOut &o)
     const char *why = trx_c64re_dump_machine(p, &bytes);
     trx_c64re_set_source(NULL);
     if (why) {
-        snprintf(o.msg, o.msglen, "%s", why);
+        r_snprintf(o.msg, o.msglen, "%s", why);
         return OPE_FAILED;
     }
-    snprintf(o.msg, o.msglen, "Saved %s (%u KB)", p, (unsigned)((bytes + 1023) >> 10));
+    r_snprintf(o.msg, o.msglen, "Saved %s (%u KB)", p, (unsigned)((bytes + 1023) >> 10));
     return OPE_OK;
 }
 
@@ -445,32 +454,32 @@ static int op_load(CoreCtx *c, const OpArgs &a, OpOut &o)
     const char *why = trx_c64re_load(a.s(0));
     trx_c64re_set_source(NULL);
     if (why) {
-        snprintf(o.msg, o.msglen, "%s", why);
+        r_snprintf(o.msg, o.msglen, "%s", why);
         return OPE_FAILED;
     }
     g_sel = -1;
     g_nmark = 0;
     if (trx_c64re_missed()[0]) {
-        snprintf(o.msg, o.msglen, "State loaded from %s; not put back: %s", a.s(0), trx_c64re_missed());
+        r_snprintf(o.msg, o.msglen, "State loaded from %s; not put back: %s", a.s(0), trx_c64re_missed());
     } else {
-        snprintf(o.msg, o.msglen, "State loaded from %s", a.s(0));
+        r_snprintf(o.msg, o.msglen, "State loaded from %s", a.s(0));
     }
     return OPE_OK;
 }
 
 // the setting: Timewarp Ring Off / On, Instruction Trace Off / On
-static int fx_ring(CoreCtx *c, const OpArgs &, OpOut &)
+static int fx_ring(CoreCtx *, const OpArgs &, OpOut &)
 {
-    ring_autostart = cfg_value(c, "Timewarp Ring", 1) != 0;
+    ring_autostart = cfg_index("set.Timewarp_Ring", l_onoff, NLAB(l_onoff), 1) != 0;
     TrxRingStatus st;
     trx_ring_status(&st);
     if (st.present) {
-        if (ring_autostart && !st.on && c->started) {
+        if (ring_autostart && !st.on && trx_ring_engine_started()) {
             trx_ring_start();
         } else if (!ring_autostart && st.on) {
             trx_ring_stop();
         }
-        trx_ring_trace_ctl(cfg_value(c, "Instruction Trace", 0) ? 1 : 0);
+        trx_ring_trace_ctl(cfg_index("set.Instruction_Trace", l_onoff, NLAB(l_onoff), 0) ? 1 : 0);
     }
     return OPE_OK;
 }
@@ -498,7 +507,7 @@ static const char *st_ring(CoreCtx *)
         return "Off while the REU is enabled";
     }
     int fps = trx_ring_fps() ? trx_ring_fps() : 50;
-    snprintf(b1, sizeof(b1), "%s, %d.%d s", st.on ? "Recording" : "Stopped", st.frames / fps, (st.frames % fps) * 10 / fps);
+    r_snprintf(b1, sizeof(b1), "%s, %d.%d s", st.on ? "Recording" : "Stopped", st.frames / fps, (st.frames % fps) * 10 / fps);
     return b1;
 }
 static const char *st_label(CoreCtx *)
@@ -512,14 +521,14 @@ static const char *st_label(CoreCtx *)
     if (back <= 0 && g_sel < 0) {
         return "LIVE";
     }
-    snprintf(b2, sizeof(b2), "-%d.%d s", back / fps, (back % fps) * 10 / fps);
+    r_snprintf(b2, sizeof(b2), "-%d.%d s", back / fps, (back % fps) * 10 / fps);
     return b2;
 }
 static const char *st_left(CoreCtx *)
 {
     int n = trx_ring_count();
     int fps = trx_ring_fps() ? trx_ring_fps() : 50;
-    snprintf(b3, sizeof(b3), "-%d.%d s", n / fps, (n % fps) * 10 / fps);
+    r_snprintf(b3, sizeof(b3), "-%d.%d s", n / fps, (n % fps) * 10 / fps);
     return b3;
 }
 static const char *st_frame(CoreCtx *)
@@ -528,13 +537,13 @@ static const char *st_frame(CoreCtx *)
     if (!trx_ring_frame(shown(), &f)) {
         return "FRAME -";
     }
-    snprintf(b5, sizeof(b5), "FRAME %u", (unsigned)f.marker);
+    r_snprintf(b5, sizeof(b5), "FRAME %u", (unsigned)f.marker);
     return b5;
 }
 static const char *st_bar(CoreCtx *)
 {
     int n = trx_ring_count();
-    snprintf(b4, sizeof(b4), "%d", n > 1 ? shown() * 100 / (n - 1) : 100);
+    r_snprintf(b4, sizeof(b4), "%d", n > 1 ? shown() * 100 / (n - 1) : 100);
     return b4;
 }
 // the bar of the pixel layer (trx_timewarp_ui.cc draw_bar): the position large, the frame small, the span of the ring as a track
@@ -546,7 +555,7 @@ static const char *st_pos(CoreCtx *)
     }
     int fps = trx_ring_fps() ? trx_ring_fps() : 50;
     int f = n - 1 - g_sel;
-    snprintf(b4, sizeof(b4), "-%d.%d s", f / fps, (f % fps) * 10 / fps);
+    r_snprintf(b4, sizeof(b4), "-%d.%d s", f / fps, (f % fps) * 10 / fps);
     return b4;
 }
 static const char *st_info(CoreCtx *)
@@ -555,25 +564,25 @@ static const char *st_info(CoreCtx *)
     if (n < 2) {
         return "the ring holds no frame yet";
     }
-    snprintf(b1, sizeof(b1), "frame %d / %d", shown() + 1, n);
+    r_snprintf(b1, sizeof(b1), "frame %d / %d", shown() + 1, n);
     return b1;
 }
 static const char *st_glyph(CoreCtx *)
 {
     static char g[4];
-    snprintf(g, sizeof(g), "%d", g_glyph);
+    r_snprintf(g, sizeof(g), "%d", g_glyph);
     return g;
 }
 static const char *st_track(CoreCtx *)
 {
     int n = trx_ring_count();
-    snprintf(b5, sizeof(b5), "%d/%d", n > 0 ? shown() : 0, n);
+    r_snprintf(b5, sizeof(b5), "%d/%d", n > 0 ? shown() : 0, n);
     return b5;
 }
 static const char *st_marks(CoreCtx *)
 {
     static char m[32];
-    snprintf(m, sizeof(m), "%d marker%s", g_nmark, g_nmark == 1 ? "" : "s");
+    r_snprintf(m, sizeof(m), "%d marker%s", g_nmark, g_nmark == 1 ? "" : "s");
     return g_nmark ? m : "none";
 }
 static const char *st_present(CoreCtx *)
@@ -599,40 +608,71 @@ static const ArgSpec value_arg[] = { ARG_INT("value", -100000, 100000) };
 static const ArgSpec name_arg[] = { ARG_STRING("name", 55) };
 static const ArgSpec path_arg[] = { ARG_PATH("path") };
 
-void ringops_register(OpRegistry &r)
+// ---- the library's poll and the menu's close (U18: calls of the core application's main loop before) ------------------------------------------
+// ring.poll: LibRecord::poll (lib_ring.cc). The setting is read until the log's delayed start, which takes it (run.cc did it before the engine started).
+static int op_poll(CoreCtx *, const OpArgs &, OpOut &)
 {
-    r.contributor("timewarp");
-    r.add_op("tw.step", value_arg, 1, op_step);
-    r.add_op("tw.seconds", value_arg, 1, op_seconds);
-    r.add_op("tw.live", 0, 0, op_live);
-    r.add_op("tw.oldest", 0, 0, op_oldest);
-    r.add_op("tw.resume", 0, 0, op_resume);
-    r.add_op("tw.cancel", 0, 0, op_cancel);
-    r.add_op("tw.monitor", 0, 0, op_monitor);
-    r.add_op("tw.mark", 0, 0, op_mark);
-    r.add_op("tw.next_mark", value_arg, 1, op_next_mark);
-    r.add_op("tw.clear_marks", 0, 0, op_clear_marks);
-    r.add_op("tw.dump", name_arg, 1, op_dump);
-    r.add_op("tw.ringdump", name_arg, 1, op_ringdump);
-    r.add_op("machine.save_c64re", name_arg, 1, op_c64re_dump);
-    r.add_state("machine.suggest.c64re", st_suggest_c64re);
-    r.add_op("tw.load", path_arg, 1, op_load);
-    r.add_op("ring.start", 0, 0, op_start);
-    r.add_op("ring.stop", 0, 0, op_stop);
-    r.add_op("ring.fx", value_arg, 1, fx_ring);
-    r.add_state("ring.reu_off", st_reu_off);
-    r.add_state("tw.chip", st_chip);
-    r.add_state("tw.ring", st_ring);
-    r.add_state("tw.label", st_label);
-    r.add_state("tw.left", st_left);
-    r.add_state("tw.frame", st_frame);
-    r.add_state("tw.bar", st_bar);
-    r.add_state("tw.marks", st_marks);
-    r.add_state("tw.pos", st_pos);
-    r.add_state("tw.info", st_info);
-    r.add_state("tw.glyph", st_glyph);
-    r.add_state("tw.track", st_track);
-    r.add_state("tw.present", st_present);
-    r.add_state("tw.running", st_running);
-    r.add_state("tw.stopped", st_stopped);
+    if (!trx_ring_engine_started()) {
+        ring_autostart = cfg_index("set.Timewarp_Ring", l_onoff, NLAB(l_onoff), 1) != 0;
+    }
+    trx_ring_engine_poll();
+    return OPE_OK;
+}
+
+// ring.unfreeze: the menu closes (run.cc before freeze->leave): the frame chosen in the Timewarp bar is where the machine runs on.
+static int op_unfreeze(CoreCtx *, const OpArgs &, OpOut &)
+{
+    if (trx_ring_pending()) {
+        trx_ring_unfreeze();
+    }
+    return OPE_OK;
+}
+
+// The registrations, in the order ringops_register() made them (contributor "timewarp"), plus ring.poll and ring.unfreeze.
+static const LibOpDecl ops[] = {
+    { "tw.step", value_arg, 1, op_step },
+    { "tw.seconds", value_arg, 1, op_seconds },
+    { "tw.live", 0, 0, op_live },
+    { "tw.oldest", 0, 0, op_oldest },
+    { "tw.resume", 0, 0, op_resume },
+    { "tw.cancel", 0, 0, op_cancel },
+    { "tw.monitor", 0, 0, op_monitor },
+    { "tw.mark", 0, 0, op_mark },
+    { "tw.next_mark", value_arg, 1, op_next_mark },
+    { "tw.clear_marks", 0, 0, op_clear_marks },
+    { "tw.dump", name_arg, 1, op_dump },
+    { "tw.ringdump", name_arg, 1, op_ringdump },
+    { "machine.save_c64re", name_arg, 1, op_c64re_dump },
+    { "tw.load", path_arg, 1, op_load },
+    { "ring.start", 0, 0, op_start },
+    { "ring.stop", 0, 0, op_stop },
+    { "ring.fx", value_arg, 1, fx_ring },
+    { "ring.poll", 0, 0, op_poll },
+    { "ring.unfreeze", 0, 0, op_unfreeze },
+};
+static const LibStateDecl states[] = {
+    { "machine.suggest.c64re", st_suggest_c64re },
+    { "ring.reu_off", st_reu_off },
+    { "tw.chip", st_chip },
+    { "tw.ring", st_ring },
+    { "tw.label", st_label },
+    { "tw.left", st_left },
+    { "tw.frame", st_frame },
+    { "tw.bar", st_bar },
+    { "tw.marks", st_marks },
+    { "tw.pos", st_pos },
+    { "tw.info", st_info },
+    { "tw.glyph", st_glyph },
+    { "tw.track", st_track },
+    { "tw.present", st_present },
+    { "tw.running", st_running },
+    { "tw.stopped", st_stopped },
+};
+
+void ringops_record(LibRecord *out)
+{
+    out->ops = ops;
+    out->nops = int(sizeof(ops) / sizeof(ops[0]));
+    out->states = states;
+    out->nstates = int(sizeof(states) / sizeof(states[0]));
 }

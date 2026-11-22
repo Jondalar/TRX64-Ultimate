@@ -1,0 +1,373 @@
+// The ring library's helpers over the base (ringsys.h).
+#include "ringsys.h"
+
+void *r_calloc(uint32_t n, uint32_t size)
+{
+    if (size && n > 0xFFFFFFFFu / size) {
+        return 0;
+    }
+    void *p = r_malloc(n * size);
+    if (p) {
+        memset(p, 0, n * size);
+    }
+    return p;
+}
+
+// ---- text ------------------------------------------------------------------------------------------------------------------------------------------------
+struct Out {
+    char *dst;
+    int cap, n;
+};
+
+static void out_c(Out *o, char c)
+{
+    if (o->n < o->cap - 1) {
+        o->dst[o->n] = c;
+    }
+    o->n++;
+}
+
+static void out_pad(Out *o, char c, int k)
+{
+    while (k-- > 0) {
+        out_c(o, c);
+    }
+}
+
+int r_vsnprintf(char *dst, int cap, const char *fmt, va_list ap)
+{
+    Out o = { dst, cap, 0 };
+    for (const char *p = fmt; *p; p++) {
+        if (*p != '%') {
+            out_c(&o, *p);
+            continue;
+        }
+        p++;
+        bool left = false, zero = false;
+        for (;; p++) {
+            if (*p == '-') {
+                left = true;
+            } else if (*p == '0') {
+                zero = true;
+            } else {
+                break;
+            }
+        }
+        int width = 0, prec = -1;
+        while (*p >= '0' && *p <= '9') {
+            width = width * 10 + (*p++ - '0');
+        }
+        if (*p == '.') {
+            p++;
+            prec = 0;
+            if (*p == '*') {
+                prec = va_arg(ap, int);
+                p++;
+            }
+            while (*p >= '0' && *p <= '9') {
+                prec = prec * 10 + (*p++ - '0');
+            }
+        }
+        int lng = 0;
+        while (*p == 'l') {
+            lng++;
+            p++;
+        }
+        char tmp[24];
+        int tn = 0;
+        bool neg = false;
+        const char *s = tmp;
+        int sl = 0;
+        switch (*p) {
+        case 'd':
+        case 'i':
+        case 'u':
+        case 'x':
+        case 'X': {
+            uint64_t u;
+            if (*p == 'd' || *p == 'i') {
+                int64_t v = lng >= 2 ? va_arg(ap, long long) : lng ? va_arg(ap, long) : va_arg(ap, int);
+                neg = v < 0;
+                u = neg ? uint64_t(-v) : uint64_t(v);
+            } else {
+                u = lng >= 2 ? va_arg(ap, unsigned long long) : lng ? va_arg(ap, unsigned long) : va_arg(ap, unsigned);
+            }
+            const char *digits = *p == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+            unsigned base = (*p == 'x' || *p == 'X') ? 16 : 10;
+            do {
+                tmp[tn++] = digits[base == 16 ? unsigned(u & 15) : unsigned(u % 10)];
+                u = base == 16 ? u >> 4 : u / 10;
+            } while (u);
+            int len = tn + (neg ? 1 : 0);
+            if (!left && !zero) {
+                out_pad(&o, ' ', width - len);
+            }
+            if (neg) {
+                out_c(&o, '-');
+            }
+            if (!left && zero) {
+                out_pad(&o, '0', width - len);
+            }
+            while (tn) {
+                out_c(&o, tmp[--tn]);
+            }
+            if (left) {
+                out_pad(&o, ' ', width - len);
+            }
+            continue;
+        }
+        case 'c':
+            tmp[0] = char(va_arg(ap, int));
+            sl = 1;
+            break;
+        case 's':
+            s = va_arg(ap, const char *);
+            if (!s) {
+                s = "(null)";
+            }
+            while (s[sl] && (prec < 0 || sl < prec)) {
+                sl++;
+            }
+            break;
+        case '%':
+            tmp[0] = '%';
+            sl = 1;
+            break;
+        default:                                    // not one of ours: written as it stands
+            out_c(&o, '%');
+            if (!*p) {
+                p--;
+            } else {
+                out_c(&o, *p);
+            }
+            continue;
+        }
+        if (!left) {
+            out_pad(&o, ' ', width - sl);
+        }
+        for (int i = 0; i < sl; i++) {
+            out_c(&o, s[i]);
+        }
+        if (left) {
+            out_pad(&o, ' ', width - sl);
+        }
+    }
+    if (cap > 0) {
+        dst[o.n < cap ? o.n : cap - 1] = 0;
+    }
+    return o.n;
+}
+
+int r_snprintf(char *dst, int cap, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = r_vsnprintf(dst, cap, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+void r_log(const char *fmt, ...)
+{
+    char line[200];
+    va_list ap;
+    va_start(ap, fmt);
+    r_vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    size_t n = strlen(line);
+    if (n && line[n - 1] == '\n') {
+        line[n - 1] = 0;
+    }
+    g_api->log(line);
+}
+
+static int lower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
+
+int r_strcasecmp(const char *a, const char *b)
+{
+    while (*a && lower((unsigned char)*a) == lower((unsigned char)*b)) {
+        a++;
+        b++;
+    }
+    return lower((unsigned char)*a) - lower((unsigned char)*b);
+}
+
+const char *r_strstr(const char *hay, const char *needle)
+{
+    size_t n = strlen(needle);
+    for (; *hay; hay++) {
+        if (!strncmp(hay, needle, n)) {
+            return hay;
+        }
+    }
+    return n ? 0 : hay;
+}
+
+int64_t r_strtoll(const char *s)
+{
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+    bool neg = *s == '-';
+    if (*s == '-' || *s == '+') {
+        s++;
+    }
+    uint64_t v = 0;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + uint64_t(*s++ - '0');
+    }
+    return neg ? -int64_t(v) : int64_t(v);
+}
+
+int r_atoi(const char *s)
+{
+    return int(r_strtoll(s));
+}
+
+void r_copy(char *out, int outlen, const char *s, size_t n)
+{
+    if (outlen <= 0) {
+        return;
+    }
+    size_t l = 0;
+    while (l < n && s[l]) {
+        l++;
+    }
+    if (l > size_t(outlen) - 1) {
+        l = size_t(outlen) - 1;
+    }
+    memcpy(out, s, l);
+    out[l] = 0;
+}
+
+// ---- the TRX IO block ------------------------------------------------------------------------------------------------------------------------------------
+uint8_t trx_io_caps(void)
+{
+    return g_api->trx ? uint8_t(g_api->trx->caps) : 0;
+}
+
+uint8_t trx_rd8(uint32_t reg)
+{
+    return g_api->trx ? g_api->trx->regs[reg] : 0;
+}
+
+void trx_wr8(uint32_t reg, uint8_t v)
+{
+    if (g_api->trx) {
+        g_api->trx->regs[reg] = v;
+    }
+}
+
+uint32_t trx_io_read32(uint32_t reg)
+{
+    if (!g_api->trx) {
+        return 0;
+    }
+    volatile uint8_t *r = g_api->trx->regs + reg;
+    sync_enter();
+    uint32_t v = r[0];
+    v |= uint32_t(r[1]) << 8;
+    v |= uint32_t(r[2]) << 16;
+    v |= uint32_t(r[3]) << 24;
+    sync_leave();
+    return v;
+}
+
+void trx_io_write32(uint32_t reg, uint32_t v)
+{
+    if (!g_api->trx) {
+        return;
+    }
+    volatile uint8_t *r = g_api->trx->regs + reg;
+    sync_enter();
+    r[0] = uint8_t(v);
+    r[1] = uint8_t(v >> 8);
+    r[2] = uint8_t(v >> 16);
+    r[3] = uint8_t(v >> 24);
+    sync_leave();
+}
+
+bool trx_io_slim(void)
+{
+    static int slim = -1;                           // not looked yet
+    if (slim < 0) {
+        slim = (trx_io_caps() & TRX_CAPS_VIDEO) && (trx_io_read32(TRX_IO_BASE + 0x60C0) >> 24) >= 2;   // TX_CTRL: the text layer's version
+    }
+    return slim != 0;
+}
+
+// ---- files -----------------------------------------------------------------------------------------------------------------------------------------------
+bool rf_open(RFile *f, const char *path)
+{
+    f->pos = 0;
+    f->h = g_api->fs ? g_api->fs->open(path, false) : 0;
+    return f->h != 0;
+}
+
+// SvcFs::open does not make a file: save() makes it empty (or replaces it), then it is opened for writing.
+bool rf_create(RFile *f, const char *path)
+{
+    f->pos = 0;
+    f->h = 0;
+    if (!g_api->fs || !g_api->fs->save(path, "", 0)) {
+        return false;
+    }
+    f->h = g_api->fs->open(path, true);
+    if (f->h && !g_api->fs->writable(f->h)) {
+        g_api->fs->close(f->h);
+        f->h = 0;
+    }
+    return f->h != 0;
+}
+
+bool rf_read(RFile *f, void *buf, uint32_t len)
+{
+    if (!len) {
+        return true;
+    }
+    if (!g_api->fs->read(f->h, f->pos, buf, len)) {
+        return false;
+    }
+    f->pos += len;
+    return true;
+}
+
+bool rf_write(RFile *f, const void *buf, uint32_t len)
+{
+    if (!len) {
+        return true;
+    }
+    if (!g_api->fs->write(f->h, f->pos, buf, len)) {
+        return false;
+    }
+    f->pos += len;
+    return true;
+}
+
+uint64_t rf_size(RFile *f)
+{
+    return g_api->fs->fsize(f->h);
+}
+
+void rf_close(RFile *f)
+{
+    if (f->h) {
+        g_api->fs->close(f->h);
+        f->h = 0;
+    }
+}
+
+bool rf_remove(const char *path)
+{
+    return g_api->fs && g_api->fs->remove(path);
+}
+
+bool rf_exists(const char *path)
+{
+    uint64_t size;
+    bool dir;
+    return g_api->fs && g_api->fs->stat(path, &size, &dir) && !dir;
+}

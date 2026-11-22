@@ -1,10 +1,10 @@
-// Timewarp as operations and state values (ringops.cc). Host-owned.
-#ifndef COREAPP_RINGOPS_H
-#define COREAPP_RINGOPS_H
+// Timewarp as operations and state values (ringops.cc): the tables lib_register hands out.
+#ifndef RING_RINGOPS_H
+#define RING_RINGOPS_H
 
-#include "ctx.h"
-#include "ops.h"
+#include "libapi.h"
 
-void ringops_register(OpRegistry &r);
+// Fills the record's operations and state values.
+void ringops_record(LibRecord *out);
 
 #endif

@@ -13,11 +13,12 @@
 // entry's own snap position, and the CPU and CIA flip-flops loaded from the
 // block on that edge (the sequence tb_ring.cpp "restore" plays).
 //
-// Only the U64-II/C64U application builds this; on a bitstream without the
-// engine (CAPS b2) every call refuses and nothing touches the hardware.
+// The ring library (U18) builds this; on a bitstream without the engine
+// (CAPS b2) every call refuses and nothing touches the hardware.
 #ifndef TRX_RING_H
 #define TRX_RING_H
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring.h, plus trx_ring_engine_init() and ring_autostart (T104.2 UI).
+// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring.h, plus trx_ring_engine_init(), ring_autostart (T104.2 UI)
+// and trx_ring_engine_poll() (U18: the library's poll); the branch for products without the ring is gone.
 
 #include <stdint.h>
 
@@ -100,11 +101,15 @@ struct TrxRestoreStats {
     bool     vic_latches;    // the VIC's IRQ and collision latches at the load equal the block's
 };
 
-// The application starts the engine once (allocates its buffers, starts the poll task); the log itself starts 6 s later when ring_autostart is set.
+// lib_register starts the engine once (allocates its buffers); the library's poll (ring.poll, every TRX_RING_POLL_MS) calls trx_ring_engine_poll(), which
+// starts the log 6 s after the engine when ring_autostart is set and then reads the markers.
+#define TRX_RING_POLL_MS 100
 extern bool ring_autostart;
 void trx_ring_engine_init(void);
+void trx_ring_engine_poll(void);
+// The log's delayed start is past: a setting that turns the ring on starts it at once.
+bool trx_ring_engine_started(void);
 
-#if (U64 == 2) && !defined(RECOVERYAPP)
 
 // The machine's frame rate in the System Mode that runs now (T40: PAL and
 // NTSC-50 are 63 cycles x 312 lines, NTSC and PAL-60 65 x 263), read from
@@ -233,40 +238,5 @@ void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len);
 typedef int (*trx_area_fn)(void *ctx);
 int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_area_fn areas, void *ctx);
 
-#else
-
-// Other products: no frame ring (the REST verbs answer 503).
-static inline bool trx_ring_apply_hw(int) { return false; }
-static inline int  trx_ring_fps(void) { return 50; }
-static inline uint32_t trx_ring_fps_x100(void) { return 5012; }
-static inline uint32_t trx_ring_frame_cycles(void) { return 19656; }
-static inline bool trx_ring_start(void) { return false; }
-static inline bool trx_ring_trace_present(void) { return false; }
-static inline int  trx_ring_trace_ctl(int) { return -1; }
-static inline bool trx_ring_trace_status(TrxTraceStatus *st) { st->present = false; return false; }
-static inline int  trx_ring_trace_read(uint32_t, uint32_t, TrxTraceRec *) { return 0; }
-static inline int  trx_ring_log_read(uint64_t *, int, uint32_t *lost) { *lost = 0; return 0; }
-static inline int  trx_ring_trace_writes(uint32_t, uint32_t, TrxWriteRec *) { return 0; }
-static inline int  trx_ring_trace_whowrote(uint16_t, int, TrxTraceHit *, bool *e) { *e = true; return 0; }
-static inline void trx_ring_stop(void) { }
-static inline const char *trx_ring_reu_refusal(void) { return 0; }
-static inline void trx_ring_status(TrxRingStatus *st) { st->present = false; }
-static inline int  trx_ring_count(void) { return 0; }
-static inline bool trx_ring_frame(int, TrxFrame *) { return false; }
-static inline int  trx_ring_target(int) { return -1; }
-static inline int  trx_ring_find(uint32_t) { return -1; }
-static inline int  trx_ring_restore(int, TrxRestoreStats *) { return -1; }
-static inline int  trx_ring_scrub_show(int, TrxRestoreStats *) { return -1; }
-static inline void trx_ring_set_pending(int) { }
-static inline const char *trx_ring_error(int) { return "no frame ring in this bitstream"; }
-static inline bool trx_ring_pending(void) { return false; }
-static inline bool trx_ring_scrubbing(void) { return false; }
-static inline int  trx_ring_land(int, TrxRestoreStats *) { return -1; }
-static inline void trx_ring_commit(void) { }
-static inline uint32_t trx_ring_landed(void) { return 0; }
-static inline bool trx_ring_reachable(int) { return false; }
-static inline void trx_ring_unfreeze(void) { }
-
-#endif
 
 #endif

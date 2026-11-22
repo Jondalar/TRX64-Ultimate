@@ -1,4 +1,4 @@
-// PROVENANCE: copied unchanged from TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.h, T104.2 UI.
+// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.h, T104.2 UI; the branch for products without the ring is gone (U18).
 // .c64re and .c64rering files from the TRX64 Ultimate frame ring
 // (TRX64-Ultimate docs/specs/T20-delta-ring.md §9, §10; the container and node
 // shapes are TRX64's: crates/trx64-core/src/native_snapshot.rs,
@@ -10,7 +10,6 @@
 
 #include <stdint.h>
 
-#if (U64 == 2) && !defined(RECOVERYAPP)
 
 // What the single-frame .c64re (format 2, as TRX64-Ultimate's trx_c64re.cc writes it) says of the machine beyond the chip block (the caller knows it, this
 // file does not): which of the six System Modes runs (0 PAL, 1 NTSC, 2 PAL-60, 3 NTSC-50, 4 PAL-60/L, 5 NTSC-50/L), the cartridge as it stands now (its
@@ -75,20 +74,5 @@ bool trx_trxring_is_one(const char *path);
 const char *trx_trxring_check(const char *path);
 const char *trx_trxring_load(const char *path);
 
-#else
-
-struct TrxC64reSrc;
-typedef void (*trx_progress_fn)(int done, int total, void *ctx);
-static inline void trx_c64re_set_source(const TrxC64reSrc *) { }
-static inline const char *trx_c64re_dump(const char *, int, uint32_t *) { return "No frame ring"; }
-static inline const char *trx_c64rering_dump(const char *, int, int, uint32_t *, int *) { return "No frame ring"; }
-static inline const char *trx_c64re_load(const char *) { return "No frame ring"; }
-static inline const char *trx_c64re_missed(void) { return ""; }
-static inline const char *trx_c64re_dump_machine(const char *, uint32_t *) { return "No frame ring"; }
-static inline const char *trx_c64re_dump_ex(const char *, int, uint32_t *, trx_progress_fn, void *) { return "No frame ring"; }
-static inline const char *trx_c64rering_dump_ex(const char *, int, int, uint32_t *, int *, trx_progress_fn, void *)
-{ return "No frame ring"; }
-
-#endif
 
 #endif
