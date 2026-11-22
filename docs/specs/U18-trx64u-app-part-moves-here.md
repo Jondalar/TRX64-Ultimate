@@ -362,3 +362,12 @@ Nothing decided yet.
       core's address map; offsets stay in our constants header. No absolute addresses remain.
     - CoreHooks gets `base_setting_changed(key)` (after the base applies one of its own settings, and once after start;
       lock task): ours sets C64_PADDLE_SWAP from "Joystick Input" bit 0; the base sets the keyboard part.
+  - **Base round 3:** `menu.toml` has the key table (14 `[[key]]` rows: the monitor's `terminal` / `any`, 13 Timewarp
+    keys on `timeline`, taken from MultiCore's `menukeytab.cc`); the rows need four fields beyond the handover's list
+    (`value`, `status`, `status_ok`, `close`) and three key names ("pgup", "pgdn", "runstop"), and descrec does not
+    accept `[[key]]` yet (`unknown key 'key'`), so the menu cannot be packed until MultiCore's descrec takes it. The
+    library image carries no menu (`LIB_MENU` gone). No absolute address is left: our blocks are `io.window` names
+    (`speaker_enable`, `u64`, `audio_mixer`, `speaker_mixer`, `resampler`, `c64_palette`, `hdmi_palette`), the
+    resampler's 32-bit coefficients four bytes inside `sync.enter` / `leave`; the API TOML that declares them has no
+    format yet (T213.1). `base_setting_changed` sets the paddle swap from "Joystick Input". `u64cfg_palette` now
+    ignores a colour index of 16 or more (it overflowed `g_palette`). Image + bss 131,712 B.

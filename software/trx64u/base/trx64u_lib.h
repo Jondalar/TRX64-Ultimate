@@ -62,6 +62,77 @@ static inline void ddr_write(uint32_t off, const void *p, uint32_t n)
     }
 }
 
+// The C64U's register blocks through the io group, offsets in c64u_regs.h: the cartridge-port control block (cart_rd / cart_wr), the C64 I/O block
+// (bus_wr), the machine stop, the reset, the memory-only mode of the RAM window, the video format and the ROM aperture. Without the group a write does
+// nothing and a read gives 0.
+static inline uint8_t c64_cart_rd(uint32_t reg)
+{
+    const SvcIo *io = b33_io();
+    return io ? io->cart_rd(reg) : 0;
+}
+static inline void c64_cart_wr(uint32_t reg, uint8_t v)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->cart_wr(reg, v);
+    }
+}
+static inline void c64_bus_wr(uint32_t off, uint8_t v)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->bus_wr(off, v);
+    }
+}
+static inline void c64_stop(bool on)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->stop(on);
+    }
+}
+static inline void c64_mode_reset(bool on)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->mode_reset(on);
+    }
+}
+// on: every byte of the C64's memory window goes to the RAM's second port, $D000-$DFFF included
+static inline void c64_ram_memonly(bool on)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->ram_memonly(on);
+    }
+}
+static inline void c64_video_format(uint8_t v)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->video_format(v);
+    }
+}
+static inline void c64_rom_write(uint32_t off, const void *p, uint32_t n)
+{
+    const SvcIo *io = b33_io();
+    if (io) {
+        io->rom_write(off, p, n);
+    }
+}
+
+// A register window of the bitstream (io.window; the ids, names and needed sizes are C64U_WINDOWS of c64u_regs.h): its base, kept once found. Null when
+// the io group is missing, the API TOML does not declare the window, the address map does not grant it, or it is shorter than the offsets need; the
+// first null of each window is logged, and the caller then writes nothing. One byte per access.
+volatile uint8_t *c64u_win(int w);
+static inline void c64u_win_wr(int w, uint32_t off, uint8_t v)
+{
+    volatile uint8_t *p = c64u_win(w);
+    if (p) {
+        p[off] = v;
+    }
+}
+
 // An operation of the registry by name (api->ops->call), its message copied to msg. Returns its OpErr (OPE_NOT_FOUND: no library has it).
 int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
 
@@ -80,7 +151,7 @@ static inline void trx_wr(uint32_t reg, uint8_t v)
     }
 }
 
-// The C64's memory window (api->c64): the bus as the machine sees it, or the RAM's second port while C64_DMA_MEMONLY is on.
+// The C64's memory window (api->c64): the bus as the machine sees it, or the RAM's second port while c64_ram_memonly is on.
 static inline bool c64_window(void) { return g_api->c64 != 0; }
 static inline uint8_t c64_peek(uint32_t addr) { return g_api->c64 ? g_api->c64->peek((uint16_t)addr) : 0; }
 static inline void c64_poke(uint32_t addr, uint8_t v)

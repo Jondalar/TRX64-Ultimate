@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """setlists.h for setting.cc: every choice setting (core_setting) of menu.toml with its values, so that setting.cc knows which keys the menu has (and keeps
-their indexes in the base's settings), their number of values, a range's low end and base, and the labels. Written by the Makefile from the menu.toml the
-library carries as its record; never edited by hand.
+their indexes in the base's settings), their number of values, a range's low end and base, and the labels. Written by the Makefile from the core's menu.toml
+(the description MultiCore's pipeline packs into trx64u.cor); never edited by hand.
 
     python3 setlists.py <SDK tools dir> menu.toml setlists.h
 

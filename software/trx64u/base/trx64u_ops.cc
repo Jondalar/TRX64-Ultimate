@@ -3,8 +3,9 @@
 // ConfigureU64SystemBus and set_emulation_flags, GPL-3.0), the fast reset patch is his (c64.cc fastresetPatch).
 // U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read through the settings group
 // (setting.cc), the files through api->fs, the TRX block through api->trx, the C64's memory window through api->c64, the running core's state, the REU's
-// memory and the board through the 3.3 groups ctx, io and board (base33.h), the cartridge port, drive A, the command interface, the SID file and the temp
-// disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the operations and states of this file with their names and arguments.
+// memory, the C64U's register blocks (offsets in c64u_regs.h) and the board through the 3.3 groups ctx, io and board (base33.h), the cartridge port,
+// drive A, the command interface, the SID file and the temp disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the
+// operations and states of this file with their names and arguments.
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "trx64u_lib.h"
@@ -114,7 +115,7 @@ static void fast_reset(void)
 
 static int reu_load(const char *path, char *msg, int msglen, bool at_zero = true);
 static void mp3_forget(void);
-#define TRX_SLOT_CTRL 0x7000                                       // TRX_IO_BASE + 0x7000 = 0x101A7000
+#define TRX_SLOT_CTRL 0x7000                                       // the TRX block's slot control
 
 // TRX_SLOT_STATUS (TRX block +0x7004, 32 bit): b31 the slot block is in the bitstream, b16 the port is armed for a cartridge. b31 is the bitstream's and is
 // read once (the firmware's trx_slot_present keeps it the same way, software/ultimate-app/software/io/c64/trx_cart.cc); b16 is read each time, one byte.
@@ -143,7 +144,7 @@ int fx_io(CoreCtx *, const OpArgs &, OpOut &)
 {
     g_ext_cart_seen = g_api->c64 && (g_api->c64->cart_detect() & 3) != 3;         // U64_CART_DETECT: GAME and EXROM both high = nothing in the port
     trx_wr(TRX_SLOT_CTRL, 2);                                                        // T228 R20 29: CPU writes reach a real cartridge (TRX-Ultimate trx_cart.cc:364-406 keeps it at 2)
-    c64_bus_wr(C64_BUSREG_BRIDGE, bus_mode_values[setting_ix("Bus Operation Mode", 0)]);
+    c64_bus_wr(C64U_BUS_BRIDGE, bus_mode_values[setting_ix("Bus Operation Mode", 0)]);
     bool cart = cart_active();
     if (!cart) {
         uint8_t internal = 0, external = 0;
@@ -170,13 +171,13 @@ int fx_io(CoreCtx *, const OpArgs &, OpOut &)
             }
             }
         }
-        c64_bus_wr(C64_BUSREG_INTERNAL, internal);
-        c64_bus_wr(C64_BUSREG_EXTERNAL, external);
+        c64_bus_wr(C64U_BUS_INTERNAL, internal);
+        c64_bus_wr(C64U_BUS_EXTERNAL, external);
         // one module in the expansion port: the REU, the Ultimate Audio and the UCI are the machine's only while no cartridge runs
         bool taken = port_taken();                                                   // a cartridge in the port (seen or armed): off, whatever the settings say
-        c64_cart_wr(C64_CARTREG_REU, !taken && setting_ix("RAM Expansion Unit", 0) == 1 ? 1 : 0);
-        c64_cart_wr(C64_CARTREG_REU_SIZE, (uint8_t)setting_ix("REU Size", 4));
-        c64_cart_wr(C64_CARTREG_SAMPLER, taken ? 0 : (uint8_t)setting_ix("Map Ultimate Audio $DF20-DFFF", 0));
+        c64_cart_wr(C64U_CART_REU_ENABLE, !taken && setting_ix("RAM Expansion Unit", 0) == 1 ? 1 : 0);
+        c64_cart_wr(C64U_CART_REU_SIZE, (uint8_t)setting_ix("REU Size", 4));
+        c64_cart_wr(C64U_CART_SAMPLER, taken ? 0 : (uint8_t)setting_ix("Map Ultimate Audio $DF20-DFFF", 0));
         uci_slot(!taken && setting_ix("Command Interface (UCI)", 0), true);        // the server itself was started by the start hook (uci.start)
     } else {
         uci_slot(false, false);                                                     // c64.cc:426-445: a running cartridge has the port, the UCI is off (the saved value stays)

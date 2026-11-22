@@ -4,6 +4,7 @@
 #include "trx64u_lib.h"
 #include "libfmt.h"
 #include "core_hooks.h"
+#include "c64u_regs.h"
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include <string.h>
@@ -92,6 +93,50 @@ const void *x_table(int which, uint32_t off)
     return *(void *const *)(t + off) ? t : 0;
 }
 
+// ---- the register windows (c64u_regs.h C64U_WINDOWS, io.window) -----------------------------------------------------------------------------------
+// The API TOML is read once per start of the core, so a window found stays. One that is missing is looked for again at the next use (the io group may
+// come later than the first call) and logged once.
+static const struct {
+    const char *name;
+    uint32_t need;
+} g_win_def[C64U_W_N] = {
+#define X(id, name, need) { name, (uint32_t)(need) },
+    C64U_WINDOWS(X)
+#undef X
+};
+static volatile uint8_t *g_win[C64U_W_N];
+static bool g_win_said[C64U_W_N];
+
+volatile uint8_t *c64u_win(int w)
+{
+    if (w < 0 || w >= C64U_W_N) {
+        return 0;
+    }
+    if (g_win[w]) {
+        return g_win[w];
+    }
+    const SvcIo *io = b33_io();
+    uint32_t size = 0;
+    volatile uint8_t *p = 0;
+    if (io && io->size >= offsetof(SvcIo, window) + sizeof(io->window) && io->window) {
+        p = io->window(g_win_def[w].name, &size);
+    }
+    if (p && size >= g_win_def[w].need) {
+        g_win[w] = p;
+        return p;
+    }
+    if (!g_win_said[w]) {
+        g_win_said[w] = true;
+        if (p) {
+            lib_logf("[trx64u] register window \"%s\" is %u bytes, %u needed: its registers are not written", g_win_def[w].name, (unsigned)size,
+                     (unsigned)g_win_def[w].need);
+        } else {
+            lib_logf("[trx64u] no register window \"%s\" (io group, API TOML or address map): its registers are not written", g_win_def[w].name);
+        }
+    }
+    return 0;
+}
+
 // ---- the core hooks (core_hooks.h, the export "corehooks") ----------------------------------------------------------------------------------------
 // start: the command interface with this machine's side (uci.start, which does nothing when the bitstream lacks it) and the ring library's engine
 // ("ring.init", idempotent; no ring library: nothing; "ring.start" is the log's start, not this). A failure of the ring is the answer: the base logs
@@ -126,8 +171,20 @@ static void hook_menu_closed(void)
     }
 }
 
+// base_setting_changed: the base applied one of its own settings (core_hooks.h: after each change and once after the start hook; lock task). Of
+// those, this core's hardware follows "Joystick Input": its paddle swap (u64cfg.cc); the keyboard joystick is the base's. Keys compare without case,
+// as the base's settings do. The contract does not say which key the call after the start names, so the first call writes the swap whatever its key.
+static void hook_base_setting_changed(const char *key)
+{
+    static bool first = true;
+    if (first || (key && !strcasecmp(key, "Joystick Input"))) {
+        first = false;
+        u64cfg_paddle_swap();
+    }
+}
+
 // init, release, warm_reset, cold_start, media_flush, media_pending come with c64.cc (the C64 descriptor's hooks), which moves into this library later.
-static const CoreHooks core_hooks = { sizeof(CoreHooks), 0, 0, 0, 0, 0, 0, hook_start, hook_menu_closed };
+static const CoreHooks core_hooks = { sizeof(CoreHooks), 0, 0, 0, 0, 0, 0, hook_start, hook_menu_closed, hook_base_setting_changed };
 
 // ---- the record -----------------------------------------------------------------------------------------------------------------------------------
 static const ArgSpec value_arg[] = { ARG_INT("value", -2000, 2000) };
