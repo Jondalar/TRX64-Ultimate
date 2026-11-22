@@ -4,6 +4,6 @@ LIB_NAME = ring
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.1 trx64u>=1
 LIB_SRCS = lib_ring.cc ring.cc ringfile.cc trxring.cc trx_c64re_nodes.cc trx_sha256.c trx_inflate.c ringops.cc ring_api.cc ringsys.cc
-LIB_INC = -I$(APPLOADER)
+LIB_INC = -I$(APPLOADER) $(TRX_INC)
 LIB_LIBC = 1
 include $(SDK)/mk/lib.mk

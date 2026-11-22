@@ -40,6 +40,7 @@ for lib in $LIBS; do
     fi
     echo "== $lib"
     make -C "$B" SDK="$SDK" APPSDK="$APP/software/appsdk/include" APPLOADER="$APP/software/app_loader" \
+        TRX_INC="-I$HERE/include -I$HERE/contract" \
         RV_PREFIX=riscv32-unknown-elf- || rc=1
 done
 exit $rc

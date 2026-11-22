@@ -6,6 +6,7 @@ LIB_VERSION = 1
 LIB_NEEDS = base>=3.1 ring>=1
 LIB_SRCS = lib_monitor.cc monitor.cc monsrv.cc $(sort $(wildcard trxmon/*.c))
 LIB_LIBC = 1
+LIB_INC = $(TRX_INC)
 include $(SDK)/mk/lib.mk
 
 # lib.mk gives hidden.h (every declaration hidden) only to the C files. A C++ file that reads a variable of another file (g_api, trxmon's M) would then reach

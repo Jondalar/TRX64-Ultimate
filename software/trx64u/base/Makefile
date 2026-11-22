@@ -6,6 +6,7 @@ LIB_NEEDS = base>=3.1
 LIB_SRCS = lib_trx64u.cc trx64u_ops.cc u64cfg.cc setting.cc libc_extra.c
 LIB_MENU = menu.toml
 LIB_LIBC = 1
+LIB_INC = $(TRX_INC)
 include $(SDK)/mk/lib.mk
 
 # setting.cc's lists of the values of every choice setting, from the menu.toml the image carries (setlists.py)
