@@ -209,8 +209,11 @@ Nothing decided yet.
   MultiCore recorded them as T239.3 D19 and D20 (integration `5f49fe2f`). Proposed to MultiCore the same evening:
   - `trx` and `ring` are ours: exports "trx" and "ring", major 1, with the firmware's ABI header (`app_api.h`) as their
     one definition (`u2p_trx_api_t` with `detach`, `stop_requested`, `ui_request` and `ring` null in the library;
-    `u2p_ring_api_t` whole). The library's `LIB_VERSION` is the export's major; within a major, members are only
-    appended.
+    `u2p_ring_api_t` whole). Within a major, members are only appended (size first); reorder or remove is a new
+    major. MultiCore accepted all three and changed the mechanism: base 3.2 gets named exports (`LibRecord` lists
+    {name, major, table, size}; `find` and `LIB_NEEDS` match export names before library names), so one library
+    exports "trx" and "c64" and the major is the export's own. We build to `find("trx", 1)`, `find("ring", 1)`,
+    `find("c64", 1)`.
   - `c64` gets an SDK header (MultiCore's; other C64-family cores may provide it). Our base library provides it for
     trx64u. Today's `SvcC64` plus `dma_read_frozen`, `cart_preference` and `reset` (from `SvcTrx.reset_c64`).
   - MultiCore's cartridge module (`c64_cart.cc`, D12) drives our bitstream's cartridge engine through its register map,
