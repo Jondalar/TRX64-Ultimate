@@ -116,6 +116,7 @@ sub-apps load on demand), D2, D5.
   the library in the same change; new ring features go only into the library. Asked against "one source with the
   firmware, as trxmon (D4)": that refactors code with an end date (D2, U3) and needs a firmware build plus a board
   check of Timewarp.
+
 ### Under discussion: the trx64u tests leave MultiCore's pipeline (Alex, 2026-11-20)
 
 Alex (translated): "Lint, apptests and emu tests must then also run separately in the pipeline, *out* of MultiCore's big
