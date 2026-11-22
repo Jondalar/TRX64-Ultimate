@@ -401,3 +401,7 @@ Nothing decided yet.
     (`u64_userport` 0xA0000405, `u64_hdmi_connectors` 0xA0000408-09, `u64_pwm_duty` 0xA000040D), the case LED select
     goes through `board.case_led_select`, the paddle swap is written only on "Joystick Input". descrec 0.1.0 refuses both
     files until 3.3, as decided.
+  - **Windows confirmed (MultiCore, by Alex's delegation):** `menu.toml` (UI TOML: menu, keys) and `desc.toml` (API
+    TOML: the core's data, `[[window]]`) stay two files (D7); with 3.3 `cor_pack.py pack` takes `--desc` more than once
+    and compiles both into record 6, refusing a table or key in both. The three u64 runs and `speaker_enable` are
+    grantable (only u64cfg writes them); `speaker_enable` reads back as the board revision, and our code only writes it.
