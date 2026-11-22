@@ -1,7 +1,8 @@
 # U18 — trx64u's application part moves here: a library on MultiCore's app core
 
-**Status:** ACCEPTED (2026-11-20, D1-D5). Under discussion: the trx64u tests leave MultiCore's pipeline (§3). Nothing
-built; the requests to MultiCore in §3 are not sent.
+**Status:** IN PROGRESS (2026-11-22, Alex's go; branch `u18`). SDK 0.1.0 pinned, MultiCore's sources in
+`software/trx64u`, their boundary measured (`software/trx64u/BOUNDARY.md`) and given to MultiCore; nothing builds yet.
+Under discussion: the trx64u tests leave MultiCore's pipeline (§3).
 **Repo:** TRX64-Ultimate (the trx64u library, its menu, its tests, the `.cor`); TREX/TRX64U-MultiCore (app core, SDK).
 **Number:** U18 (registry: the TODO table in `TODO.md`).
 **Milestone:** MultiCore T239 step B (T239.3), after their steps A (GitHub home, T239.1) and D (platform checkpoint,
@@ -138,7 +139,7 @@ trx64u units and does not run them again. Open:
 4. ~~One trxmon source here?~~ Answered: D4.
 5. ~~One library or two?~~ Answered: D5 (three libraries and a sub-app).
 
-### Requests to MultiCore for T239.3 (not sent; with Alex's go)
+### Requests to MultiCore for T239.3 (read by MultiCore 2026-11-20; R1 in SDK 0.1.0, R2 in work, R3 and R4 wait for Alex)
 
 - **R1** The SDK release ships the app core image (`coreapp.bin`) with its version, so that a large core can be packed
   outside (§1 item 5).
@@ -172,3 +173,17 @@ Nothing decided yet.
   and R5 follow D3 and D5.
 - **2026-11-20: tests put under discussion** (Alex): lint, apptests and emu tests of trx64u leave MultiCore's pipeline
   and run here as stages of their own. What MultiCore runs today is listed in §3; S6 and R9 added.
+- **2026-11-22: started** (Alex, late: *"die MC session wird dir irgendwann das SDK rüber reichen ... Dann baust du um, hier
+  und lässt dir von der MC session helfen"*; then *"danach gib Gas. Vor allem der UI Performance muss richtig gut werden"*).
+  MultiCore handed over SDK 0.1.0 (from `t239.3-sdk` `3b8e2955`: public headers, `lib.mk`, packers, the app core image
+  of R1). Branch `u18`, `software/trx64u`:
+  - `sdk.pin` and `fetch_sdk.sh` (the SDK is not in git; the tarball is checked against its sha256); the SDK's example
+    builds in `u64-build-env` with `riscv32-unknown-elf-` (a Mac's `riscv64-elf-` has no newlib headers).
+  - `base/`, `ring/`, `monitor/`: MultiCore's files copied unchanged from `3b8e2955` (14,465 lines with `menu.toml`).
+  - `BOUNDARY.md`, from `tools/boundary.py`: MultiCore's core application built from `3b8e2955`, the moving objects'
+    symbols read with `nm`. trx64u 80 symbols from 28 providers, ring 90 from 20, monitor 48 from 8; the core
+    application calls back into the moving code from `appsvc`, `c64`, `run`, `screens`, `diag` and five more. The
+    preparation's "no constructors" holds for global objects; `ringfile` and `ringops` use `__cxa_atexit`
+    (`FileSystem_Root`, `mstring` with destructors).
+  - Menu speed (T239.3 D4): MultiCore builds a measurement in its menu simulator (`t239.3-speed`), flushed pixels per
+    key press, trx64u against the A1200; both sessions exchange its numbers before and after each change.
