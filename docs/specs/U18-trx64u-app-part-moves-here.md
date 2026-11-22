@@ -257,3 +257,13 @@ Nothing decided yet.
       trx are null there) but in the core's start hook or its first poll. The poll {"ring.poll", 100 ms} stays.
     - Memory: the S13 budget declares a permanent figure (the ring: about 1.42 MiB) and a peak (a `.c64rering` dump: up
       to about 4.2 MB more); trx64u's heap of 0x950000 holds it.
+  - **Monitor library ported** (`2a646fa3`): compiles; the link is open only on `sync_enter` / `sync_leave` /
+    `sys_yield`; with those stubbed it packs (image 203,404 B, image + bss 674,898 B, 64.4 % of 1 MiB).
+  - **The monitor's list (MultiCore, by Alex's delegation):** `lib.mk` will force-include `hidden.h` for C++ too (our
+    Makefile line stays until 3.3); the base honours a poll's `when_frozen` (3.3), so TCP 4312 answers with the menu open;
+    `KF_DIRECT` runs on the menu task without the core lock by design, our guard stays; the generic key table's
+    KS_MONITOR / KS_TIMELINE rows move into our UI TOML key table (D7); `mon_release` goes into the `menu_closed` hook;
+    the F4 screen becomes the monitor's export "textgrid" 1 (SDK header `textgrid.h`: render, cols, rows, line, attr,
+    blank_rows, cursor, sig), named by a menu node with layout "terminal"; `save(path, buf, 0)` creates an empty file;
+    `plat_firmware_version` / `plat_firmware_git` map to `sys.app_version` / `sys.app_git`; `net.gated` is "yes" while
+    the REST token gate is active, null otherwise; `sleep_ms(0)` sleeps one 5 ms tick, `sys.yield` is the yield.
