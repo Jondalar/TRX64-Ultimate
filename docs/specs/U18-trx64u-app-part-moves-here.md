@@ -304,3 +304,18 @@ Nothing decided yet.
     a pending ring frame and clears C64_STOP), so `op_load` stays immediate and the core hook `menu_closed` stays `void`.
     It replaces those first two steps: it runs on the menu task with the machine still stopped, without the core lock,
     and a `when_frozen` poll (monitor.serve) may run at the same time.
+  - **Menu speed (MultiCore T239.3 P7, `t239.3-speed`, menu simulator on the Mac; board milliseconds not measured):**
+    trx64u's menu was the slowest because every cursor key evaluated every `show_state` / hide of the whole tree (93-119
+    registry lookups per key, linear over about 190 states; our menu has 96 `show_state`), and a scroll step on the long
+    F5 list rebuilt the whole pane (355,656 px). Generic fixes: a cursor key asks the registry nothing (states are
+    evaluated at open, after an operation, on a tab switch that ran one, and every 2 s; a state changed outside the menu
+    shows up to 2 s late), lookups compare a hash first, rows change in place, the header's network addresses are read
+    once a second. Measured: cursor move 93 -> 2 state calls, 66 -> 29 us; long F5 run 15,152 -> 4,415 px per move,
+    109 -> 51 us; 5 cores x 4 key sequences, 5,490 pictures, 0 differ. Left, the same on every core: a tab switch
+    rebuilds the pane (about 400k px); the console line per key blocks about 10 ms at 115,200 baud. Ours: state
+    functions must stay cheap (the 2 s tick runs all of them); `state_mp3<N>` makes about 12 uncached DDR2 reads,
+    `state_reu_on` and `state_port_taken` read hardware.
+  - **Round 2 started** (`74a95323`): MultiCore's 3.3 contract (`t239.3-boundary` `d6afb393`: headers and a handover table
+    per library mapping all 106 pending calls) is copied to `software/trx64u/contract/`; `include/base33.h` gives one
+    accessor per new `LibApi` group, undefined until an SDK carries 3.3. The engine starts in an operation `ring.start`
+    called from our core hook `start`; `menu_closed` calls `monitor.release` and `ring.unfreeze`.
