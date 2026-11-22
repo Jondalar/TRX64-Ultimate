@@ -13,7 +13,8 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 
 ## State
 
-Not built yet. The sources of `base/`, `ring/` and `monitor/` are MultiCore's, copied unchanged from TRX64U-MultiCore
+The three libraries compile against base 3.1 (SDK 0.1.0); each link is open only on the calls in its `pending_api.h`
+(base 3.2 / 3.3 calls and MultiCore's shared libraries; ring 44, monitor 3, base 59). The sources of `base/`, `ring/` and `monitor/` are MultiCore's, copied unchanged from TRX64U-MultiCore
 commit `3b8e2955` (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from), `coreapp/src` and
 `coreapp/cores/trx64u/menu.toml`. They were written for MultiCore's app core and call its internals; the move onto the
 SDK's public API (`include/` of the package) is the open work, U18 §5. What they take from outside the SDK is measured in
@@ -23,7 +24,7 @@ SDK's public API (`include/` of the package) is the open work, U18 §5. What the
 
 `./build.sh [trx64u] [ring] [monitor]` builds the libraries in `build/<name>/` (copies of the sources; the monitor
 also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. Today every
-library stops at its first header from MultiCore's core application (`ctx.h`, `trx_io.h`).
+library compiles; its link stops on the calls in its `pending_api.h`.
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
 (`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which
