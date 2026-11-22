@@ -1,7 +1,7 @@
 # Base 3.3 contract (MultiCore)
 
 Copies of MultiCore's public headers for base 3.3 and the exports of their shared libraries, taken from TRX64U-MultiCore
-branch `t239.3-boundary`, commit `d6afb393` (`coreapp/src/`), unchanged. The pending calls of our three libraries map to
+branch `t239.3-boundary`, commit `020d9950` (`coreapp/src/`), unchanged. The pending calls of our three libraries map to
 them as `docs/dev/boundary-trx64u-handover.md` of that commit says.
 
 They stay here until an SDK release carries them (base 3.3); then this folder goes and the libraries build against the
