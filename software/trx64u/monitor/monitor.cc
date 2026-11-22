@@ -1,22 +1,16 @@
-// The monitor of F4: trxmon's engine in the application (monitor.h). PROVENANCE: the trx table (acquire, release, the ring and the video calls) is api_trx_* of
-// vendor/gideon/software/app_loader/app_api_net.cc (Gideon Zweijtzer's firmware with the TRX64 line's additions, GPL-3.0) with the frame ring being this application's
-// (ring.cc); the platform calls are what trxmon's main.c and the firmware's app API gave it, here over CoreFs and FreeRTOS; the session is ui_session() of trxmon's main.c
-// (ui_set_size, ui_set_keys, ui_open, ui_map_key, ui_key, ui_tick, ui_render) without the overlay; the RPC server is monsrv.cc.
+// The monitor of F4: trxmon's engine in the monitor library (monitor.h). PROVENANCE: monitor.cc of MultiCore's core application (TRX64U-MultiCore 3b8e2955,
+// coreapp/src); the session is ui_session() of trxmon's main.c (ui_set_size, ui_set_keys, ui_open, ui_map_key, ui_key, ui_tick, ui_render) without the
+// overlay; the RPC server is monsrv.cc, the platform calls are lib_monitor.cc.
+// This file reads the firmware's application ABI (u2p_app.h, app_api.h), as trxmon does, and no header of the SDK: svctab.h defines u2p_video_t and the ring
+// records again. The base's tables reach it through monlib.h.
 #include "monitor.h"
-#include "ops_glue.h"
-#include "fsif.h"
-#include "trx_ring.h"
+#include "monlib.h"
 #include "monsrv.h"
-#include "trx_io.h"
-#include "keyboard.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include <stdio.h>
+#include <stddef.h>
 #include <string.h>
-#include <stdlib.h>
-#include "u2p_app_api.h"
 
 extern "C" {
+#include "u2p_app.h"
 #include "trxmon/hw.h"
 #include "trxmon/mach.h"
 #include "trxmon/mon.h"
@@ -24,255 +18,40 @@ extern "C" {
 #include "trxmon/ui.h"
 }
 
-#define TRX_P0(off)  (TRX_IO_BASE + (off))
-#define TRX_P3(off)  (TRX_IO_BASE + 0x3000 + (off))
-#define TRX_CAPS_DBG 0x08                       // page 3: debug (trx_dbg.v, drv_dbg.v)
+static_assert(sizeof(u2p_video_t) == 20, "u2p_video_t: the layout lib_monitor.cc hands over from svctab.h");
 
-static CoreCtx *g_c;
+// ---- trxmon's trx table ------------------------------------------------------------------------------------------------------------------------------------
+// What the firmware's app loader gave trxmon (app_api.h u2p_trx_api_t), made of the base's trx table (api->trx) and the ring library's table. detach,
+// stop_requested and ui_request stay null: the library has no task of its own and no overlay, and their callers in trxmon's main.c are not built here.
+static u2p_trx_api_t s_trx;
 
-// ---- the trx table of the firmware's app API ---------------------------------------------------------------------------------------------------------------
-static bool s_owned;
+static int trx_video(u2p_video_t *v) { return monlib_trx_video(v); }
 
-static int api_trx_acquire(uint32_t)
+static void trx_table(void)
 {
-    trx_io_write32(TRX_P3(0x000), 0x01);        // PAUSE_CB: the machine is held first, then the app takes run control from C64_STOP
-    trx_io_write32(TRX_P0(0x118), 1);           // OWNER
-    s_owned = true;
-    return U2P_OK;
-}
-
-static void api_trx_release(void)
-{
-    if (!s_owned) {
-        return;
+    memset(&s_trx, 0, sizeof(s_trx));
+    s_trx.size = sizeof(s_trx);
+    MonTrxBase b;
+    if (!monlib_trx(&b)) {
+        return;                                 // regs stay null: hw_init() refuses
     }
-    trx_io_write32(TRX_P3(0x048), 0);           // DBG_CTRL: exec bitmap off
-    trx_io_write32(TRX_P3(0x080), 0);           // watch unit 0 off
-    trx_io_write32(TRX_P3(0x0A0), 0);           // watch unit 1 off
-    trx_io_write32(TRX_P3(0x0C0), 0);           // drive comparator off
-    trx_io_write32(TRX_P0(0x134), 0);           // CYC_CMP disarmed
-    trx_io_write32(TRX_P0(0x118), 0);           // OWNER: C64_STOP rules the gate again
-    trx_io_write32(TRX_P3(0x000), 0x03);        // RUN: drop the debugger's hold and the stop record
-    s_owned = false;
-}
-
-static void api_trx_announce(uint16_t) { }
-
-static int api_ring_status(u2p_ring_status_t *st)
-{
-    TrxRingStatus rs;
-    trx_ring_status(&rs);
-    memset(st, 0, sizeof(*st));
-    st->present = rs.present;
-    st->on = rs.on;
-    st->reu_off = 0;
-    st->frames = rs.frames;
-    st->targets = rs.targets;
-    st->head_seq = rs.head_seq;
-    st->oldest_seq = rs.oldest_seq;
-    st->landed_seq = trx_ring_landed();
-    st->landed = st->landed_seq != 0;
-    return rs.present ? U2P_OK : U2P_ERR_UNSUPPORTED;
-}
-
-static int api_ring_frame(int index, u2p_ring_frame_t *f)
-{
-    static TrxFrame tf;                         // 260 bytes: off the stack
-    if (!trx_ring_frame(index, &tf)) {
-        return U2P_ERR_NOT_FOUND;
-    }
-    memset(f, 0, sizeof(*f));
-    f->seq = tf.seq;
-    f->c24 = tf.c24;
-    f->cycles = tf.cycles;
-    f->line = tf.line;
-    f->x = tf.x;
-    f->flags = tf.flags;
-    f->target = trx_ring_reachable(index);
-    return U2P_OK;
-}
-
-static int api_ring_land(int index) { return trx_ring_land(index, NULL); }
-
-static_assert(sizeof(u2p_trace_rec_t) == sizeof(TrxTraceRec), "trace record layout");
-static_assert(sizeof(u2p_trace_hit_t) == sizeof(TrxTraceHit), "hit layout");
-
-static int api_trace_status(u2p_trace_status_t *st)
-{
-    TrxTraceStatus ts;
-    bool ok = trx_ring_trace_status(&ts);
-    memset(st, 0, sizeof(*st));
-    st->present = ts.present;
-    st->on = ts.on;
-    st->gap = ts.gap;
-    st->records = ts.records;
-    st->capacity = ts.capacity;
-    st->lost = ts.lost;
-    st->oldest_cycle = ts.oldest_cycle;
-    st->newest_cycle = ts.newest_cycle;
-    return ok ? U2P_OK : U2P_ERR_UNSUPPORTED;
-}
-
-static int api_trace_read(uint32_t first, uint32_t n, u2p_trace_rec_t *out) { return trx_ring_trace_read(first, n, (TrxTraceRec *)out); }
-
-static int api_trace_whowrote(uint16_t addr, int limit, u2p_trace_hit_t *hits, int *exhausted)
-{
-    bool ex = true;
-    int n = trx_ring_trace_whowrote(addr, limit, (TrxTraceHit *)hits, &ex);
-    *exhausted = ex ? 1 : 0;                    // this application's ring has no unresolved-store count
-    return n;
-}
-
-static int api_log_read(uint64_t *out, int max, uint32_t *lost) { return trx_ring_log_read(out, max, lost); }
-
-static int api_video(u2p_video_t *v)
-{
-    memset(v, 0, sizeof(*v));
-    v->frame_cycles = trx_ring_frame_cycles();
-    v->fps_x100 = trx_ring_fps_x100();
-    v->hz60 = trx_ring_fps() == 60;
-    v->lines = v->hz60 ? 263 : 312;
-    v->cycles_per_line = v->hz60 ? 65 : 63;
-    v->cpu_hz = v->hz60 ? 1022727 : 985248;
-    return U2P_OK;
-}
-
-static u2p_ring_api_t s_ring = {
-    sizeof(u2p_ring_api_t), api_ring_status, api_ring_frame, trx_ring_find, api_ring_land, trx_ring_commit, trx_ring_error, { 0, 0, 0 },
-    trx_ring_trace_ctl, api_trace_status, api_trace_read, 0, api_trace_whowrote, api_log_read,
-};
-
-static int api_stop_requested(void) { return 0; }
-
-static u2p_trx_api_t s_trx = {
-    sizeof(u2p_trx_api_t), (volatile uint8_t *)TRX_IO_BASE, 0, api_trx_acquire, api_trx_release, api_trx_announce, NULL, NULL, api_video, api_stop_requested, NULL,
-};
-
-// ---- what trxmon's main.c gave the engine (mach.h, rpc.h) ------------------------------------------------------------------------------------------------------
-extern "C" {
-uint32_t plat_ms(void) { return (uint32_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
-void plat_yield(void) { taskYIELD(); }
-void plat_sleep(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms < PLAT_SLEEP_MIN_MS ? PLAT_SLEEP_MIN_MS : ms)); }
-
-// A file is held whole: a read loads it, a write is collected and saved when it is closed (CoreFs saves whole files; a medium it refuses to write says so at the close).
-struct PlatFile {
-    char path[200];
-    bool write;
-    uint8_t *buf;
-    uint32_t len, pos, cap;
-};
-
-void *plat_fopen(const char *path, const char *mode)
-{
-    if (!g_c || !g_c->fs) {
-        return 0;
-    }
-    PlatFile *f = (PlatFile *)calloc(1, sizeof(PlatFile));
-    if (!f) {
-        return 0;
-    }
-    snprintf(f->path, sizeof(f->path), "%s", path);
-    f->write = mode[0] == 'w';
-    if (!f->write) {
-        uint64_t sz = 0;
-        bool dir = false;
-        if (!g_c->fs->stat(path, &sz, &dir) || dir || sz > 65536 + 2) {
-            free(f);
-            return 0;
+    s_trx.regs = b.regs;
+    s_trx.caps = b.caps;
+    s_trx.acquire = b.acquire;
+    s_trx.release = b.release;
+    s_trx.announce = b.announce;
+    s_trx.video = trx_video;
+    // The ring as trxmon's hw_trx.c reads it: null without the engine. The table must reach `load`: hw_trx.c calls status ... load without asking for them.
+    uint32_t n = 0;
+    const u2p_ring_api_t *r = (const u2p_ring_api_t *)monlib_ring(&n);
+    if (r && n >= offsetof(u2p_ring_api_t, load) + sizeof(r->load) && U2P_HAS(r, load) && r->status) {
+        u2p_ring_status_t st;
+        memset(&st, 0, sizeof(st));
+        r->status(&st);
+        if (st.present) {
+            s_trx.ring = r;
         }
-        f->buf = (uint8_t *)malloc(sz ? (size_t)sz : 1);
-        int n = f->buf ? g_c->fs->load(path, f->buf, (uint32_t)sz) : -1;
-        if (n < 0) {
-            free(f->buf);
-            free(f);
-            return 0;
-        }
-        f->len = (uint32_t)n;
     }
-    return f;
-}
-
-int plat_fread(void *buf, int n, void *fp)
-{
-    PlatFile *f = (PlatFile *)fp;
-    int r = (int)(f->len - f->pos) < n ? (int)(f->len - f->pos) : n;
-    memcpy(buf, f->buf + f->pos, r);
-    f->pos += r;
-    return r;
-}
-
-int plat_fwrite(const void *buf, int n, void *fp)
-{
-    PlatFile *f = (PlatFile *)fp;
-    if (f->len + n > f->cap) {
-        uint32_t cap = f->cap ? f->cap * 2 : 4096;
-        while (cap < f->len + n) {
-            cap *= 2;
-        }
-        uint8_t *b = (uint8_t *)realloc(f->buf, cap);
-        if (!b) {
-            return -1;
-        }
-        f->buf = b;
-        f->cap = cap;
-    }
-    memcpy(f->buf + f->len, buf, n);
-    f->len += n;
-    return n;
-}
-
-void plat_fclose(void *fp)
-{
-    PlatFile *f = (PlatFile *)fp;
-    if (f->write && g_c && g_c->fs && !g_c->fs->save(f->path, f->buf, f->len)) {
-        printf("[monitor] %s: not written\n", f->path);
-    }
-    free(f->buf);
-    free(f);
-}
-
-int plat_mkdir(const char *path) { return g_c && g_c->fs && g_c->fs->mkdir(path) ? 0 : -1; }
-
-int plat_exists(const char *dir, const char *name)
-{
-    char p[FS_PATH_MAX];
-    uint64_t sz;
-    bool d;
-    snprintf(p, sizeof(p), "%s/%s", dir, name);
-    return g_c && g_c->fs && g_c->fs->stat(p, &sz, &d) ? 1 : 0;
-}
-
-int plat_dir(const char *path, plat_dir_cb cb, void *ctx)
-{
-    static FsEntryShort e[64];                         // the monitor prints the names: 55 characters of a FAT long name are enough there
-    if (!g_c || !g_c->fs) {
-        return -1;
-    }
-    int n = g_c->fs->list_short(path, e, 64);
-    for (int i = 0; i < n; i++) {
-        cb(ctx, e[i].name, (uint32_t)e[i].size, e[i].dir ? 1 : 0);
-    }
-    return n < 0 ? -1 : 0;
-}
-
-int plat_rmdir(const char *path) { return g_c && g_c->fs && g_c->fs->remove(path) ? 0 : -1; }
-
-// The firmware's configuration items the verbs read: here the settings of this core (the display text of the row).
-int plat_config(const char *, const char *item, char *buf, int len)
-{
-    char key[96];
-    snprintf(key, sizeof(key), "set.%s", item);
-    const char *v = g_c ? ops_state(g_c, key) : 0;
-    if (!v) {
-        return -1;
-    }
-    snprintf(buf, len, "%s", v);
-    return (int)strlen(buf);
-}
-
-int plat_media(int, char *, int) { return 0; }
-const char *plat_firmware_git(void) { return ""; }
-const char *plat_firmware_version(void) { return ""; }
 }
 
 // ---- the session ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -283,20 +62,16 @@ static bool g_ok;                               // the debug block is there
 static bool g_leave, g_diag;
 static bool g_menu;                             // the menu's monitor tab uses the session (an RPC client may use it too: monsrv_has_client())
 static uint32_t g_hash, g_last;
+static uint32_t g_try;                          // the last time mon_serve() tried to listen
 
-static void session_open(CoreCtx *c)
+static void session_open(void)
 {
-    g_c = c;
     if (g_open) {
         return;
     }
     g_open = true;
-    uint8_t caps = trx_io_caps();
-    s_trx.caps = caps;
-    TrxRingStatus rs;
-    trx_ring_status(&rs);
-    s_trx.ring = rs.present ? &s_ring : NULL;
-    g_ok = (caps & TRX_CAPS_DBG) && hw_init(&s_trx);
+    trx_table();
+    g_ok = hw_init(&s_trx);                     // 0 without regs or without the debug page (CAPS b3)
     ui_init(&s_ui);
     ui_set_size(&s_ui, UI_WIDE_COLS, UI_WIDE_ROWS);
     int fkey[9] = { 0, KEY_PAGEUP, 0, KEY_HELP, 0, KEY_TASKS, 0, KEY_PAGEDOWN, 0 };       // the Ultimate interface: F1 F3 F5 F7 (ui_set_keys names them in the hint row)
@@ -317,37 +92,30 @@ static void session_open(CoreCtx *c)
     }
 }
 
-void mon_open(CoreCtx *c)
+void mon_open(void)
 {
     g_menu = true;
-    session_open(c);
+    session_open();
 }
 
-// An RPC client sent a command: the engine is needed now (monsrv.cc calls this before rpc_request). False: the debug block is not there.
-extern "C" int mon_claim(void)
+bool mon_claim(void)
 {
-    if (!g_open && g_c) {
-        session_open(g_c);
-    }
-    return g_open && g_ok;
+    session_open();
+    return g_ok;
 }
 
 static void session_end(void)
 {
-    if (g_ok) {
-        api_trx_release();
+    if (g_ok && s_trx.release) {
+        s_trx.release();                        // the base's release does nothing when the debug block was not acquired
     }
     g_open = false;
 }
 
-// Called every pass of the main loop, menu open or not (trxmon.u2a ran on a task of its own; the RPC answers whatever the menu does): listens on TCP 4312,
-// answers what came, and ends the session again when neither the menu's tab nor a client uses it.
-void mon_serve(CoreCtx *c)
+void mon_serve(void)
 {
-    g_c = c;
-    static uint32_t t_try;
-    if (!monsrv_listening() && (!t_try || plat_ms() - t_try >= 5000)) {
-        t_try = plat_ms() | 1;
+    if (!monsrv_listening() && (!g_try || plat_ms() - g_try >= 5000)) {
+        g_try = plat_ms() | 1;
         monsrv_start();
     }
     monsrv_poll();
@@ -379,11 +147,11 @@ void mon_release(void)
 
 bool mon_wants_stop(void) { return g_open && g_ok && M.running; }
 
-bool mon_key(CoreCtx *c, int k)
+bool mon_key(int k)
 {
     g_menu = true;
-    session_open(c);
-    switch (k) {                                // the keyboards deliver F1 F3 F5 F7 as function keys; trxmon names them PAGEUP HELP TASKS PAGEDOWN, the monitor has those names here
+    session_open();
+    switch (k) {                                // the keyboards deliver F1 F3 F5 F7 as function keys; trxmon names them PAGEUP HELP TASKS PAGEDOWN
     case KEY_F1: k = KEY_PAGEUP; break;
     case KEY_F3: k = KEY_HELP; break;
     case KEY_F5: k = KEY_TASKS; break;
@@ -423,12 +191,11 @@ bool mon_diag_requested(void)
     return r;
 }
 
-bool mon_tick(CoreCtx *c)
+bool mon_tick(void)
 {
     if (!g_open || !g_ok) {
         return false;
     }
-    g_c = c;
     rpc_poll();
     bool d = ui_tick(&s_ui) != 0;
     uint32_t now = plat_ms();
@@ -441,10 +208,10 @@ bool mon_tick(CoreCtx *c)
     return d;
 }
 
-void mon_run(CoreCtx *c, const char *line)
+void mon_run(const char *line)
 {
     g_menu = true;
-    session_open(c);
+    session_open();
     if (!g_ok) {
         return;
     }
@@ -488,53 +255,4 @@ uint32_t mon_sig(void)
     h = (h ^ (uint32_t)s_scr.cursor_x ^ ((uint32_t)s_scr.cursor_y << 8)) * 16777619u;
     g_hash = h;
     return h;
-}
-
-// ---- operations (the Help node of the tab runs a command in the monitor) -------------------------------------------------------------------------------
-static int op_run(CoreCtx *c, const OpArgs &a, OpOut &o)
-{
-    mon_run(c, a.s(0));
-    snprintf(o.msg, o.msglen, "%s", a.s(0));
-    return OPE_OK;
-}
-static const ArgSpec line_arg[] = { ARG_STRING("line", 60) };
-
-// T192.3 leak 2: the monitor's keys are an operation, not a branch of the menu controller. The key table (menukeytab.cc) sends every key of the monitor's screen to it; the answer
-// is what the controller does next: "goto F8" (the line `diag`: the System tab, F8; the session is released first), "close" (`x`: resume and leave), else nothing.
-static int op_key(CoreCtx *c, const OpArgs &a, OpOut &o)
-{
-    mon_key(c, a.i(0));
-    o.msg[0] = 0;
-    if (mon_diag_requested()) {
-        mon_release();
-        snprintf(o.msg, o.msglen, "goto F8");
-    } else if (mon_leave_requested()) {
-        snprintf(o.msg, o.msglen, "close");
-    }
-    return OPE_OK;
-}
-static const ArgSpec key_arg[] = { ARG_INT("key", 0, 0x1FFF) };
-// The pump's look at the monitor while its screen is shown (stops, finished run-tos, the live log): `more` says the screen changed.
-static int op_tick(CoreCtx *c, const OpArgs &, OpOut &o)
-{
-    o.msg[0] = 0;
-    o.more = mon_tick(c);
-    return OPE_OK;
-}
-static const char *st_wants_stop(CoreCtx *) { return mon_wants_stop() ? "yes" : 0; }
-static int op_open(CoreCtx *c, const OpArgs &, OpOut &o)
-{
-    o.msg[0] = 0;
-    mon_open(c);                                   // the monitor tab is shown: its session starts (once, until mon_release())
-    return OPE_OK;
-}
-
-void monitor_register(OpRegistry &r)
-{
-    r.contributor("monitor");
-    r.add_op("mon.run", line_arg, 1, op_run);
-    r.add_op("monitor.key", key_arg, 1, op_key);
-    r.add_op("monitor.open", 0, 0, op_open);
-    r.add_op("monitor.tick", 0, 0, op_tick);
-    r.add_state("monitor.wants_stop", st_wants_stop);
 }

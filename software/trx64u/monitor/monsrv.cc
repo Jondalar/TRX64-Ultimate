@@ -1,19 +1,17 @@
-// The RPC server of the linked monitor (monsrv.h). PROVENANCE: the network half of vendor/gideon/apps/trxmon/src/main.c (Gideon Zweijtzer's firmware with the TRX64 line's
-// additions, GPL-3.0; the copy that was apps/trxmon of branch t104-3-loader), over lwIP sockets instead of the app API's net table. Changed: no blocking wait (the menu task polls
-// it, monsrv_poll), the holder's buffers are allocated while it is connected, the dispatch is trxmon's rpc.c unchanged (srv_send, srv_broadcast, srv_cork, srv_holder_idle_ms).
+// The RPC server of the monitor library (monsrv.h). PROVENANCE: the network half of trxmon's main.c (software/ultimate-app/apps/trxmon/src; Gideon
+// Zweijtzer's firmware with the TRX64 line's additions, GPL-3.0) as MultiCore's core application had it in monsrv.cc (TRX64U-MultiCore 3b8e2955), here over
+// the base's net table (api->net) as main.c is over the firmware's. Changed against main.c: no blocking wait (the library's poll calls monsrv_poll), the
+// holder's buffers come from api->mem while it is connected, the confirmation gate (gate_refused); the dispatch is trxmon's rpc.c unchanged (srv_send,
+// srv_broadcast, srv_cork, srv_holder_idle_ms).
+#include "libapi.h"
 #include "monsrv.h"
-#include "rest.h"
-#include "uic.h"
-#include "lwip/sockets.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include "monitor.h"
+#include "monlib.h"
+#include <stddef.h>
 
 extern "C" {
 #include "trxmon/mlib.h"
+#include "trxmon/mjson.h"
 #include "trxmon/ws.h"
 #include "trxmon/rpc.h"
 #include "trxmon/mach.h"
@@ -30,16 +28,19 @@ extern "C" {
 #define MSG_SIZE      (16 * 1024)
 #define SEND_SLOW_MS  1000u              // a holder that stopped reading fills the send buffer: the first send that took this long drops it
 #define CORK_MAX      3072
-
-extern "C" int mon_claim(void);          // monitor.cc: the engine is needed now
+#define NET_NONE      (-5)               // SvcNet recv: nothing waiting
+#define GATE_TOK      512                // rpc.c's MAX_TOK: what rpc_request can parse, the gate parses too
 
 namespace {
 
+// The holder, allocated from api->mem while it is connected (39 KB)
 struct Client {
     int h;
     int ws, dead, rxlen, msglen;
     uint32_t t0, t_rx, t_ping;
     char peer[24];
+    int cork_n;
+    uint8_t cork[CORK_MAX];
     uint8_t rx[RX_SIZE];
     char msg[MSG_SIZE + 1];
 };
@@ -51,70 +52,50 @@ struct Refuse {
     char rx[REFUSE_RX];
 };
 
-Client *C;                               // the one holder, allocated while it is connected
-Refuse X[MAX_REFUSE];
+Client *C;                               // the one holder
+Refuse X[MAX_REFUSE];                    // set free by monsrv_start(): in use only while the listener stands
 int s_listener = -1;
 bool s_taken;                            // the port could not be bound
-uint8_t s_cork[CORK_MAX];
-int s_cork_n, s_cork_on;
+int s_cork_on;
 
-uint32_t now_ms(void) { return (uint32_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
-
-// D19a on the monitor's socket (T192 M1): it has no token and cannot hold a question, so while the UI service is up (the MVP core) the methods that run a monitor
-// command line, restore a checkpoint or touch the media are refused with the reason. A core without the service is as before.
-bool gate_refused(Client *c);
-
-void nonblocking(int s)
+void log_line(const char *a, const char *b, uint32_t n, const char *c)
 {
-    int flags = lwip_fcntl(s, F_GETFL, 0);
-    lwip_fcntl(s, F_SETFL, flags | O_NONBLOCK);
+    char t[200];
+    sbuf_t s;
+    sb_init(&s, t, sizeof(t));
+    sb_put(&s, a);
+    if (b) {
+        sb_put(&s, b);
+        sb_dec(&s, n);
+        sb_put(&s, c);
+    }
+    monlib_log(sb_str(&s));
 }
 
 // 0 bytes: closed by the peer; -1: nothing now; -2: error
 int net_recv(int h, void *buf, int len)
 {
-    int n = lwip_recv(h, buf, len, MSG_DONTWAIT);
-    if (n > 0) {
+    int n = g_api->net->recv(h, buf, len);
+    if (n >= 0) {
         return n;
     }
-    if (n == 0) {
-        return 0;
-    }
-    return (errno == EAGAIN || errno == EWOULDBLOCK) ? -1 : -2;
+    return n == NET_NONE ? -1 : -2;
 }
 
+// All len bytes (the base's send waits while the send buffer drains), or -2
 int net_send(int h, const void *buf, int len)
 {
-    const uint8_t *p = (const uint8_t *)buf;
-    int done = 0, idle = 0;
-    while (done < len) {
-        int n = lwip_send(h, p + done, len - done, MSG_DONTWAIT);
-        if (n > 0) {
-            done += n;
-            idle = 0;
-            continue;
-        }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && idle < 5000) {
-            vTaskDelay(1);                                       // the send buffer is full: let lwIP drain it
-            idle++;
-            continue;
-        }
-        return -2;
-    }
-    return done;
+    return g_api->net->send(h, buf, len) == len ? len : -2;
 }
+
+void net_close(int h) { g_api->net->close(h); }
 
 void net_peer(int h, char *out, int n)
 {
-    struct sockaddr_in a;
-    socklen_t al = sizeof(a);
     out[0] = 0;
-    if (lwip_getpeername(h, (struct sockaddr *)&a, &al) < 0 || a.sin_family != AF_INET) {
-        return;
+    if (g_api->net->peer && g_api->net->peer(h, out, n) < 0) {
+        out[0] = 0;
     }
-    char ip[20];
-    inet_ntoa_r(a.sin_addr, ip, sizeof(ip));
-    snprintf(out, n, "%s:%u", ip, (unsigned)ntohs(a.sin_port));
 }
 
 int send_all(Client *c, const void *p, int n)
@@ -122,13 +103,18 @@ int send_all(Client *c, const void *p, int n)
     if (c->dead) {
         return -1;
     }
-    uint32_t t0 = now_ms();
+    uint32_t t0 = plat_ms();
     if (net_send(c->h, p, n) < 0) {
         c->dead = 1;
         return -1;
     }
-    if ((uint32_t)(now_ms() - t0) >= SEND_SLOW_MS) {
-        printf("[monitor] the RPC holder %s does not read (a send took %u ms): dropped\n", c->peer, (unsigned)(now_ms() - t0));
+    if ((uint32_t)(plat_ms() - t0) >= SEND_SLOW_MS) {
+        char t[80];
+        sbuf_t s;
+        sb_init(&s, t, sizeof(t));
+        sb_put(&s, "the RPC holder ");
+        sb_put(&s, c->peer);
+        log_line(sb_str(&s), " does not read (a send took ", plat_ms() - t0, " ms): dropped");
         c->dead = 1;
         return -1;
     }
@@ -138,10 +124,12 @@ int send_all(Client *c, const void *p, int n)
 // Every packet costs the network stack a few milliseconds: a frame goes out in one send (header and payload together), and frames sent between srv_cork(1) and srv_cork(0) in one more.
 void cork_flush(void)
 {
-    if (s_cork_n && C && C->h >= 0) {
-        send_all(C, s_cork, s_cork_n);
+    if (C && C->cork_n && C->h >= 0) {
+        send_all(C, C->cork, C->cork_n);
     }
-    s_cork_n = 0;
+    if (C) {
+        C->cork_n = 0;
+    }
 }
 
 void send_frame(Client *c, int opcode, const void *p, int n)
@@ -151,12 +139,12 @@ void send_frame(Client *c, int opcode, const void *p, int n)
     if (n <= 1400) {
         memcpy(buf + hl, p, (size_t)n);
         if (s_cork_on) {
-            if (s_cork_n + hl + n > CORK_MAX) {
+            if (c->cork_n + hl + n > CORK_MAX) {
                 cork_flush();
             }
             if (hl + n <= CORK_MAX) {
-                memcpy(s_cork + s_cork_n, buf, (size_t)(hl + n));
-                s_cork_n += hl + n;
+                memcpy(c->cork + c->cork_n, buf, (size_t)(hl + n));
+                c->cork_n += hl + n;
                 return;
             }
         }
@@ -168,37 +156,60 @@ void send_frame(Client *c, int opcode, const void *p, int n)
     }
 }
 
+// D19a on the monitor's socket (T192 M1): it has no token and cannot hold a question, so while the core's UI service gates the network (the state
+// net.gated) the methods of monsrv_gated() are refused with the reason. A core without the state is as before.
+bool gated(void)
+{
+    const char *v = g_api->ops && g_api->ops->state ? g_api->ops->state("net.gated", 0) : 0;
+    return v && v[0] && strcmp(v, "0") && strcmp(v, "no");
+}
+
 bool gate_refused(Client *c)
 {
-    if (!rest_uic) {
+    if (!gated()) {
         return false;
     }
-    char m[48], id[40];
-    if (uic_json_get(c->msg, c->msglen, "method", m, sizeof(m)) != 1) {
-        return false;
+    jtok_t *t = (jtok_t *)g_api->mem->malloc(GATE_TOK * sizeof(jtok_t));
+    if (!t) {                                              // the request cannot be read: refused, so nothing gated slips through
+        static const char nomem[] = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32001,\"message\":\"no memory to check the request against the "
+                                    "confirmation gate\"}}";
+        send_frame(c, WS_TEXT, nomem, (int)sizeof(nomem) - 1);
+        return true;
     }
-    if (!monsrv_gated(m)) {
-        return false;
-    }
-    int t = uic_json_get(c->msg, c->msglen, "id", id, sizeof(id));
-    char em[110], eid[80];
-    monsrv_json_esc(m, em, sizeof(em));
-    if (t == 1) {
-        monsrv_json_esc(id, eid, sizeof(eid));
-    } else {
-        bool num = t == 2;                                 // not a string: only a number is echoed, anything else answers null
-        for (const char *q = id; *q; q++) {
-            num = num && ((*q >= '0' && *q <= '9') || *q == '-' || *q == '+' || *q == '.' || *q == 'e' || *q == 'E');
+    bool refused = false;
+    int n = json_parse(c->msg, c->msglen, t, GATE_TOK);
+    int mi = n > 0 && json_is(t, 0, JT_OBJ) ? json_get(c->msg, t, 0, "method") : -1;
+    char m[64];                                            // rpc.c's: a method rpc_request can read, the gate reads too
+    if (mi >= 0 && json_str(c->msg, t, mi, m, sizeof(m)) >= 0 && monsrv_gated(m)) {
+        refused = true;
+        char em[110], eid[80], id[40];
+        monsrv_json_esc(m, em, sizeof(em));
+        int ii = json_get(c->msg, t, 0, "id");
+        bool str = false;
+        memcpy(eid, "null", 5);
+        if (ii >= 0 && json_is(t, ii, JT_STR) && json_str(c->msg, t, ii, id, sizeof(id)) >= 0) {
+            monsrv_json_esc(id, eid, sizeof(eid));
+            str = true;
+        } else if (ii >= 0 && json_is(t, ii, JT_NUM) && t[ii].end - t[ii].start < (int)sizeof(eid)) {
+            memcpy(eid, c->msg + t[ii].start, (size_t)(t[ii].end - t[ii].start));     // a number is echoed as written, anything else answers null
+            eid[t[ii].end - t[ii].start] = 0;
         }
-        snprintf(eid, sizeof(eid), "%s", num ? id : "null");
+        char b[360];
+        sbuf_t s;
+        sb_init(&s, b, sizeof(b));
+        sb_put(&s, "{\"jsonrpc\":\"2.0\",\"id\":");
+        sb_put(&s, str ? "\"" : "");
+        sb_put(&s, eid);
+        sb_put(&s, str ? "\"" : "");
+        sb_put(&s, ",\"error\":{\"code\":-32001,\"message\":\"");
+        sb_put(&s, em);
+        sb_put(&s, " changes the machine: it needs the confirmation gate (POST /v1/ops with the token); this socket has no token\"}}");
+        if (!s.full) {
+            send_frame(c, WS_TEXT, b, s.len);
+        }
     }
-    char b[360];
-    int n = snprintf(b, sizeof(b), "{\"jsonrpc\":\"2.0\",\"id\":%s%s%s,\"error\":{\"code\":-32001,\"message\":\"%s changes the machine: it needs the confirmation gate (POST /v1/ops with the token); this socket has no token\"}}",
-                     t == 1 ? "\"" : "", eid, t == 1 ? "\"" : "", em);
-    if (n > 0 && n < (int)sizeof(b)) {
-        send_frame(c, WS_TEXT, b, n);
-    }
-    return true;
+    g_api->mem->free(t);
+    return refused;
 }
 
 void drop_client(void)
@@ -208,13 +219,12 @@ void drop_client(void)
     }
     cork_flush();
     if (C->h >= 0) {
-        lwip_close(C->h);
+        net_close(C->h);
     }
     C->h = -1;
     rpc_client_gone(0);
-    free(C);
+    g_api->mem->free(C);
     C = 0;
-    s_cork_n = 0;
 }
 
 void close_ws(Client *c, int code)
@@ -323,7 +333,7 @@ void client_read(Client *c)
         return;
     }
     c->rxlen += n;
-    c->t_rx = now_ms();
+    c->t_rx = plat_ms();
     if (!c->ws) {
         http_head(c);
     }
@@ -390,7 +400,7 @@ void refuse_answer(Refuse *x, int upgrade, const http_req_t *r)
         sb_putc(&b, '\n');
         net_send(x->h, out, b.len);
     }
-    lwip_close(x->h);
+    net_close(x->h);
     x->h = -1;
 }
 
@@ -401,7 +411,7 @@ void refuse_read(Refuse *x)
         return;
     }
     if (n <= 0) {                                                // gone before it heard anything
-        lwip_close(x->h);
+        net_close(x->h);
         x->h = -1;
         return;
     }
@@ -420,33 +430,30 @@ void refuse_start(int h)
         if (X[i].h < 0) {
             X[i].h = h;
             X[i].rxlen = 0;
-            X[i].t0 = now_ms();
+            X[i].t0 = plat_ms();
             return;
         }
     }
-    lwip_close(h);                                               // a flood of refused connections: the extra ones are dropped
+    net_close(h);                                                // a flood of refused connections: the extra ones are dropped
 }
 
+// The base's accept gives the connection non-blocking and with TCP_NODELAY.
 void accept_one(void)
 {
-    struct sockaddr_in a;
-    socklen_t al = sizeof(a);
-    int h = lwip_accept(s_listener, (struct sockaddr *)&a, &al);
+    int h = g_api->net->accept(s_listener);
     if (h < 0) {
         return;
     }
-    nonblocking(h);
-    int one = 1;
-    lwip_setsockopt(h, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     if (!C) {
-        C = (Client *)calloc(1, sizeof(Client));
+        C = (Client *)g_api->mem->malloc(sizeof(Client));
         if (C) {
+            memset(C, 0, offsetof(Client, cork));
             C->h = h;
-            C->t0 = C->t_rx = C->t_ping = now_ms();
+            C->t0 = C->t_rx = C->t_ping = plat_ms();
             net_peer(h, C->peer, sizeof(C->peer));
             return;
         }
-        lwip_close(h);                                           // no memory for a holder
+        net_close(h);                                            // no memory for a holder
         return;
     }
     refuse_start(h);
@@ -466,7 +473,7 @@ void srv_cork(int on)
 uint32_t srv_holder_idle_ms(void)
 {
     if (C && C->h >= 0 && C->ws && !C->dead) {
-        return now_ms() - C->t_rx;
+        return plat_ms() - C->t_rx;
     }
     return 0xFFFFFFFFu;
 }
@@ -483,34 +490,26 @@ void srv_broadcast(const char *text, int len) { srv_send(0, text, len); }
 
 void monsrv_start(void)
 {
-    if (s_listener >= 0) {
+    if (s_listener >= 0 || !g_api->net) {
         return;
     }
     for (int i = 0; i < MAX_REFUSE; i++) {
         X[i].h = -1;
     }
-    s_taken = false;
-    int s = lwip_socket(AF_INET, SOCK_STREAM, 0);
+    int s = g_api->net->listen(RPC_PORT, 2);
     if (s < 0) {
+        if (!s_taken) {                                          // said once, not at every try
+            monlib_log("TCP port 4312 is taken: no RPC");
+        }
         s_taken = true;
         return;
     }
-    int one = 1;
-    lwip_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof(a));
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = INADDR_ANY;
-    a.sin_port = htons(RPC_PORT);
-    if (lwip_bind(s, (struct sockaddr *)&a, sizeof(a)) < 0 || lwip_listen(s, 2) < 0) {
-        lwip_close(s);
-        s_taken = true;
-        printf("[monitor] TCP port %d is taken: no RPC\n", RPC_PORT);
-        return;
-    }
-    nonblocking(s);
+    s_taken = false;
     s_listener = s;
-    printf("[monitor] serving the TRX64 runtime contract on TCP %d\n", RPC_PORT);
+    if (g_api->trx && g_api->trx->announce) {
+        g_api->trx->announce(RPC_PORT);                          // the port the ident service and GET /v1/info report as trx64.rpc
+    }
+    monlib_log("serving the TRX64 runtime contract on TCP 4312");
 }
 
 void monsrv_poll(void)
@@ -522,7 +521,7 @@ void monsrv_poll(void)
     if (C && C->h >= 0 && !C->dead) {
         client_read(C);
     }
-    uint32_t now = now_ms();
+    uint32_t now = plat_ms();
     for (int i = 0; i < MAX_REFUSE; i++) {
         if (X[i].h < 0) {
             continue;
@@ -540,7 +539,12 @@ void monsrv_poll(void)
         }
         if (C->ws && !C->dead) {
             if ((uint32_t)(now - C->t_rx) >= KEEPALIVE_DEAD_MS) {
-                printf("[monitor] the RPC holder %s sent nothing for %u ms and did not answer a ping: dropped\n", C->peer, (unsigned)(now - C->t_rx));
+                char t[80];
+                sbuf_t s;
+                sb_init(&s, t, sizeof(t));
+                sb_put(&s, "the RPC holder ");
+                sb_put(&s, C->peer);
+                log_line(sb_str(&s), " sent nothing for ", now - C->t_rx, " ms and did not answer a ping: dropped");
                 C->dead = 1;
             } else if ((uint32_t)(now - C->t_rx) >= KEEPALIVE_IDLE_MS && (uint32_t)(now - C->t_ping) >= KEEPALIVE_IDLE_MS) {
                 send_frame(C, WS_PING, 0, 0);
@@ -561,15 +565,18 @@ void monsrv_stop(void)
         }
         drop_client();
     }
-    for (int i = 0; i < MAX_REFUSE; i++) {
-        if (X[i].h >= 0) {
-            lwip_close(X[i].h);
-            X[i].h = -1;
-        }
-    }
     if (s_listener >= 0) {
-        lwip_close(s_listener);
+        for (int i = 0; i < MAX_REFUSE; i++) {
+            if (X[i].h >= 0) {
+                net_close(X[i].h);
+                X[i].h = -1;
+            }
+        }
+        net_close(s_listener);
         s_listener = -1;
+        if (g_api->trx && g_api->trx->announce) {
+            g_api->trx->announce(0);
+        }
     }
 }
 
