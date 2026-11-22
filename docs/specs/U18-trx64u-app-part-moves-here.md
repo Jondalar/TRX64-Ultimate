@@ -396,3 +396,8 @@ Nothing decided yet.
     answering and shows progress; RPC and F4 share the path. Not without `KF_DIRECT` (typing must stay immediate), and the
     base hands no core lock to libraries (deadlocks from the menu task). "Save .C64RE dump" stays a `[[task]]` in Home:
     `job = true` on a task comes with descrec 3.3.
+  - **Base round 3 finished:** 19 key rows in `menu.toml` (14 op, 4 decline, 1 swallow; first match wins, in
+    `menukeytab.cc`'s order). The windows are `[[window]]` tables in a new `base/desc.toml`; the u64 block is three runs
+    (`u64_userport` 0xA0000405, `u64_hdmi_connectors` 0xA0000408-09, `u64_pwm_duty` 0xA000040D), the case LED select
+    goes through `board.case_led_select`, the paddle swap is written only on "Joystick Input". descrec 0.1.0 refuses both
+    files until 3.3, as decided.

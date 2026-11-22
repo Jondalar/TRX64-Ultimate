@@ -5,8 +5,8 @@
 // the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
 // U18: built as the trx64u library against the TRX64 SDK (base 3.1 and the groups of base 3.3). The settings are read and written through the settings
 // group (setting.cc), the SID chips through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx), the keys, the SID
-// sockets' supply, the video PLL, the picture layer and the ESP32 through the 3.3 groups io and board (base33.h); the C64U's registers through the io
-// group's blocks and register windows (trx64u_lib.h), their offsets and window names in c64u_regs.h.
+// sockets' supply, the video PLL, the picture layer, the case LEDs and the ESP32 through the 3.3 groups io and board (base33.h); the C64U's registers
+// through the io group's blocks and register windows (trx64u_lib.h), their offsets and window names in c64u_regs.h, the windows in desc.toml.
 // lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "u64cfg.h"
 #include "trx64u_lib.h"
@@ -315,7 +315,7 @@ int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
     int sys = V(K_SYSMODE);
     c64_bus_wr(C64U_BUS_SCANLINES, (uint8_t)V(K_SCANLINES, 1));
     int dig = V(K_DIGITAL);
-    c64u_win_wr(C64U_W_U64, C64U_U64_HDMI_ENABLE, dig == 2 ? 0 : 1);  // Auto: the screen is HDMI unless the user says DVI (the EDID tells nothing a DVI monitor does not also say)
+    c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_HDMI_ENABLE, dig == 2 ? 0 : 1);  // Auto: the screen is HDMI unless the user says DVI (the EDID tells nothing a DVI monitor does not also say)
     uint8_t format = V(K_ANALOG) ? VIDEO_FMT_RGB_OUTPUT : 0;
     if (sys < 0 || sys >= (int)(sizeof(color_timing) / sizeof(color_timing[0]))) {
         snprintf(o.msg, o.msglen, "No colour timing for system mode %d", sys);
@@ -1697,8 +1697,8 @@ bool u64cfg_sid_autoconfig(CoreCtx *, int count, const uint8_t *base, const uint
 
 // ---- the rest: joystick, user port, turbo, serial bus, LEDs ---------------------------------------------------------------------------------
 // "Joystick Input" is a setting the base owns and applies (svc_settings.h: the keyboard joystick, its port and WASD); the paddle swap of this core
-// follows bit 0 of its position. The base calls the core hook base_setting_changed after it applied the setting and once after the start
-// (lib_trx64u.cc), which writes the swap here; no group of this menu writes it.
+// follows bit 0 of its position. The base calls the core hook base_setting_changed with the key "Joystick Input" after it applied the setting, and
+// once after the start (lib_trx64u.cc), which writes the swap here; no group of this menu writes it.
 void u64cfg_paddle_swap(void)
 {
     int joy = setting_ix("Joystick Input", -1);                     // not in this menu: settings.cfg_value (setting.cc)
@@ -1713,8 +1713,8 @@ static const uint8_t c_iec_connectors[] = { 0x70, 0x60, 0x30, 0x50 };      // 4:
 int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
 {
     uint8_t en = V(K_USERPORT, 1) ? 3 : 0;
-    c64u_win_wr(C64U_W_U64, C64U_U64_USERPORT_EN, en);
-    c64u_win_wr(C64U_W_U64, C64U_U64_PWM_DUTY, en ? 0xD8 : 0x00);
+    c64u_win_wr(C64U_W_U64_USERPORT, C64U_U64_USERPORT_EN, en);
+    c64u_win_wr(C64U_W_U64_PWM_DUTY, C64U_U64_PWM_DUTY, en ? 0xD8 : 0x00);
     // turbo (setCpuSpeed)
     uint8_t prefReg, turboRegs;
     int tc = V(K_TURBO);
@@ -1729,9 +1729,12 @@ int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
     c64_bus_wr(C64U_BUS_SPEED_PREFER, prefReg);
     c64_bus_wr(C64U_BUS_SPEED_UPDATE, 1);
     // serial bus, burst mode, the parallel cable
-    c64u_win_wr(C64U_W_U64, C64U_U64_INT_CONNECTORS, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
-    // LEDs
-    c64u_win_wr(C64U_W_U64, C64U_U64_CASELED_SELECT, (uint8_t)((V(K_LED1, 4) << 4) | V(K_LED0, 0)));
+    c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_INT_CONNECTORS, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
+    // the case LEDs' sources: the high nibble LED 1 ("LED Select Bot"), the low nibble LED 0 ("LED Select Top"); a base without the member writes nothing
+    const SvcBoard *b = b33_board();
+    if (b && b->size >= offsetof(SvcBoard, case_led_select) + sizeof(b->case_led_select) && b->case_led_select) {
+        b->case_led_select((uint8_t)((V(K_LED1, 4) << 4) | V(K_LED0, 0)));
+    }
     return OPE_OK;
 }
 

@@ -1,0 +1,54 @@
+# The register windows of TRX64U (MultiCore's handover, "The windows of a core's API TOML", base 3.3): the blocks of the C64U's bitstream outside the
+# core window that this core's libraries write, each one `io.window(name, &size)` hands out. tools/descrec.py compiles them into the core's description
+# record (record 6 of trx64u.cor), packed by MultiCore's pipeline together with menu.toml; descrec takes [[window]] from base 3.3 on. This build does not
+# read the file.
+#
+# The base refuses a window over a register it drives itself (power, RESTORE, the HDMI PLL reset, the keyboard scan, I2C, MDIO, the USB hub reset, the case
+# LED select), so the U64 block (FW U64_IO_BASE, 0xA0000400) is declared as the three runs this core writes; the case LEDs go through board.case_led_select.
+# Each name is the one in C64U_WINDOWS (c64u_regs.h), which also holds the offsets inside the window; each size covers the offsets that list needs. The
+# addresses are the firmware's (software/ultimate-app/software/system/u2p.h, u64.h; U2P_IO_BASE 0xA0000000).
+
+[[window]]
+name = "speaker_enable"         # FW U2PIO_SPEAKER_EN (U2P_IO_BASE + 0x0C); the rest of that block (I2C, MDIO, the USB hub reset) is the base's
+address = 0xA000000C
+size = 0x1
+
+[[window]]
+name = "u64_userport"           # FW U64_USERPORT_EN (U64_IO_BASE + 0x05)
+address = 0xA0000405
+size = 0x1
+
+[[window]]
+name = "u64_hdmi_connectors"    # FW U64_HDMI_ENABLE, U64_INT_CONNECTORS (U64_IO_BASE + 0x08, + 0x09)
+address = 0xA0000408
+size = 0x2
+
+[[window]]
+name = "u64_pwm_duty"           # FW U64_PWM_DUTY (U64_IO_BASE + 0x0D)
+address = 0xA000040D
+size = 0x1
+
+[[window]]
+name = "audio_mixer"            # FW U64_AUDIO_MIXER: 10 channels, a byte per side
+address = 0xA0000500
+size = 0x14
+
+[[window]]
+name = "speaker_mixer"          # FW U64_SPEAKER_MIXER: 10 channels, a byte per side
+address = 0xA0000540
+size = 0x14
+
+[[window]]
+name = "resampler"              # FW U64_RESAMPLER: data +0 .. +3, reset +4, labor +8, flush +9
+address = 0xA0000580
+size = 0xA
+
+[[window]]
+name = "c64_palette"            # FW C64_PALETTE (U2P_IO_BASE + 0x80800): RGB of 16 colours at +0, their YUV at +0x400
+address = 0xA0080800
+size = 0x440
+
+[[window]]
+name = "hdmi_palette"           # FW U64II_HDMI_PALETTE (VID_IO_BASE + 0x5000): RGB of 16 colours
+address = 0xA0045000
+size = 0x40

@@ -1,9 +1,9 @@
 // The C64U's registers this library reads and writes, as offsets: into the blocks the base's io group reaches by member (svc_io.h, base 3.3: cart_rd /
 // cart_wr, bus_wr, stop, mode_reset, ram_memonly, video_format, rom_write) and into the register windows of the bitstream that io.window hands out by name.
-// They are ours (U18; MultiCore, round 2's open points: the blocks outside the core window are windows of our API TOML, name / address / size) and no
-// other file of the library names a register or an address. The numbers are the bitstream's as the firmware names them (software/ultimate-app/software/
-// system/u64.h, u2p.h, io/c64/c64.h). The ring library names the C64U_CART_* and C64U_BUS_* offsets it shares with this file in ../ring/c64u_regs.h:
-// the same names, the same values.
+// They are ours (U18; MultiCore, round 2's open points: the blocks outside the core window are windows of our API TOML, name / address / size: desc.toml)
+// and no other source file of the library names a register or an address; the windows' addresses are in desc.toml. The numbers are the bitstream's as
+// the firmware names them (software/ultimate-app/software/system/u64.h, u2p.h, io/c64/c64.h). The ring library names the C64U_CART_* and C64U_BUS_*
+// offsets it shares with this file in ../ring/c64u_regs.h: the same names, the same values.
 // The io helpers that take these offsets (c64_cart_rd, c64_bus_wr, c64u_win, ...) are in trx64u_lib.h.
 #ifndef TRX64U_C64U_REGS_H
 #define TRX64U_C64U_REGS_H
@@ -64,16 +64,19 @@
 #define C64_CHAR_BYTES   4096u
 
 // ---- the register windows: io.window(name, &size) -----------------------------------------------------------------------------------------------
-// Each window is one block of the firmware's map and its offsets follow. The speaker enable alone is one register: the rest of its block (FW U2P_IO_BASE:
-// I2C, MDIO, the USB hub's reset) is the host's.
+// Each window is one run of a block of the firmware's map, declared in desc.toml (name, address, size), and its offsets follow. The base refuses a window
+// over a register it drives itself, so a block that holds one is split into the runs this library writes: the speaker enable alone of its block
+// (FW U2P_IO_BASE: I2C, MDIO, the USB hub's reset are the base's), three runs of the U64 block (FW U64_IO_BASE: power, RESTORE, the HDMI PLL reset, the
+// keyboard scan and the case LED select are the base's; the case LEDs are board.case_led_select).
 // speaker_enable (FW U2PIO_SPEAKER_EN, U2P_IO_BASE + 0x0C)
 #define C64U_SPEAKER_EN         0x00  // b0: the speaker on
-// u64 (FW U64_IO_BASE): the U64 block
-#define C64U_U64_USERPORT_EN    0x05
-#define C64U_U64_HDMI_ENABLE    0x08
-#define C64U_U64_INT_CONNECTORS 0x09
-#define C64U_U64_PWM_DUTY       0x0D
-#define C64U_U64_CASELED_SELECT 0x0E
+// u64_userport (FW U64_USERPORT_EN, U64_IO_BASE + 0x05)
+#define C64U_U64_USERPORT_EN    0x00
+// u64_hdmi_connectors (FW U64_HDMI_ENABLE, U64_INT_CONNECTORS: U64_IO_BASE + 0x08, + 0x09)
+#define C64U_U64_HDMI_ENABLE    0x00
+#define C64U_U64_INT_CONNECTORS 0x01
+// u64_pwm_duty (FW U64_PWM_DUTY, U64_IO_BASE + 0x0D)
+#define C64U_U64_PWM_DUTY       0x00
 // audio_mixer (FW U64_AUDIO_MIXER) and speaker_mixer (FW U64_SPEAKER_MIXER): one byte per channel and side, right then left
 #define C64U_MIXER_CHANNELS     10
 // resampler (FW U64_RESAMPLER)
@@ -86,11 +89,13 @@
 #define C64U_PALETTE_YUV        0x400
 // hdmi_palette (FW U64II_HDMI_PALETTE): 16 colours of 4 bytes (R, G, B)
 
-// The windows: id, the name the API TOML declares, and the bytes the offsets above need (c64u_win refuses a window that is shorter). The name is in
-// this list alone; MultiCore has no format for the API TOML yet, so the TOML file is not written.
+// The windows: id, the name desc.toml declares, and the bytes the offsets above need (c64u_win refuses a window that is shorter). A name here and in
+// desc.toml is the same string; nothing checks the two against each other at build time.
 #define C64U_WINDOWS(X)                                                                         \
     X(SPEAKER_EN, "speaker_enable", C64U_SPEAKER_EN + 1)                                        \
-    X(U64, "u64", C64U_U64_CASELED_SELECT + 1)                                                  \
+    X(U64_USERPORT, "u64_userport", C64U_U64_USERPORT_EN + 1)                                   \
+    X(U64_HDMI_CONNECTORS, "u64_hdmi_connectors", C64U_U64_INT_CONNECTORS + 1)                  \
+    X(U64_PWM_DUTY, "u64_pwm_duty", C64U_U64_PWM_DUTY + 1)                                      \
     X(AUDIO_MIXER, "audio_mixer", 2 * C64U_MIXER_CHANNELS)                                      \
     X(SPEAKER_MIXER, "speaker_mixer", 2 * C64U_MIXER_CHANNELS)                                  \
     X(RESAMPLER, "resampler", C64U_RESAMPLE_FLUSH + 1)                                          \

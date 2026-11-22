@@ -122,7 +122,7 @@ static inline void c64_rom_write(uint32_t off, const void *p, uint32_t n)
 }
 
 // A register window of the bitstream (io.window; the ids, names and needed sizes are C64U_WINDOWS of c64u_regs.h): its base, kept once found. Null when
-// the io group is missing, the API TOML does not declare the window, the address map does not grant it, or it is shorter than the offsets need; the
+// the io group is missing, desc.toml does not declare the window, the address map does not grant it, or it is shorter than the offsets need; the
 // first null of each window is logged, and the caller then writes nothing. One byte per access.
 volatile uint8_t *c64u_win(int w);
 static inline void c64u_win_wr(int w, uint32_t off, uint8_t v)

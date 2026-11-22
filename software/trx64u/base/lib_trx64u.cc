@@ -93,9 +93,9 @@ const void *x_table(int which, uint32_t off)
     return *(void *const *)(t + off) ? t : 0;
 }
 
-// ---- the register windows (c64u_regs.h C64U_WINDOWS, io.window) -----------------------------------------------------------------------------------
-// The API TOML is read once per start of the core, so a window found stays. One that is missing is looked for again at the next use (the io group may
-// come later than the first call) and logged once.
+// ---- the register windows (c64u_regs.h C64U_WINDOWS, desc.toml, io.window) ---------------------------------------------------------------------------
+// The windows are the core's description (desc.toml in record 6 of the .cor), so a window found stays. One that is missing is looked for again at the next
+// use (the io group may come later than the first call) and logged once.
 static const struct {
     const char *name;
     uint32_t need;
@@ -131,7 +131,7 @@ volatile uint8_t *c64u_win(int w)
             lib_logf("[trx64u] register window \"%s\" is %u bytes, %u needed: its registers are not written", g_win_def[w].name, (unsigned)size,
                      (unsigned)g_win_def[w].need);
         } else {
-            lib_logf("[trx64u] no register window \"%s\" (io group, API TOML or address map): its registers are not written", g_win_def[w].name);
+            lib_logf("[trx64u] no register window \"%s\" (io group, desc.toml or address map): its registers are not written", g_win_def[w].name);
         }
     }
     return 0;
@@ -171,14 +171,12 @@ static void hook_menu_closed(void)
     }
 }
 
-// base_setting_changed: the base applied one of its own settings (core_hooks.h: after each change and once after the start hook; lock task). Of
-// those, this core's hardware follows "Joystick Input": its paddle swap (u64cfg.cc); the keyboard joystick is the base's. Keys compare without case,
-// as the base's settings do. The contract does not say which key the call after the start names, so the first call writes the swap whatever its key.
+// base_setting_changed: the base applied one of its own settings, `key` its key (core_hooks.h: after each change, and after the start hook once for each
+// base-owned setting; lock task). Of those, this core's hardware follows "Joystick Input": its paddle swap (u64cfg.cc); the keyboard joystick is the
+// base's. Keys compare without case, as the base's settings do.
 static void hook_base_setting_changed(const char *key)
 {
-    static bool first = true;
-    if (first || (key && !strcasecmp(key, "Joystick Input"))) {
-        first = false;
+    if (key && !strcasecmp(key, "Joystick Input")) {
         u64cfg_paddle_swap();
     }
 }

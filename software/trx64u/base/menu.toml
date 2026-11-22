@@ -574,7 +574,7 @@ order = 10
 closes_menu = true
 ui = { primary = true }
 
-# R1: the Monitor page - the terminal is the layout and every key is the monitor's (the [[key]] row of layout "terminal" below); this entry is what the
+# R1: the Monitor page - the terminal is the layout and its keys are the monitor's (the [[key]] rows of layout "terminal" below); this entry is what the
 # page needs to exist
 [[node]]
 anchor = "F1/monitor/bar"
@@ -584,28 +584,50 @@ op = "mon.run"
 bind = [ { arg = "line", str = "?" } ]
 order = 10
 
-# The key table (base 3.3; MultiCore's handover, "The key table of the UI TOML"): the rows of the two pages that name an operation, tried in the order of
-# this file. They are the KS_MONITOR and KS_TIMELINE rows of MultiCore's coreapp/src/menukeytab.cc (t239.3-boundary 0aff1a3b) with the same keys,
-# operations and flags. The handover's fields are layout / node, key, op, pass_key, directive, direct; four flags of the Timewarp rows have no field
-# there and are written as `value` (KF_ARG: the int argument "value"), `status` (KF_STATUS), `status_ok` (KF_STATUS_OK) and `close` (KF_CLOSE), and
-# three keys outside the handover's list use the base's own key names (uiapp.cc key_code): "pgup", "pgdn", "runstop". Not here, because they name
-# no operation of ours: KS_MONITOR's declines (F10, SCRLOCK, the menu key, RUN/STOP unless "monitor.wants_stop") and KS_TIMELINE's swallow of the
-# printable keys.
+# The key table (base 3.3; MultiCore's handover, "The key table of the UI TOML"): the KS_MONITOR and KS_TIMELINE rows of MultiCore's
+# coreapp/src/menukeytab.cc (t239.3-boundary e3bfcf2d), all of them, with the same keys, actions, operations, flags and conditions and in the same order.
+# The base tries the rows in the order of this file and the first that matches takes the key: a page's declines stand before its "any" row. `do` is
+# "op" (run `op`), "decline" (the key goes on to the menu's grammar) or "swallow" (the key is spent); `when` names the state the row needs ("!" negates);
+# `codes = [lo, hi]` takes the key codes lo .. hi in place of `key`. The key names are the base's (uiapp.cc key_code, plus f10, scrlock, menu).
 
-# the Monitor: every key is trxmon's, called on the menu task without the core lock; its answer can close the menu or go to a page
+# the Monitor: every key is trxmon's, called on the menu task without the core lock, and its answer can close the menu or go to a page; F10, SCROLL LOCK and
+# the menu key stay the menu's, RUN/STOP too unless the monitor asks for it ("monitor.wants_stop")
+[[key]]
+layout = "terminal"
+key = "f10"
+do = "decline"
+
+[[key]]
+layout = "terminal"
+key = "scrlock"
+do = "decline"
+
+[[key]]
+layout = "terminal"
+key = "menu"
+do = "decline"
+
+[[key]]
+layout = "terminal"
+key = "runstop"
+do = "decline"
+when = "!monitor.wants_stop"
+
 [[key]]
 layout = "terminal"
 key = "any"
+do = "op"
 op = "monitor.key"
 pass_key = true
 directive = true
 direct = true
 
 # Timewarp: LEFT and RIGHT one frame, UP and DOWN one second, PAGE UP / DOWN (F1 and F7) ten seconds, HOME the oldest frame, CTRL+O into the monitor on the
-# frame shown, RUN/STOP and ESC (the C64's left arrow) cancel, RETURN rewinds there and runs
+# frame shown, RUN/STOP and ESC (the C64's left arrow) cancel, RETURN rewinds there and runs; a printable key (codes 0x20 .. 0x7E) does nothing
 [[key]]
 layout = "timeline"
 key = "left"
+do = "op"
 op = "tw.step"
 value = -1
 status = true
@@ -613,6 +635,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "right"
+do = "op"
 op = "tw.step"
 value = 1
 status = true
@@ -620,6 +643,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "up"
+do = "op"
 op = "tw.seconds"
 value = -1
 status = true
@@ -627,6 +651,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "down"
+do = "op"
 op = "tw.seconds"
 value = 1
 status = true
@@ -634,6 +659,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "pgup"
+do = "op"
 op = "tw.seconds"
 value = -10
 status = true
@@ -641,6 +667,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "f1"
+do = "op"
 op = "tw.seconds"
 value = -10
 status = true
@@ -648,6 +675,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "pgdn"
+do = "op"
 op = "tw.seconds"
 value = 10
 status = true
@@ -655,6 +683,7 @@ status = true
 [[key]]
 layout = "timeline"
 key = "f7"
+do = "op"
 op = "tw.seconds"
 value = 10
 status = true
@@ -662,33 +691,43 @@ status = true
 [[key]]
 layout = "timeline"
 key = "home"
+do = "op"
 op = "tw.oldest"
 status = true
 
 [[key]]
 layout = "timeline"
 key = "ctrl+o"
+do = "op"
 op = "tw.monitor"
 directive = true
 
 [[key]]
 layout = "timeline"
 key = "runstop"
+do = "op"
 op = "tw.cancel"
 close = true
 
 [[key]]
 layout = "timeline"
 key = "esc"
+do = "op"
 op = "tw.cancel"
 close = true
 
 [[key]]
 layout = "timeline"
 key = "return"
+do = "op"
 op = "tw.resume"
 status_ok = true
 close = true
+
+[[key]]
+layout = "timeline"
+codes = [32, 126]
+do = "swallow"
 
 
 [[task]]

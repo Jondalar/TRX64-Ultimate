@@ -1,7 +1,8 @@
 # The trx64u base library (U18 D5): the operations of the menu (trx64u_ops) and the C64U settings (u64cfg); lib_trx64u.cc is the entry, the record and
 # the core hooks, setting.cc the settings as the base shows them, libc_extra.c the C library beyond the SDK's. Built by ../build.sh.
-# The image carries no menu record: menu.toml is the core's description, delivered beside the library and packed by MultiCore's pipeline as record 6 of
-# trx64u.cor (cor_pack.py pack --desc). This build reads it only for setlists.h.
+# The image carries no menu record: menu.toml (the menu and its key table) and desc.toml (the register windows) are the core's description, delivered
+# beside the library and packed by MultiCore's pipeline as record 6 of trx64u.cor (cor_pack.py pack --desc). This build reads menu.toml only, for
+# setlists.h.
 LIB_NAME = trx64u
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.1
