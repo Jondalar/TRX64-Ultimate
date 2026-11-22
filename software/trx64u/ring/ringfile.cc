@@ -739,7 +739,8 @@ static void write_media(Gz &g)
     g.str("\"}");
 }
 
-// The media of the manifest: media0 the disk image, media1 (or media0 without a disk) the cartridge, each hashed here and streamed into mediaPayloads.
+// The media of the manifest: media0 the cartridge, media1 (or media0 without a cartridge) the disk image, each hashed and streamed into mediaPayloads
+// by the dump with no ring (machine_step below).
 struct MediaFile {
     const char *path;
     const char *role;
@@ -749,13 +750,13 @@ struct MediaFile {
     uint8_t digest[32];
 };
 
-static bool media_probe(MediaFile *m, const char *path, const char *role, const char *name)
+// The name and the format (the extension, lower case) of a medium, from its path.
+static void media_name(MediaFile *m, const char *path, const char *role)
 {
     m->path = path;
     m->role = role;
-    const char *base = name ? name : path;
-    const char *sl = strrchr(base, '/');
-    strncpy(m->name, sl ? sl + 1 : base, sizeof(m->name) - 1);
+    const char *sl = strrchr(path, '/');
+    strncpy(m->name, sl ? sl + 1 : path, sizeof(m->name) - 1);
     m->name[sizeof(m->name) - 1] = 0;
     const char *dot = strrchr(m->name, '.');
     m->format[0] = 0;
@@ -764,29 +765,6 @@ static bool media_probe(MediaFile *m, const char *path, const char *role, const 
         m->format[i] = (c >= 'A' && c <= 'Z') ? char(c + 32) : c;
         m->format[i + 1] = 0;
     }
-    RFile fo;
-    RFile *f = &fo;
-    if (!rf_open(f, path)) {
-        return false;
-    }
-    m->size = uint32_t(rf_size(f));
-    TrxSha256 sh;
-    trx_sha_init(&sh);
-    uint8_t piece[3072];
-    uint32_t left = m->size;
-    bool ok = m->size != 0;
-    while (ok && left) {
-        uint32_t want = left > sizeof(piece) ? uint32_t(sizeof(piece)) : left;
-        if (!rf_read(f, piece, want)) {
-            ok = false;
-            break;
-        }
-        trx_sha_add(&sh, piece, want);
-        left -= want;
-    }
-    trx_sha_final(&sh, m->digest);
-    rf_close(f);
-    return ok;
 }
 
 static void write_checkpoint(Gz &g, const TrxFrame &f, uint8_t *ram, const uint8_t *col, const uint8_t *cart,
@@ -1421,345 +1399,473 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     return n;
 }
 
-const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes)
+// ---- the dumps, in steps (U18; MultiCore's decision of 2026-11-22: a ring dump is a stepped operation) ------------------------------------------------
+// One state per dump on the heap. trx_dump_begin builds the machine the file describes once; each trx_dump_step does one piece under the caller's core
+// lock (trx_c64re.h). The bytes are those of the one-call writers: the same writes in the same order, cut between calls. The frame (format 2) and the
+// ring (.c64rering) come from the timeline; the machine (format 1) is read through the DMA window, no ring needed.
+#define DUMP_PIECE      3072            // a medium is read in pieces of this size: a whole number of base64 groups (Gz::file_ta)
+#define DUMP_SLICE      (21 * DUMP_PIECE)   // the bytes of a medium one step hashes or writes
+#define MAX_RING_ENTRIES 64
+
+// The register the dump with no ring tests before it reads the VIC registers and the colour RAM as bus cycles (machine_read).
+#define DRV_STATUS_REG (TRX_IO_BASE + 0x3008)
+
+struct SecOut {
+    uint8_t id;
+    const uint8_t *p;      // NULL: the cartridge image, streamed through rom_read
+    uint32_t len;
+};
+
+enum { DS_RUN, DS_DONE, DS_FAILED };
+enum { FP_PREP, FP_DATA };                      // a frame: its memories and the file's head; then the sections, RAW_CHUNK a step
+enum { RP_PICK, RP_MAT, RP_WRITE };             // a ring: the entries picked and paused for; one materialized a step; one written a step
+enum { MP_READ, MP_PROBE, MP_DATA };            // the machine: read; the media hashed, a slice a step; written, a slice a step, then the rest
+
+struct TrxDump {
+    int kind;                   // TRX_DUMP_*
+    int phase;
+    int state;                  // DS_*
+    char path[260];
+    RingMachine mach;           // what the file says of the machine, built by trx_dump_begin
+    RFile file;
+    bool file_on;               // the file is created and not closed
+    uint32_t bytes;
+    int entries;
+    int step, steps;            // the progress: steps done, of about this many (0: not known yet)
+    // format 2, one frame
+    int idx;
+    TrxFrame *f;
+    uint8_t *ram, *col, *blk, *cart, *chunk;
+    char *hdr;
+    TrxDriveState *drive;
+    SecOut sec[SEC_SLOTS];
+    int ns, si;
+    uint32_t off, rom_len;
+    Raw w;
+    // .c64rering
+    int seconds, stride, n, k;
+    int ix[MAX_RING_ENTRIES];
+    uint8_t **rams, **cols;
+    TrxFrame *fr;
+    TrxMat *mat;
+    Gz g;
+    bool g_on;                  // g holds its block (Gz::init ran, Gz::done not yet)
+    uint32_t mat_ms, wr_ms;
+    // format 1, the machine
+    uint8_t vic[0x30];
+    const char *cand[2];        // the media in the machine: the cartridge's .crt, drive A's image (paths in mach)
+    const char *role[2];
+    int ncand;
+    MediaFile mf[2];
+    int nm, mi;                 // the media read whole; the one being hashed or written
+    RFile in;
+    bool in_on;                 // that medium's file is open
+    uint32_t in_done;
+    TrxSha256 sh;
+};
+
+static uint32_t file_bytes(const char *path)
 {
-    return trx_c64re_dump_ex(path, idx, bytes, NULL, NULL);
+    uint64_t size = 0;
+    bool dir = false;
+    return (path && path[0] && g_api->fs && g_api->fs->stat(path, &size, &dir) && !dir) ? uint32_t(size) : 0;
 }
 
-static const char *dump_ex_body(const char *path, int idx, uint32_t *bytes, trx_progress_fn progress, void *pctx);
-
-const char *trx_c64re_dump_ex(const char *path, int idx, uint32_t *bytes, trx_progress_fn progress, void *pctx)
+static int slices(uint32_t len, uint32_t per)
 {
-    bool built = trx_c64re_source_begin(false);
-    const char *err = dump_ex_body(path, idx, bytes, progress, pctx);
-    trx_c64re_source_end(built);
-    return err;
+    return int((len + per - 1) / per);
 }
 
-static const char *dump_ex_body(const char *path, int idx, uint32_t *bytes, trx_progress_fn progress, void *pctx)
+// ---- format 2: the frame ---------------------------------------------------------------------------------------------------------------------------------
+static const char *frame_prep(TrxDump *d)
 {
-    TrxFrame *f = (TrxFrame *)r_malloc(sizeof(TrxFrame));
-    uint8_t *ram = (uint8_t *)r_malloc(65536);
-    uint8_t *col = (uint8_t *)r_malloc(1024);
-    uint8_t *blk = (uint8_t *)r_malloc(BLOCK_SEC_BYTES);
-    char *hdr = (char *)r_malloc(HDR_JSON_MAX);
-    uint8_t *chunk = (uint8_t *)r_malloc(RAW_CHUNK);
-    const char *err = NULL;
-    RFile file_o = { 0, 0 };
-    RFile *file = &file_o;
-    uint8_t *cart = NULL;
-    TrxDriveState *drive = NULL;
-    uint32_t rom_len = 0;
-    *bytes = 0;
-
-    if (!f || !ram || !col || !blk || !hdr || !chunk) {
-        err = "Out of memory";
-    } else if (!trx_ring_frame(idx, f)) {
-        err = "No such frame";
-    } else if (!f->block) {
-        err = "The frame has no chip block";
-    } else {
-        // with a cartridge on, its RAM window comes out of the same pause
-        if (f->w[W_GLUE] & GLUE_CART) {
-            cart = (uint8_t *)r_malloc(TRX_CART_RAM_BYTES);
-        }
-        if (int e = trx_ring_materialize(idx, ram, col, cart)) {
-            err = trx_ring_error(e);
-        }
+    d->f = (TrxFrame *)r_malloc(sizeof(TrxFrame));
+    d->ram = (uint8_t *)r_malloc(65536);
+    d->col = (uint8_t *)r_malloc(1024);
+    d->blk = (uint8_t *)r_malloc(BLOCK_SEC_BYTES);
+    d->hdr = (char *)r_malloc(HDR_JSON_MAX);
+    d->chunk = (uint8_t *)r_malloc(RAW_CHUNK);
+    TrxFrame *const f = d->f;
+    if (!f || !d->ram || !d->col || !d->blk || !d->hdr || !d->chunk) {
+        return "Out of memory";
+    }
+    if (!trx_ring_frame(d->idx, f)) {
+        return "No such frame";
+    }
+    if (!f->block) {
+        return "The frame has no chip block";
+    }
+    // with a cartridge on, its RAM window comes out of the same pause
+    if (f->w[W_GLUE] & GLUE_CART) {
+        d->cart = (uint8_t *)r_malloc(TRX_CART_RAM_BYTES);
+    }
+    if (int e = trx_ring_materialize(d->idx, d->ram, d->col, d->cart)) {
+        return trx_ring_error(e);
     }
     // a dump this build could not load back is not written at all: the gate is the cartridge, because that is where the state reaches outside the chip block
     // (FW trx_c64re_dump_ex, U9 D0); one list answers here and in replay_cart()
-    if (!err && (f->w[W_GLUE] & GLUE_CART)) {
+    if (f->w[W_GLUE] & GLUE_CART) {
         const char *cname = NULL;
         if (!trx_ring_cart_state_ok(io_cart_rd(C64U_CART_TYPE), &cname)) {
             static char refused[96];
             r_snprintf(refused, sizeof(refused), "A state of this cartridge (type %02x) cannot be loaded back yet", (int)io_cart_rd(C64U_CART_TYPE));
-            err = refused;
-        } else if (trx_ring_cart_has_eeprom(io_cart_rd(C64U_CART_TYPE))) {
+            return refused;
+        }
+        if (trx_ring_cart_has_eeprom(io_cart_rd(C64U_CART_TYPE))) {
             // U9 D3a: GMod2's saved game is in the 93C86, outside the ROM window: without it the file would hold a cartridge whose save it cannot put back
             if (!(fpga_caps() & CAPAB_EEPROM)) {
-                err = "This bitstream has no EEPROM: a GMod2 state cannot be saved";
-            } else if (!(g_src_on && g_src.eeprom)) {
-                err = "The EEPROM could not be read: a GMod2 state cannot be saved";
+                return "This bitstream has no EEPROM: a GMod2 state cannot be saved";
+            }
+            if (!(g_src_on && g_src.eeprom)) {
+                return "The EEPROM could not be read: a GMod2 state cannot be saved";
             }
         }
     }
     // the medium: the cartridge image as it stands now, read straight out of DDR2 when it is written (not the .crt on the stick: the game may have
     // programmed the flash since)
-    if (!err && (f->w[W_GLUE] & GLUE_CART) && g_src_on && g_src.rom_read) {
-        rom_len = g_src.rom_bytes;
+    if ((f->w[W_GLUE] & GLUE_CART) && g_src_on && g_src.rom_read) {
+        d->rom_len = g_src.rom_bytes;
     }
     // drive A, through the stub on its own CPU. A drive that cannot be entered gives its RAM only, and one that is off gives nothing; neither stops the
     // file from being written.
-    if (!err && trx_drive_present()) {
-        drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState));
-        const char *derr = drive ? trx_drive_read(drive, true) : "Out of memory";
+    if (trx_drive_present()) {
+        d->drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState));
+        const char *derr = d->drive ? trx_drive_read(d->drive, true) : "Out of memory";
         if (derr) {
             r_log("[C64RE] drive A is not in the file: %s\n", derr);
-            r_free(drive);
-            drive = NULL;
+            r_free(d->drive);
+            d->drive = NULL;
         }
     }
 
-    struct SecOut {
-        uint8_t id;
-        const uint8_t *p;      // NULL: the cartridge image, streamed through rom_read
-        uint32_t len;
-    } sec[SEC_SLOTS];
+    SecOut *const sec = d->sec;
     int ns = 0;
-    int hl = 0;
-    if (!err) {
-        hl = header_json(hdr, HDR_JSON_MAX, *f, rom_len);
-        sec[ns].id = SEC_BLOCK;   sec[ns].p = blk;  sec[ns].len = block_section(blk, *f);     ns++;
-        sec[ns].id = SEC_RAM;     sec[ns].p = ram;  sec[ns].len = 65536;                      ns++;
-        sec[ns].id = SEC_COLOR;   sec[ns].p = col;  sec[ns].len = 1024;                       ns++;
-        if (cart) {
-            sec[ns].id = SEC_CARTRAM; sec[ns].p = cart; sec[ns].len = TRX_CART_RAM_BYTES;     ns++;
-        }
-        if (rom_len) {
-            sec[ns].id = SEC_CARTROM; sec[ns].p = NULL; sec[ns].len = rom_len;                ns++;
-        }
-        if (drive) {
-            sec[ns].id = SEC_DRIVE; sec[ns].p = (const uint8_t *)drive; sec[ns].len = sizeof(TrxDriveState); ns++;
-        }
-        if (g_src_on && g_src.eeprom && (f->w[W_GLUE] & GLUE_CART)) {
-            sec[ns].id = SEC_EEPROM; sec[ns].p = g_src.eeprom; sec[ns].len = TRX_EEPROM_BYTES; ns++;
-        }
-        err = open_out(path, file);
+    int hl = header_json(d->hdr, HDR_JSON_MAX, *f, d->rom_len);
+    sec[ns].id = SEC_BLOCK;   sec[ns].p = d->blk; sec[ns].len = block_section(d->blk, *f); ns++;
+    sec[ns].id = SEC_RAM;     sec[ns].p = d->ram; sec[ns].len = 65536;                      ns++;
+    sec[ns].id = SEC_COLOR;   sec[ns].p = d->col; sec[ns].len = 1024;                       ns++;
+    if (d->cart) {
+        sec[ns].id = SEC_CARTRAM; sec[ns].p = d->cart; sec[ns].len = TRX_CART_RAM_BYTES; ns++;
     }
-    if (!err) {
-        uint8_t head[41];
-        memset(head, 0, sizeof(head));
-        memcpy(head, "C64RESNP", 8);
-        head[8] = C64RE_FORMAT;
-        if (!rf_write(file, head, sizeof(head))) {
-            err = "The file could not be written";
-        }
-        Raw w;
-        w.init(file);
-        int steps = ns, step = 0;
-        for (int i = 0; i < ns; i++) {
-            steps += int(sec[i].len / RAW_CHUNK);
-        }
-        if (progress) {
-            progress(0, steps, pctx);
-        }
-        if (!err) {
-            w.u32(uint32_t(hl));
-            w.put(hdr, uint32_t(hl));
-            w.pad(uint32_t(hl));
-            w.u16(uint16_t(ns));
-            w.u16(0);
-            for (int i = 0; i < ns; i++) {
-                uint8_t e[SEC_ENTRY] = { sec[i].id, 0, 0, 0, uint8_t(sec[i].len), uint8_t(sec[i].len >> 8), uint8_t(sec[i].len >> 16), uint8_t(sec[i].len >> 24) };
-                w.put(e, SEC_ENTRY);
-            }
-            for (int i = 0; i < ns && !w.failed; i++) {
-                for (uint32_t off = 0; off < sec[i].len && !w.failed; off += RAW_CHUNK) {
-                    uint32_t want = sec[i].len - off > RAW_CHUNK ? RAW_CHUNK : sec[i].len - off;
-                    if (sec[i].p) {
-                        w.put(sec[i].p + off, want);
-                    } else {
-                        g_src.rom_read(g_src.rom_ctx, off, chunk, want);
-                        w.put(chunk, want);
-                    }
-                    if (progress) {
-                        progress(++step, steps, pctx);
-                    }
-                }
-                w.pad(sec[i].len);
-            }
-            if (w.failed) {
-                err = "The file could not be written";
-            }
-        }
-        if (!err) {
-            uint8_t digest[32];
-            trx_sha_final(&w.sha, digest);
-            if (!rf_seek(file, 9) || !rf_write(file, digest, 32)) {
-                err = "The file could not be written";
-            }
-        }
-        *bytes = 41 + w.written;
-        rf_close(file);
-        if (err) {
-            rf_remove(path);        // no half file is left behind
-            *bytes = 0;
-        } else {
-            r_log("[C64RE] .c64re format %d: %u bytes, %d sections, medium %u\n", C64RE_FORMAT, (unsigned)*bytes, ns, (unsigned)rom_len);
-        }
+    if (d->rom_len) {
+        sec[ns].id = SEC_CARTROM; sec[ns].p = NULL; sec[ns].len = d->rom_len;            ns++;
     }
-    r_free(f);
-    r_free(ram);
-    r_free(col);
-    r_free(blk);
-    r_free(hdr);
-    r_free(chunk);
-    r_free(cart);
-    r_free(drive);
-    return err;
+    if (d->drive) {
+        sec[ns].id = SEC_DRIVE; sec[ns].p = (const uint8_t *)d->drive; sec[ns].len = sizeof(TrxDriveState); ns++;
+    }
+    if (g_src_on && g_src.eeprom && (f->w[W_GLUE] & GLUE_CART)) {
+        sec[ns].id = SEC_EEPROM; sec[ns].p = g_src.eeprom; sec[ns].len = TRX_EEPROM_BYTES; ns++;
+    }
+    d->ns = ns;
+    if (const char *e = open_out(d->path, &d->file)) {
+        return e;
+    }
+    d->file_on = true;
+    uint8_t head[41];
+    memset(head, 0, sizeof(head));
+    memcpy(head, "C64RESNP", 8);
+    head[8] = C64RE_FORMAT;
+    if (!rf_write(&d->file, head, sizeof(head))) {
+        return "The file could not be written";
+    }
+    Raw &w = d->w;
+    w.init(&d->file);
+    w.u32(uint32_t(hl));
+    w.put(d->hdr, uint32_t(hl));
+    w.pad(uint32_t(hl));
+    w.u16(uint16_t(ns));
+    w.u16(0);
+    for (int i = 0; i < ns; i++) {
+        uint8_t e[SEC_ENTRY] = { sec[i].id, 0, 0, 0, uint8_t(sec[i].len), uint8_t(sec[i].len >> 8), uint8_t(sec[i].len >> 16), uint8_t(sec[i].len >> 24) };
+        w.put(e, SEC_ENTRY);
+    }
+    if (w.failed) {
+        return "The file could not be written";
+    }
+    d->steps = 1;
+    for (int i = 0; i < ns; i++) {
+        d->steps += slices(sec[i].len, RAW_CHUNK);
+    }
+    d->si = 0;
+    d->off = 0;
+    d->phase = FP_DATA;
+    return NULL;
 }
 
-// ---- the dump with no ring (FW apps/c64re/src/c64re.c: "Save .C64RE Dump") ----------------------------------------------------------------------------
+// One RAW_CHUNK of the sections; after the last one the digest goes into the head and the file is complete.
+static const char *frame_data(TrxDump *d)
+{
+    Raw &w = d->w;
+    const SecOut &s = d->sec[d->si];
+    uint32_t want = s.len - d->off > RAW_CHUNK ? RAW_CHUNK : s.len - d->off;
+    if (s.p) {
+        w.put(s.p + d->off, want);
+    } else {
+        g_src.rom_read(g_src.rom_ctx, d->off, d->chunk, want);
+        w.put(d->chunk, want);
+    }
+    d->off += RAW_CHUNK;
+    if (d->off >= s.len) {
+        w.pad(s.len);
+        d->si++;
+        d->off = 0;
+    }
+    if (w.failed) {
+        return "The file could not be written";
+    }
+    if (d->si < d->ns) {
+        return NULL;
+    }
+    uint8_t digest[32];
+    trx_sha_final(&w.sha, digest);
+    if (!rf_seek(&d->file, 9) || !rf_write(&d->file, digest, 32)) {
+        return "The file could not be written";
+    }
+    d->bytes = 41 + w.written;
+    rf_close(&d->file);
+    d->file_on = false;
+    r_log("[C64RE] .c64re format %d: %u bytes, %d sections, medium %u\n", C64RE_FORMAT, (unsigned)d->bytes, d->ns, (unsigned)d->rom_len);
+    d->state = DS_DONE;
+    return NULL;
+}
+
+static const char *frame_step(TrxDump *d)
+{
+    return d->phase == FP_PREP ? frame_prep(d) : frame_data(d);
+}
+
+// ---- format 1: the machine with no ring (FW apps/c64re/src/c64re.c: "Save .C64RE Dump") -----------------------------------------------------------------
 // The machine as it stands, read through the DMA window while the menu has it frozen: the 64 KB of RAM (the window's RAM-only mode, under the I/O too), the
 // VIC registers and the colour RAM (a bus cycle, only while the machine is held), the CPU port from RAM $00/$01; format 1, the media that are in the machine
 // (the cartridge's .crt and drive A's image) inside it. What the ring's chip block carries (the 6510's registers, the CIA and VIC internals) is not on any
 // bus here and is left out; every node is optional on the reading side, so the dump opens as a machine to look at.
-#define DRV_STATUS_REG (TRX_IO_BASE + 0x3008)
-
-static const char *dump_machine_body(const char *path, uint32_t *bytes);
-
-const char *trx_c64re_dump_machine(const char *path, uint32_t *bytes)
+static const char *machine_read(TrxDump *d)
 {
-    bool built = trx_c64re_source_begin(false);
-    const char *err = dump_machine_body(path, bytes);
-    trx_c64re_source_end(built);
-    return err;
-}
-
-static const char *dump_machine_body(const char *path, uint32_t *bytes)
-{
-    uint8_t *ram = (uint8_t *)r_malloc(65536);
-    uint8_t *col = (uint8_t *)r_malloc(1024);
-    const char *err = NULL;
-    RFile file_o = { 0, 0 };
-    RFile *file = &file_o;
-    *bytes = 0;
-    if (!ram || !col) {
-        err = "Out of memory";
+    d->ram = (uint8_t *)r_malloc(65536);
+    d->col = (uint8_t *)r_malloc(1024);
+    d->chunk = (uint8_t *)r_malloc(DUMP_PIECE);
+    if (!d->ram || !d->col || !d->chunk) {
+        return "Out of memory";
     }
-    if (!err && !g_api->c64) {
-        err = "This core has no C64 memory window";
+    if (!g_api->c64) {
+        return "This core has no C64 memory window";
     }
-    uint8_t vic[0x30];
-    memset(vic, 0, sizeof(vic));
-    if (!err) {
-        bool old = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
-        io_memonly(true);
-        g_api->c64->dma_read(0, ram, 65536);
-        uint32_t st = trx_io_read32(DRV_STATUS_REG);
-        if ((st & 1) && (st & (0x02 | 0x20))) {                  // the gate is shut and a stop is in force: the window's D page is a bus cycle
-            io_memonly(false);
-            for (int r = 0; r < 0x30; r++) {
-                vic[r] = c64_peek(0xD000 + r);
-            }
-            for (int a = 0; a < 1024; a++) {
-                col[a] = c64_peek(0xD800 + a) & 0x0F;
-            }
-        } else {
-            r_log("[C64RE] the machine is not held: the VIC registers and the colour RAM are not in the dump\n");
-            memset(col, 0, 1024);
-        }
-        io_memonly(old);
-        err = open_out(path, file);
-    }
-    if (!err) {
-        uint8_t header[41];
-        memset(header, 0, sizeof(header));
-        memcpy(header, "C64RESNP", 8);
-        header[8] = 1;
-        rf_write(file, header, sizeof(header));
-        Gz g;
-        g.init(file, true);
-        MediaFile mf[2];
-        int nm = 0;
-        if (g_src_on && g_src.cart_src && g_src.cart_src[0] && media_probe(&mf[nm], g_src.cart_src, "cartridge", NULL)) {
-            nm++;
-        }
-        if (g_src_on && g_src.disk_path && g_src.disk_path[0] && media_probe(&mf[nm], g_src.disk_path, "drive8", NULL)) {
-            nm++;
-        }
-        g.str("{\"mediaPayloads\":{");
-        for (int i = 0; i < nm && !g.failed; i++) {
-            RFile mfo;
-            RFile *mfile = &mfo;
-            g.num(i ? ",\"media" : "\"media", i);
-            g.str("\":");
-            if (rf_open(mfile, mf[i].path)) {
-                g.file_ta(mfile, mf[i].size);
-                rf_close(mfile);
-            } else {
-                g.failed = true;
-            }
-        }
-        g.str("},\"manifest\":{\"kind\":\"c64re-runtime-snapshot\",\"version\":1,\"createdAt\":\"1970-01-01T00:00:00Z\"");
-        g.str(",\"machine\":{\"model\":\"");
-        g.str(machine_name());
-        g.str("\",\"runtimeVersion\":\"trx64u/c64re-dump\"}");
-        g.str(",\"checkpoint\":{\"encoding\":\"ta-json-gz/1\",\"payloadRef\":\"checkpoint\",\"cycle\":0,\"pc\":0},\"media\":[");
-        for (int i = 0; i < nm; i++) {
-            static const char hex[] = "0123456789abcdef";
-            char sha[65];
-            for (int k = 0; k < 32; k++) {
-                sha[2 * k] = hex[mf[i].digest[k] >> 4];
-                sha[2 * k + 1] = hex[mf[i].digest[k] & 15];
-            }
-            sha[64] = 0;
-            g.str(i ? ",{\"role\":\"" : "{\"role\":\"");
-            g.str(mf[i].role);
-            g.str("\",\"format\":\"");
-            g.jstr(mf[i].format);
-            g.str("\",\"sha256\":\"");
-            g.str(sha);
-            g.str("\",\"sourceName\":\"");
-            g.jstr(mf[i].name);
-            g.num("\",\"embeddedPayloadRef\":\"media", i);
-            g.str("\"}");
-        }
-        g.str("]},\"checkpoint\":{\"schemaVersion\":1,\"ram\":");
-        g.ta(ram, 65536);
-        g.num(",\"cpuPortDirection\":", ram[0]);
-        g.num(",\"cpuPortValue\":", ram[1]);
-        g.str(",");
-        uint32_t w[TRX_BLOCK_WORDS];                              // write_vic reads the registers out of the block's VIC words
-        memset(w, 0, sizeof(w));
+    uint8_t *const ram = d->ram, *const col = d->col;
+    bool old = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    io_memonly(true);
+    g_api->c64->dma_read(0, ram, 65536);
+    uint32_t st = trx_io_read32(DRV_STATUS_REG);
+    if ((st & 1) && (st & (0x02 | 0x20))) {                  // the gate is shut and a stop is in force: the window's D page is a bus cycle
+        io_memonly(false);
         for (int r = 0; r < 0x30; r++) {
-            w[W_VIC + r / 4] |= uint32_t(vic[r]) << (8 * (r & 3));
+            d->vic[r] = c64_peek(0xD000 + r);
         }
-        write_vic(g, w, col, 0, 0);
-        g.str("}}");
-        uint8_t digest[32];
-        if (!g.finish(digest)) {
-            err = "The file could not be written";
-        } else if (!rf_seek(file, 9) || !rf_write(file, digest, 32)) {
-            err = "The file could not be written";
+        for (int a = 0; a < 1024; a++) {
+            col[a] = c64_peek(0xD800 + a) & 0x0F;
         }
-        *bytes = 41 + g.written;
-        g.done();
-        rf_close(file);
-        if (err) {
-            rf_remove(path);
-            *bytes = 0;
-        }
+    } else {
+        r_log("[C64RE] the machine is not held: the VIC registers and the colour RAM are not in the dump\n");
+        memset(col, 0, 1024);
     }
-    r_free(ram);
-    r_free(col);
-    return err;
+    io_memonly(old);
+    if (const char *e = open_out(d->path, &d->file)) {
+        return e;
+    }
+    d->file_on = true;
+    uint8_t header[41];
+    memset(header, 0, sizeof(header));
+    memcpy(header, "C64RESNP", 8);
+    header[8] = 1;
+    rf_write(&d->file, header, sizeof(header));
+    d->g.init(&d->file, true);
+    d->g_on = true;
+    if (d->g.failed) {
+        return "Out of memory";
+    }
+    // the media: the cartridge's .crt first, then drive A's image
+    if (g_src_on && g_src.cart_src && g_src.cart_src[0]) {
+        d->cand[d->ncand] = g_src.cart_src;
+        d->role[d->ncand++] = "cartridge";
+    }
+    if (g_src_on && g_src.disk_path && g_src.disk_path[0]) {
+        d->cand[d->ncand] = g_src.disk_path;
+        d->role[d->ncand++] = "drive8";
+    }
+    // the steps: this one, each medium hashed and then written a slice a step, the rest
+    d->steps = 2;
+    for (int i = 0; i < d->ncand; i++) {
+        d->steps += 2 * slices(file_bytes(d->cand[i]), DUMP_SLICE);
+    }
+    d->mi = 0;
+    d->phase = MP_PROBE;
+    if (!d->ncand) {
+        d->g.str("{\"mediaPayloads\":{");
+        d->phase = MP_DATA;
+    }
+    return NULL;
 }
 
-#define MAX_RING_ENTRIES 64
-
-static const char *rering_dump_body(const char *path, int seconds, int stride, uint32_t *bytes, int *entries, trx_progress_fn progress,
-                                    void *ctx);
-
-const char *trx_c64rering_dump_ex(const char *path, int seconds, int stride, uint32_t *bytes, int *entries,
-                                  trx_progress_fn progress, void *ctx)
+// One slice of a medium's hash. A medium that cannot be read whole, or is empty, is left out (its MediaFile is taken by the next one).
+static const char *machine_probe(TrxDump *d)
 {
-    bool built = trx_c64re_source_begin(false);
-    const char *err = rering_dump_body(path, seconds, stride, bytes, entries, progress, ctx);
-    trx_c64re_source_end(built);
-    return err;
+    MediaFile *m = &d->mf[d->nm];
+    if (!d->in_on) {
+        media_name(m, d->cand[d->mi], d->role[d->mi]);
+        if (rf_open(&d->in, m->path)) {
+            d->in_on = true;
+            m->size = uint32_t(rf_size(&d->in));
+            d->in_done = 0;
+            trx_sha_init(&d->sh);
+        } else {
+            d->mi++;
+        }
+    }
+    if (d->in_on) {
+        bool ok = m->size != 0;
+        uint32_t end = m->size - d->in_done > DUMP_SLICE ? d->in_done + DUMP_SLICE : m->size;
+        while (ok && d->in_done < end) {
+            uint32_t want = end - d->in_done > DUMP_PIECE ? uint32_t(DUMP_PIECE) : end - d->in_done;
+            if (!rf_read(&d->in, d->chunk, want)) {
+                ok = false;
+                break;
+            }
+            trx_sha_add(&d->sh, d->chunk, want);
+            d->in_done += want;
+        }
+        if (ok && d->in_done < m->size) {
+            return NULL;
+        }
+        trx_sha_final(&d->sh, m->digest);
+        rf_close(&d->in);
+        d->in_on = false;
+        if (ok) {
+            d->nm++;
+        }
+        d->mi++;
+    }
+    if (d->mi >= d->ncand) {
+        d->g.str("{\"mediaPayloads\":{");
+        d->mi = 0;
+        d->phase = MP_DATA;
+    }
+    return NULL;
 }
 
-static const char *rering_dump_body(const char *path, int seconds, int stride, uint32_t *bytes, int *entries, trx_progress_fn progress,
-                                    void *ctx)
+// The manifest and the checkpoint after the media; then the digest goes into the head and the file is complete.
+static const char *machine_rest(TrxDump *d)
 {
-    if (stride < 1) {
-        stride = 1;
+    Gz &g = d->g;
+    MediaFile *const mf = d->mf;
+    const int nm = d->nm;
+    g.str("},\"manifest\":{\"kind\":\"c64re-runtime-snapshot\",\"version\":1,\"createdAt\":\"1970-01-01T00:00:00Z\"");
+    g.str(",\"machine\":{\"model\":\"");
+    g.str(machine_name());
+    g.str("\",\"runtimeVersion\":\"trx64u/c64re-dump\"}");
+    g.str(",\"checkpoint\":{\"encoding\":\"ta-json-gz/1\",\"payloadRef\":\"checkpoint\",\"cycle\":0,\"pc\":0},\"media\":[");
+    for (int i = 0; i < nm; i++) {
+        static const char hex[] = "0123456789abcdef";
+        char sha[65];
+        for (int k = 0; k < 32; k++) {
+            sha[2 * k] = hex[mf[i].digest[k] >> 4];
+            sha[2 * k + 1] = hex[mf[i].digest[k] & 15];
+        }
+        sha[64] = 0;
+        g.str(i ? ",{\"role\":\"" : "{\"role\":\"");
+        g.str(mf[i].role);
+        g.str("\",\"format\":\"");
+        g.jstr(mf[i].format);
+        g.str("\",\"sha256\":\"");
+        g.str(sha);
+        g.str("\",\"sourceName\":\"");
+        g.jstr(mf[i].name);
+        g.num("\",\"embeddedPayloadRef\":\"media", i);
+        g.str("\"}");
     }
+    g.str("]},\"checkpoint\":{\"schemaVersion\":1,\"ram\":");
+    g.ta(d->ram, 65536);
+    g.num(",\"cpuPortDirection\":", d->ram[0]);
+    g.num(",\"cpuPortValue\":", d->ram[1]);
+    g.str(",");
+    uint32_t w[TRX_BLOCK_WORDS];                              // write_vic reads the registers out of the block's VIC words
+    memset(w, 0, sizeof(w));
+    for (int r = 0; r < 0x30; r++) {
+        w[W_VIC + r / 4] |= uint32_t(d->vic[r]) << (8 * (r & 3));
+    }
+    write_vic(g, w, d->col, 0, 0);
+    g.str("}}");
+    uint8_t digest[32];
+    if (!g.finish(digest) || !rf_seek(&d->file, 9) || !rf_write(&d->file, digest, 32)) {
+        return "The file could not be written";
+    }
+    d->bytes = 41 + g.written;
+    g.done();
+    d->g_on = false;
+    rf_close(&d->file);
+    d->file_on = false;
+    d->state = DS_DONE;
+    return NULL;
+}
+
+// One slice of a medium into mediaPayloads (as Gz::file_ta writes it whole), or, after the last, the rest.
+static const char *machine_data(TrxDump *d)
+{
+    Gz &g = d->g;
+    if (d->mi >= d->nm) {
+        return machine_rest(d);
+    }
+    const MediaFile &m = d->mf[d->mi];
+    if (!d->in_on) {
+        g.num(d->mi ? ",\"media" : "\"media", d->mi);
+        g.str("\":");
+        if (!rf_open(&d->in, m.path)) {
+            return "The file could not be written";
+        }
+        d->in_on = true;
+        d->in_done = 0;
+        g.str("{\"$ta\":\"Uint8Array\",\"b64\":\"");
+    }
+    uint32_t end = m.size - d->in_done > DUMP_SLICE ? d->in_done + DUMP_SLICE : m.size;
+    while (d->in_done < end && !g.failed) {
+        uint32_t want = end - d->in_done > DUMP_PIECE ? uint32_t(DUMP_PIECE) : end - d->in_done;
+        if (!rf_read(&d->in, d->chunk, want)) {
+            g.failed = true;
+            break;
+        }
+        g.b64(d->chunk, int(want));
+        d->in_done += want;
+    }
+    if (g.failed) {
+        return "The file could not be written";
+    }
+    if (d->in_done >= m.size) {
+        g.str("\"}");
+        rf_close(&d->in);
+        d->in_on = false;
+        d->mi++;
+    }
+    return NULL;
+}
+
+static const char *machine_step(TrxDump *d)
+{
+    switch (d->phase) {
+    case MP_READ:
+        return machine_read(d);
+    case MP_PROBE:
+        return machine_probe(d);
+    default:
+        return machine_data(d);
+    }
+}
+
+// ---- .c64rering: the newest seconds of the ring ----------------------------------------------------------------------------------------------------------
+// The entries, oldest first, from the newest whole entry back every `stride` frames; the pause the walk starts from (trx_ring_mat_begin).
+static const char *ring_pick(TrxDump *d)
+{
+    int stride = d->stride < 1 ? 1 : d->stride;
     int n_tl = trx_ring_count();
-    int span = (seconds * (int)trx_ring_fps_x100() + 50) / 100;
-    int idx[MAX_RING_ENTRIES];
+    int span = (d->seconds * (int)trx_ring_fps_x100() + 50) / 100;
+    int *const idx = d->ix;
     int n = 0;
     // from the newest whole entry back, every stride frames
     int i = trx_ring_target(0);
@@ -1781,49 +1887,79 @@ static const char *rering_dump_body(const char *path, int seconds, int stride, u
         idx[k] = idx[n - 1 - k];
         idx[n - 1 - k] = t;
     }
-    uint8_t **rams = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
-    uint8_t **cols = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
-    TrxFrame *fr = (TrxFrame *)r_malloc(n * sizeof(TrxFrame));
-    const char *err = NULL;
-    if (!rams || !cols || !fr) {
-        err = "Out of memory";
+    d->n = n;
+    d->rams = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
+    d->cols = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
+    d->fr = (TrxFrame *)r_malloc(n * sizeof(TrxFrame));
+    if (!d->rams || !d->cols || !d->fr) {
+        return "Out of memory";
     }
-    // the entries as they are now (materialize may move the indices; it
-    // finds its targets by their seq)
-    for (int k = 0; !err && k < n; k++) {
-        if (!trx_ring_frame(idx[k], &fr[k])) {
-            err = "No such frame";
+    // the entries as they are now (the walk may move the indices; it finds its targets by their seq)
+    for (int k = 0; k < n; k++) {
+        if (!trx_ring_frame(idx[k], &d->fr[k])) {
+            return "No such frame";
         }
     }
-    for (int k = 0; !err && k < n; k++) {
-        rams[k] = (uint8_t *)r_malloc(65536);
-        cols[k] = (uint8_t *)r_malloc(1024);
-        if (!rams[k] || !cols[k]) {
-            err = "Out of memory";
+    for (int k = 0; k < n; k++) {
+        d->rams[k] = (uint8_t *)r_malloc(65536);
+        d->cols[k] = (uint8_t *)r_malloc(1024);
+        if (!d->rams[k] || !d->cols[k]) {
+            return "Out of memory";
         }
     }
     uint16_t t0 = r_ms_timer();
-    if (!err) {
-        if (int e = trx_ring_materialize_many(idx, n, rams, cols)) {
-            err = trx_ring_error(e);
+    if (int e = trx_ring_mat_begin(idx, n, false, &d->mat)) {
+        return trx_ring_error(e);
+    }
+    d->mat_ms += uint16_t(r_ms_timer() - t0);
+    d->steps = 1 + 2 * n;
+    d->k = n - 1;
+    d->phase = RP_MAT;
+    return NULL;
+}
+
+// One entry's memories, newest first (the walk goes back from the head).
+static const char *ring_mat(TrxDump *d)
+{
+    uint16_t t0 = r_ms_timer();
+    int which = -1;
+    int e = trx_ring_mat_next(d->mat, &which, d->rams[d->k], d->cols[d->k], NULL);
+    d->mat_ms += uint16_t(r_ms_timer() - t0);
+    if (e) {
+        return trx_ring_error(e);
+    }
+    if (which != d->k) {
+        return "The ring changed while it was being saved";
+    }
+    if (--d->k < 0) {
+        trx_ring_mat_end(d->mat);
+        d->mat = NULL;
+        d->k = 0;
+        d->phase = RP_WRITE;
+    }
+    return NULL;
+}
+
+// One entry into the file, oldest first: the first opens the file and writes the ring's head, the last the tail.
+static const char *ring_write(TrxDump *d)
+{
+    uint16_t t0 = r_ms_timer();
+    Gz &g = d->g;
+    const int n = d->n;
+    char id[32];
+    if (d->k == 0) {
+        if (const char *e = open_out(d->path, &d->file)) {
+            return e;
         }
-    }
-    uint16_t t1 = r_ms_timer();
-    if (!err && progress) {
-        progress(0, n, ctx);        // the RAM of every entry is in memory; the JSON and the file follow
-    }
-    RFile file_o = { 0, 0 };
-    RFile *file = &file_o;
-    if (!err) {
-        err = open_out(path, file);
-    }
-    if (!err) {
+        d->file_on = true;
         static const uint8_t header[9] = { 'C', '6', '4', 'R', 'E', 'R', 'N', 'G', 1 };
-        rf_write(file, header, sizeof(header));
-        Gz g;
-        g.init(file, false);
-        char id[32];
-        const TrxFrame &last = fr[n - 1];
+        rf_write(&d->file, header, sizeof(header));
+        g.init(&d->file, false);
+        d->g_on = true;
+        if (g.failed) {
+            return "Out of memory";
+        }
+        const TrxFrame &last = d->fr[n - 1];
         g.num("{\"checkpoint_ring\":{\"budget_bytes\":", int64_t(n) * 256 * 1024);
         g.num(",\"max_entries\":", n);
         g.num(",\"seq\":", last.seq);
@@ -1831,49 +1967,203 @@ static const char *rering_dump_body(const char *path, int seconds, int stride, u
         g.str(",\"current_id\":\"");
         g.str(id);
         g.str("\",\"entries\":[");
-        for (int k = 0; k < n; k++) {
-            const TrxFrame *f = &fr[k];
-            // frame: the ring's cycle count in frames of the running mode (seq skips the frames a rewind cut)
-            uint32_t frame = uint32_t(f->cycles / trx_ring_frame_cycles());
-            r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)frame, (unsigned)f->seq);
-            g.str(k ? ",{\"id\":\"" : "{\"id\":\"");
-            g.str(id);
-            g.num("\",\"frame\":", frame);
-            g.num(",\"cycles\":", int64_t(f->cycles));
-            g.str(",\"pinned\":false,\"byte_size\":96000,\"created_at_ms\":0,\"payload\":");
-            // no cartridge RAM per entry: that would be a 64 KB read and 87 KB
-            // of base64 for every one of them (T66 part 5)
-            write_checkpoint(g, *f, rams[k], cols[k], NULL, NULL);
-            g.str("}");
-            if (progress) {
-                progress(k + 1, n, ctx);
-            }
-        }
-        g.str("]},\"delta_ring\":{\"entry_cap\":1,\"writes_cap\":1,\"enabled\":false,\"entries\":\"\",\"writes\":\"\"}");
-        g.str(",\"cpu_history\":{\"capacity\":1,\"enabled\":false,\"entries\":\"\"}}");
-        if (!g.finish(NULL)) {
-            err = "The file could not be written";
-        }
-        r_log("[RING] .c64rering: %d entries, materialized in %u ms, written in %u ms (%u in file writes)\n", n,
-               (unsigned)uint16_t(t1 - t0), (unsigned)uint16_t(r_ms_timer() - t1), (unsigned)g.write_ms);
-        *bytes = 9 + g.written;
-        *entries = n;
-        g.done();
-        rf_close(file);
     }
-    for (int k = 0; k < n && rams && cols; k++) {
-        r_free(rams[k]);
-        r_free(cols[k]);
+    const int k = d->k;
+    const TrxFrame *f = &d->fr[k];
+    // frame: the ring's cycle count in frames of the running mode (seq skips the frames a rewind cut)
+    uint32_t frame = uint32_t(f->cycles / trx_ring_frame_cycles());
+    r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)frame, (unsigned)f->seq);
+    g.str(k ? ",{\"id\":\"" : "{\"id\":\"");
+    g.str(id);
+    g.num("\",\"frame\":", frame);
+    g.num(",\"cycles\":", int64_t(f->cycles));
+    g.str(",\"pinned\":false,\"byte_size\":96000,\"created_at_ms\":0,\"payload\":");
+    // no cartridge RAM per entry: that would be a 64 KB read and 87 KB of base64 for every one of them (T66 part 5)
+    write_checkpoint(g, *f, d->rams[k], d->cols[k], NULL, NULL);
+    g.str("}");
+    if (g.failed) {
+        return "The file could not be written";
     }
-    r_free(rams);
-    r_free(cols);
-    r_free(fr);
-    return err;
+    d->wr_ms += uint16_t(r_ms_timer() - t0);
+    if (++d->k < n) {
+        return NULL;
+    }
+    g.str("]},\"delta_ring\":{\"entry_cap\":1,\"writes_cap\":1,\"enabled\":false,\"entries\":\"\",\"writes\":\"\"}");
+    g.str(",\"cpu_history\":{\"capacity\":1,\"enabled\":false,\"entries\":\"\"}}");
+    bool ok = g.finish(NULL);
+    r_log("[RING] .c64rering: %d entries, materialized in %u ms, written in %u ms (%u in file writes)\n", n, (unsigned)d->mat_ms,
+          (unsigned)d->wr_ms, (unsigned)g.write_ms);
+    if (!ok) {
+        return "The file could not be written";
+    }
+    d->bytes = 9 + g.written;
+    d->entries = n;
+    g.done();
+    d->g_on = false;
+    rf_close(&d->file);
+    d->file_on = false;
+    d->state = DS_DONE;
+    return NULL;
+}
+
+static const char *ring_step(TrxDump *d)
+{
+    switch (d->phase) {
+    case RP_PICK:
+        return ring_pick(d);
+    case RP_MAT:
+        return ring_mat(d);
+    default:
+        return ring_write(d);
+    }
+}
+
+// ---- the calls (trx_c64re.h) -----------------------------------------------------------------------------------------------------------------------------
+// Closes what is open; a file that is not complete is removed (no half file is left behind).
+static void dump_close(TrxDump *d)
+{
+    if (d->g_on) {
+        d->g.done();
+        d->g_on = false;
+    }
+    if (d->in_on) {
+        rf_close(&d->in);
+        d->in_on = false;
+    }
+    if (d->file_on) {
+        rf_close(&d->file);
+        d->file_on = false;
+        rf_remove(d->path);
+    }
+    trx_ring_mat_end(d->mat);
+    d->mat = NULL;
+}
+
+TrxDump *trx_dump_begin(int kind, const char *path, int arg, int stride, const char **err)
+{
+    *err = NULL;
+    if (int(strlen(path)) >= int(sizeof(((TrxDump *)0)->path))) {
+        *err = "The path is too long";
+        return NULL;
+    }
+    TrxDump *d = (TrxDump *)r_calloc(1, sizeof(TrxDump));
+    if (!d) {
+        *err = "Out of memory";
+        return NULL;
+    }
+    d->kind = kind;
+    d->state = DS_RUN;
+    r_snprintf(d->path, sizeof(d->path), "%s", path);
+    d->idx = arg;
+    d->seconds = arg;
+    d->stride = stride;
+    ring_machine_build(&d->mach, false);
+    return d;
+}
+
+int trx_dump_step(TrxDump *d, const char **err)
+{
+    *err = NULL;
+    if (!d || d->state == DS_FAILED) {
+        *err = "The dump has failed";
+        return -1;
+    }
+    if (d->state == DS_DONE) {
+        return 0;
+    }
+    // the file describes the machine trx_dump_begin found, whatever source is set around this step
+    TrxC64reSrc saved = g_src;
+    bool saved_on = g_src_on;
+    trx_c64re_set_source(&d->mach.src);
+    const char *e = d->kind == TRX_DUMP_FRAME ? frame_step(d) : d->kind == TRX_DUMP_RING ? ring_step(d) : machine_step(d);
+    g_src = saved;
+    g_src_on = saved_on;
+    d->step++;
+    if (e) {
+        dump_close(d);
+        d->bytes = 0;
+        d->state = DS_FAILED;
+        *err = e;
+        return -1;
+    }
+    return d->state == DS_DONE ? 0 : 1;
+}
+
+int trx_dump_pct(const TrxDump *d)
+{
+    if (!d || !d->steps) {
+        return 0;
+    }
+    if (d->state == DS_DONE) {
+        return 100;
+    }
+    int p = d->step * 100 / d->steps;
+    return p > 99 ? 99 : p;
+}
+
+const char *trx_dump_path(const TrxDump *d) { return d ? d->path : ""; }
+uint32_t trx_dump_bytes(const TrxDump *d) { return d ? d->bytes : 0; }
+int trx_dump_entries(const TrxDump *d) { return d ? d->entries : 0; }
+
+void trx_dump_drop(TrxDump *d)
+{
+    if (!d) {
+        return;
+    }
+    dump_close(d);
+    r_free(d->f);
+    r_free(d->ram);
+    r_free(d->col);
+    r_free(d->blk);
+    r_free(d->cart);
+    r_free(d->chunk);
+    r_free(d->hdr);
+    r_free(d->drive);
+    for (int k = 0; k < d->n && d->rams && d->cols; k++) {
+        r_free(d->rams[k]);
+        r_free(d->cols[k]);
+    }
+    r_free(d->rams);
+    r_free(d->cols);
+    r_free(d->fr);
+    r_free(d);
+}
+
+// The whole file in one call: begin, the steps in a loop, drop.
+static const char *dump_whole(int kind, const char *path, int arg, int stride, uint32_t *bytes, int *entries)
+{
+    *bytes = 0;
+    const char *err = NULL;
+    TrxDump *d = trx_dump_begin(kind, path, arg, stride, &err);
+    if (!d) {
+        return err;
+    }
+    int rc;
+    while ((rc = trx_dump_step(d, &err)) > 0) {
+    }
+    if (rc == 0) {
+        *bytes = d->bytes;
+        if (entries) {
+            *entries = d->entries;
+        }
+    }
+    trx_dump_drop(d);
+    return rc == 0 ? NULL : err;
+}
+
+const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes)
+{
+    return dump_whole(TRX_DUMP_FRAME, path, idx, 0, bytes, NULL);
+}
+
+const char *trx_c64re_dump_machine(const char *path, uint32_t *bytes)
+{
+    return dump_whole(TRX_DUMP_MACHINE, path, 0, 0, bytes, NULL);
 }
 
 const char *trx_c64rering_dump(const char *path, int seconds, int stride, uint32_t *bytes, int *entries)
 {
-    return trx_c64rering_dump_ex(path, seconds, stride, bytes, entries, NULL, NULL);
+    return dump_whole(TRX_DUMP_RING, path, seconds, stride, bytes, entries);
 }
 
 // ---- load ------------------------------------------------------------------------

@@ -97,8 +97,10 @@ static const char *api_ring_save_native(const char *path, uint32_t *bytes)
     return err;
 }
 
-// dump, save, load, load_entry and save_native as the firmware's table has them. Each builds the machine its file describes (System Mode, cartridge,
-// drive A, their media) and a load's hooks itself (ringmachine.cc), as the menu's operations do: the same file through either way in.
+// dump, save, load, load_entry and save_native as the firmware's table has them: each writes or reads the whole file in the one call (dump and save run
+// every step of the menu's stepped dump, trx_dump_*, in a loop) and returns NULL or what went wrong. They read and write registers, so the caller holds
+// the core lock: an operation or a poll of its library. Each builds the machine its file describes (System Mode, cartridge, drive A, their media) and a
+// load's hooks itself (ringmachine.cc), as the menu's operations do: the same file through either way in.
 static const u2p_ring_api_t s_ring = {
     sizeof(u2p_ring_api_t),
     api_ring_status,

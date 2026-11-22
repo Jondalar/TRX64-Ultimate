@@ -1,6 +1,6 @@
 // The ring library's entry (U18 D5): its operations and state values (ringops.cc), its poll (ring.poll every TRX_RING_POLL_MS, not while the
 // machine is frozen) and the ring table it exports (ring_api.cc). The engine does not start here: the api's groups (sync, io, ctx, ...) are null while
-// lib_register runs, so the core's start hook starts it through the operation ring.start; the log starts from the poll.
+// lib_register runs, so the core's start hook starts it through the operation ring.init; the log starts from the poll.
 #include "ringsys.h"
 #include "ringops.h"
 #include "trx_ring.h"

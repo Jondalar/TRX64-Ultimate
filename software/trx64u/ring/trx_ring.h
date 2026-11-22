@@ -188,6 +188,14 @@ int  trx_ring_materialize(int index, uint8_t *ram, uint8_t *color, uint8_t *cart
 // Many entries at once (oldest first in idx[], n of them): one pause, the
 // undo walked back from the head once. ram/color: n buffers each.
 int  trx_ring_materialize_many(const int *idx, int n, uint8_t **ram, uint8_t **color, uint8_t **carts = 0);
+// The same one target per call, for a caller that steps (a .c64rering dump the menu steps): begin makes the pause, reads the memories and finds the
+// targets (idx[] oldest first, as above; carts: read the cartridge RAM too); each next gives one target, newest first, its position in idx[] in *which
+// (cart may be NULL); end frees the walk, at any point. A next after the timeline or the log counts changed (a land, a restart, a parse that found
+// new records) refuses (trx_ring_error: "the timeline changed ..."). Returns 0 or a negative error, as above.
+struct TrxMat;
+int  trx_ring_mat_begin(const int *idx, int n, bool carts, TrxMat **out);
+int  trx_ring_mat_next(TrxMat *m, int *which, uint8_t *ram, uint8_t *color, uint8_t *cart);
+void trx_ring_mat_end(TrxMat *m);
 
 // The freeze menu's deferred rewind: the menu chooses an entry, the restore
 // happens when the menu closes (C64::unfreeze() asks).

@@ -802,7 +802,7 @@ static void replay_cia(const uint32_t *w, uint32_t *count)
 #define W_CART         26
 #define GLUE_CART      0x08
 
-// U9 D0/D3: one list, read by the writer's gate (trx_c64re_dump_ex) and by the
+// U9 D0/D3: one list, read by the writer's gate (ringfile.cc frame_prep) and by the
 // replay below. A type is on it when a .c64re can carry its whole state back:
 // the banking registers go in as bus writes, and nothing of the cartridge's own
 // state lives outside the ROM window, the cartridge RAM and - for GMod2 - the
@@ -946,6 +946,7 @@ enum {
     E_MEM = -7,
     E_APPLY = -8,
     E_REU = -9,
+    E_MOVED = -10,
 };
 
 const char *trx_ring_error(int code)
@@ -961,6 +962,7 @@ const char *trx_ring_error(int code)
     case E_MEM:     return "out of memory";
     case E_APPLY:   return "the engine did not finish applying the log";
     case E_REU:     return TRX_REU_OFF_TEXT;
+    case E_MOVED:   return "the timeline changed while the ring was being read";
     default:        return "error";
     }
 }
@@ -1831,23 +1833,57 @@ bool trx_ring_reachable(int index)
 
 // ---- materialize -----------------------------------------------------------------
 // idx[] oldest first. From the head's copy back: the newest target first, each
-// older one from the one after it, so the records are walked once.
-static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **cols, uint8_t **carts)
+// older one from the one after it, so the records are walked once. The walk is
+// kept in a TrxMat between targets, so a caller can take them one per call
+// (trx_ring_mat_next, a stepped .c64rering dump) or all in one.
+struct TrxMat {
+    int n;                  // targets
+    int i;                  // the next target to give, n - 1 down to 0
+    int hi;                 // the entry the next walk goes down from
+    int *at;                // the targets' timeline indices after begin's parse
+    uint32_t *seqs;
+    uint8_t *ram, *col, *cart;      // the working copies, walked back target by target
+    // the timeline as begin left it: a target asked for after it changed answers E_MOVED
+    int tl_n;
+    uint32_t head_seq, cnt0, cnt1;
+};
+
+static void mat_free(TrxMat *m)
 {
+    if (m) {
+        r_free(m->at);
+        r_free(m->seqs);
+        r_free(m->ram);
+        r_free(m->col);
+        r_free(m->cart);
+        r_free(m);
+    }
+}
+
+static int mat_begin_locked(const int *idx, int n, bool carts, TrxMat **out)
+{
+    *out = NULL;
     for (int i = 0; i < n; i++) {
         if (idx[i] < 0 || idx[i] >= tl_n || (i && idx[i] < idx[i - 1])) {
             return E_INDEX;
         }
     }
-    uint8_t *ram = (uint8_t *)r_malloc(65536);
-    uint8_t *col = (uint8_t *)r_malloc(1024);
-    uint8_t *cart = carts ? (uint8_t *)r_malloc(65536) : NULL;
-    if (!ram || !col || (carts && !cart)) {
-        r_free(ram);
-        r_free(col);
-        r_free(cart);
+    TrxMat *m = (TrxMat *)r_calloc(1, sizeof(TrxMat));
+    if (!m) {
         return E_MEM;
     }
+    m->ram = (uint8_t *)r_malloc(65536);
+    m->col = (uint8_t *)r_malloc(1024);
+    m->cart = carts ? (uint8_t *)r_malloc(65536) : NULL;
+    m->seqs = (uint32_t *)r_malloc(n * sizeof(uint32_t));
+    m->at = (int *)r_malloc(n * sizeof(int));
+    if (!m->ram || !m->col || (carts && !m->cart) || !m->seqs || !m->at) {
+        mat_free(m);
+        return E_MEM;
+    }
+    uint8_t *const ram = m->ram, *const col = m->col, *const cart = m->cart;
+    uint32_t *const seqs = m->seqs;
+    int *const at = m->at;
     // a pause (anywhere): RAM through the second port, colour RAM through the
     // freeze session (answered without a C64 cycle)
     uint32_t gate = r32(GATE_CTRL);
@@ -1879,13 +1915,11 @@ static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **c
         }
     }
     // the parse may drop entries from the front: find the targets again
-    uint32_t *seqs = (uint32_t *)r_malloc(n * sizeof(uint32_t));
-    int *at = (int *)r_malloc(n * sizeof(int));
-    for (int i = 0; seqs && i < n; i++) {
+    for (int i = 0; i < n; i++) {
         seqs[i] = ent(idx[i]).seq;
     }
     parse_locked();
-    for (int i = 0; seqs && at && i < n; i++) {
+    for (int i = 0; i < n; i++) {
         at[i] = -1;
         for (int j = 0; j < tl_n; j++) {
             if (ent(j).seq == seqs[i]) {
@@ -1900,31 +1934,62 @@ static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **c
         w32(GATE_CTRL, gate & 1);
         w32(SH_CTRL, sh);
     }
-    int err = (seqs && at) ? E_NONE : E_MEM;
-    for (int i = 0; !err && i < n; i++) {
+    for (int i = 0; i < n; i++) {
         if (at[i] < 0 || !reachable(ent(at[i]))) {
-            err = E_GONE;
+            mat_free(m);
+            return E_GONE;
         }
     }
-    int hi = tl_n;
-    for (int i = n - 1; !err && i >= 0; i--) {
-        Coll cl = { 0, 0, 0 };
-        collect(at[i], hi, true, true, &cl);
-        each(ram_tch, 65536, ram_val, [ram](int a, uint8_t v) { ram[a] = v; });
-        each(col_tch, 1024, col_val, [col](int a, uint8_t v) { col[a] = v; });
-        memcpy(rams[i], ram, 65536);
-        memcpy(cols[i], col, 1024);
-        if (cart) {
-            each(cart_tch, 65536, cart_val, [cart](int a, uint8_t v) { cart[a] = v; });
-            memcpy(carts[i], cart, 65536);
-        }
-        hi = at[i];
+    m->n = n;
+    m->i = n - 1;
+    m->hi = tl_n;
+    m->tl_n = tl_n;
+    m->head_seq = tl_n ? ent(tl_n - 1).seq : 0;
+    m->cnt0 = cnt_now[0];
+    m->cnt1 = cnt_now[1];
+    *out = m;
+    return E_NONE;
+}
+
+// The next target, newest first: its position in idx[] goes to *which, its memories to ram / col and, when begin read the cartridge RAM, cart.
+static int mat_next_locked(TrxMat *m, int *which, uint8_t *ram_out, uint8_t *col_out, uint8_t *cart_out)
+{
+    const int i = m->i;
+    if (i < 0) {
+        return E_INDEX;
     }
-    r_free(seqs);
-    r_free(at);
-    r_free(ram);
-    r_free(col);
-    r_free(cart);
+    if (tl_n != m->tl_n || ent(tl_n - 1).seq != m->head_seq || cnt_now[0] != m->cnt0 || cnt_now[1] != m->cnt1 ||
+        ent(m->at[i]).seq != m->seqs[i]) {
+        return E_MOVED;
+    }
+    uint8_t *const ram = m->ram, *const col = m->col, *const cart = m->cart;
+    Coll cl = { 0, 0, 0 };
+    collect(m->at[i], m->hi, true, true, &cl);
+    each(ram_tch, 65536, ram_val, [ram](int a, uint8_t v) { ram[a] = v; });
+    each(col_tch, 1024, col_val, [col](int a, uint8_t v) { col[a] = v; });
+    memcpy(ram_out, ram, 65536);
+    memcpy(col_out, col, 1024);
+    if (cart) {
+        each(cart_tch, 65536, cart_val, [cart](int a, uint8_t v) { cart[a] = v; });
+        if (cart_out) {
+            memcpy(cart_out, cart, 65536);
+        }
+    }
+    m->hi = m->at[i];
+    m->i = i - 1;
+    *which = i;
+    return E_NONE;
+}
+
+static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **cols, uint8_t **carts)
+{
+    TrxMat *m;
+    int err = mat_begin_locked(idx, n, carts != NULL, &m);
+    for (int k = n - 1; !err && k >= 0; k--) {
+        int which;
+        err = mat_next_locked(m, &which, rams[k], cols[k], carts ? carts[k] : NULL);
+    }
+    mat_free(m);
     return err;
 }
 
@@ -2202,6 +2267,35 @@ int trx_ring_materialize_many(const int *idx, int n, uint8_t **ram, uint8_t **co
     int err = materialize_locked(idx, n, ram, color, carts);
     unlock();
     return err;
+}
+
+int trx_ring_mat_begin(const int *idx, int n, bool carts, TrxMat **out)
+{
+    *out = NULL;
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    int err = mat_begin_locked(idx, n, carts, out);
+    unlock();
+    return err;
+}
+
+int trx_ring_mat_next(TrxMat *m, int *which, uint8_t *ram, uint8_t *color, uint8_t *cart)
+{
+    if (!m) {
+        return E_INDEX;
+    }
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    int err = mat_next_locked(m, which, ram, color, cart);
+    unlock();
+    return err;
+}
+
+void trx_ring_mat_end(TrxMat *m)
+{
+    mat_free(m);
 }
 
 void trx_ring_set_pending(int index)

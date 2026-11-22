@@ -41,8 +41,8 @@ struct TrxC64reSrc {
     int (*machine_set)(void *ctx, int machine);
     int (*drive_mount)(void *ctx, const char *spec);
 };
-// Every entry below and trx_trxring_save() build the source for their own call (trx_c64re_source_begin, ringmachine.h) unless one is set. set_source sets
-// one built earlier (the dump operation builds it on its handler and writes on a job), NULL drops it.
+// A dump (trx_dump_begin) builds the source its file describes once and sets it around each of its steps. trx_c64re_place(), the loads and
+// trx_trxring_save() build the source for their own call (trx_c64re_source_begin, ringmachine.h) unless one is set. set_source sets one, NULL drops it.
 void trx_c64re_set_source(const TrxC64reSrc *src);
 // The source set now, or NULL (the .trxring names its media from it).
 const TrxC64reSrc *trx_c64re_source(void);
@@ -51,24 +51,36 @@ const TrxC64reSrc *trx_c64re_source(void);
 bool trx_c64re_source_begin(bool load);
 void trx_c64re_source_end(bool built);
 
-// Writes timeline entry idx as a .c64re of format 2 (U8): a binary section table, streamed, with the cartridge image as it stands at the freeze, once.
-// NULL, or what went wrong - and then no file is left behind.
-const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes);
-// The same, calling progress(done, total, ctx) once before the first section (done 0) and after every piece written.
 typedef void (*trx_progress_fn)(int done, int total, void *ctx);
-const char *trx_c64re_dump_ex(const char *path, int idx, uint32_t *bytes, trx_progress_fn progress, void *ctx);
 
+// ---- the dumps in steps (U18; MultiCore's decision of 2026-11-22: a ring dump is a stepped operation) ----------------------------------------------------
+// trx_dump_begin sets a dump up and builds the machine its file describes (ringmachine.cc); it writes no file. Each trx_dump_step does one piece of the
+// work: TRX_DUMP_FRAME the frame's memories and the file's head, then 16 KB of a section a step; TRX_DUMP_RING the entries picked and the pause the walk
+// starts from, then one entry materialized a step (newest first), then one entry written a step (oldest first); TRX_DUMP_MACHINE the machine read and the
+// file's head, then 63 KB of a medium hashed or written a step, then the manifest and the checkpoint. It answers 1 while there is more, 0 when the file is
+// complete, -1 when it failed (*err says why, and the partial file is gone). trx_dump_drop ends a dump at any point and removes a file that is not complete.
+// begin and every step read registers: call them on a task that holds the core lock. Between two steps the machine must stay as it is (the menu keeps it
+// frozen while it steps); a timeline that changed between two steps of a ring dump fails it.
+enum { TRX_DUMP_FRAME, TRX_DUMP_RING, TRX_DUMP_MACHINE };
+struct TrxDump;
+// FRAME: timeline entry `arg` as a .c64re of format 2; RING: the newest `arg` seconds, one entry in every `stride` frames, as a .c64rering; MACHINE: the
+// machine as it stands, no ring, as a .c64re of format 1. NULL and *err set when there is no memory or the path does not fit.
+TrxDump *trx_dump_begin(int kind, const char *path, int arg, int stride, const char **err);
+int trx_dump_step(TrxDump *d, const char **err);
+int trx_dump_pct(const TrxDump *d);             // 0-100 for the progress display
+// Once trx_dump_step answered 0: the file, its size and (.c64rering) its entries.
+const char *trx_dump_path(const TrxDump *d);
+uint32_t trx_dump_bytes(const TrxDump *d);
+int trx_dump_entries(const TrxDump *d);
+void trx_dump_drop(TrxDump *d);
+
+// The same dumps whole in one call (begin, the steps in a loop, drop): NULL, or what went wrong - and then no file is left behind.
+// Timeline entry idx as a .c64re of format 2 (U8): a binary section table, streamed, with the cartridge image as it stands at the freeze, once.
+const char *trx_c64re_dump(const char *path, int idx, uint32_t *bytes);
 // The machine as it stands, with no frame ring: RAM, VIC registers, colour RAM and the media in the machine, format 1 (FW apps/c64re "Save .C64RE Dump").
 const char *trx_c64re_dump_machine(const char *path, uint32_t *bytes);
-
-// Writes the newest "seconds" of the ring, one entry in every "stride"
-// frames (oldest first, the newest entry is the cursor), as a .c64rering.
+// The newest "seconds" of the ring, one entry in every "stride" frames (oldest first, the newest entry is the cursor), as a .c64rering.
 const char *trx_c64rering_dump(const char *path, int seconds, int stride, uint32_t *bytes, int *entries);
-
-// The same, calling progress(done, total, ctx) once the memories are read
-// (done 0) and after every entry written.
-const char *trx_c64rering_dump_ex(const char *path, int seconds, int stride, uint32_t *bytes, int *entries,
-                                  trx_progress_fn progress, void *ctx);
 
 // Where a state file belongs and what to name it after: the folder of the cartridge or disk the source names, else a timewarp/ folder on the first
 // volume there is (U8 §5). False when there is nowhere to write at all.

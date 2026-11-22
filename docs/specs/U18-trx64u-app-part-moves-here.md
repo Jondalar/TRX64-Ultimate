@@ -380,3 +380,13 @@ Nothing decided yet.
     our u64 block is declared as the runs we write; the case LED select is set through `board.case_led_select(v)`; both
     palettes are ours. `bus_wr` / `bus_rd` take the whole bus-side I/O block (0x00-0x2E). After start,
     `base_setting_changed` runs once per base-owned setting with its own key: the swap is written on "Joystick Input".
+  - **Ring round 3, stepped dumps:** `tw.dump` (one 16 KB chunk per step), `tw.ringdump` (one entry materialized, then
+    one written per step) and `machine.save_c64re` (63 KB hashed or written per step) answer `more` until done; the first
+    call builds the state and the machine info once; cancel, a failed step or a menu close removes the partial file. A
+    call the menu does not step (REST, the exported table) runs every step inside one call. `api->job` and its stack are
+    gone. Nine files (frame, ring and machine dumps x none / cartridge / GMod2) are byte-identical old against new in a
+    host harness; the split materialize is read, not run. Image + bss 135,576 B; peak on top of the permanent heap:
+    4,349,536 B for a 64-entry ring. Open: "Save .C64RE dump" is a `[[task]]`, which takes no `job` (it runs all steps in
+    one call, no progress); the F4 terminal reaches the ring table from `monitor.key`, which runs without the core lock.
+    More firmware bugs (D6, frozen copy; fixed in the library): `Gz` writes through a null pointer when its 16 KB buffer
+    allocation fails; a failed `.c64rering` write leaves the partial file.

@@ -2,15 +2,14 @@
 // the menu says to it: start and stop, scrub a frame or a second, back to live, mark, resume here, write and load a .c64re. menu.toml F2 draws it (screens.cc layout
 // "timeline"), the keys of that layout call these operations (menuctl.cc).
 // U18 (the ring library on the SDK): the registrations are the static tables of ringops_record() (lib_ring.cc hands them out), settings are read
-// through api->ops->state("set.<Key>"), the dump's task is a job (api->job), the menu's write protocol and the target path are the ctx group's; ring.start
-// starts the engine (the core's start hook calls it), ring.poll is the library's poll and ring.unfreeze the menu's rewind at its close (the core hook
-// menu_closed calls it); the last two were calls of the core application's main loop. The machine a file describes is ringmachine.cc's, for these
-// operations and the exported table alike.
+// through api->ops->state("set.<Key>"), the dumps are operations the menu steps (trx_dump_*), the menu's write protocol and the target path are the ctx
+// group's; ring.init starts the engine (the core's start hook calls it), ring.poll is the library's poll and ring.unfreeze the menu's rewind at its close
+// (the core hook menu_closed calls it); the last two were calls of the core application's main loop. The machine a file describes is ringmachine.cc's,
+// for these operations and the exported table alike.
 #include "ringops.h"
 #include "trx_ring.h"
 #include "trx_c64re.h"
 #include "trx_trxring.h"
-#include "ringmachine.h"
 #include "ringsys.h"
 #include <string.h>
 
@@ -235,151 +234,102 @@ static bool target_path(const char *name, const char *ext, char *out, int n)
     return c && c->target_path(name, ext, out, n);
 }
 
-// FW shows the progress box while trx_c64re_dump_ex writes (trx_timewarp_ui.cc:361-376); the menu draws a progress only for an operation that answers `more` and is called
-// again (ctx.job_step, newdisk.cc is the pattern), so with job_step the write runs on a task of its own and the operation answers `more` until it is done, reporting
-// the share the task has written (ctx.job_progress, from the handler: the ctx group's rule). Without job_step (REST, a hotkey) the write runs on the caller. The task is
-// a job of the library (api->job); without a job it writes on the caller. The machine the file describes is built on the handler (ringmachine.cc) and goes to the task.
-struct DumpJob {
-    volatile int state;                         // 0 idle, 1 the task writes, 2 it is done (result in why / bytes / entries)
-    volatile int pct;                           // the share written, set by the task
-    bool ring;                                  // .c64rering (the last seconds) instead of one frame
-    int idx;
-    int secs;
-    char path[260];
-    uint32_t bytes;
-    int entries;
-    const char *why;
-    RingMachine mach;
-    SvcJobH *job;
-};
-static DumpJob g_dj;
+// ---- the dumps (trx_c64re.h trx_dump_*) -------------------------------------------------------------------------------------------------------------
+// FW showed a progress box while its write ran on a task (trx_timewarp_ui.cc:361-376). Here the menu steps the operation (the node attribute `job`,
+// ctx.job_step): each call does one step of the dump under the core lock and answers `more` until the file is complete; the menu stays open meanwhile, so
+// the machine stays frozen between the steps. A call the menu does not step (REST, a hotkey, a task) does every step in that one call. The stepped dump
+// lives here between two calls of its operation; one at a time, and only calls on the menu task (the stepped ones, ring.unfreeze) touch it.
+static TrxDump *g_dump;
+static int g_dump_kind;
+static char g_dump_name[56];                    // the name it was started with (name_arg: 55 characters)
 
-static void dump_progress(int done, int total, void *)
+// Drops the stepped dump, removing its file when that is not complete.
+static void dump_drop(void)
 {
-    int pct = total ? done * 100 / total : 0;
-    g_dj.pct = pct;
-    if (total && (done == 0 || done == total || (done * 10 / total) != ((done - 1) * 10 / total))) {
-        r_log("[C64RE] dump %d%s\n", pct, "%");
-    }
+    trx_dump_drop(g_dump);
+    g_dump = NULL;
 }
 
-// the firmware's task had 12 * configMINIMAL_STACK_SIZE words (1600 each); SvcJob::start takes bytes (the base gives at least 12 KB)
-#define DUMP_STACK (12 * 1600 * 4)
-
-// The source goes with both kinds: a .c64rering entry names the cartridge and drive A as a .c64re does (FW write_checkpoint).
-static void dump_run(DumpJob *j)
+static int dump_said(const TrxDump *d, int kind, int rc, const char *why, OpOut &o)
 {
-    trx_c64re_set_source(&j->mach.src);
-    if (j->ring) {
-        j->why = trx_c64rering_dump_ex(j->path, j->secs, 5, &j->bytes, &j->entries, dump_progress, NULL);
-    } else {
-        j->why = trx_c64re_dump_ex(j->path, j->idx, &j->bytes, dump_progress, NULL);
-    }
-    trx_c64re_set_source(NULL);
-}
-
-static int dump_task(SvcJobH *, void *arg)
-{
-    DumpJob *j = (DumpJob *)arg;
-    dump_run(j);
-    __asm__ volatile ("fence" ::: "memory");
-    j->state = 2;
-    return 0;
-}
-
-static int dump_op(const OpArgs &a, OpOut &o, bool ring)
-{
-    DumpJob *j = &g_dj;
-    o.more = false;
-    if (j->state == 1 && !job_step()) {
-        r_snprintf(o.msg, o.msglen, "A save is still being written");
+    if (rc < 0) {
+        r_snprintf(o.msg, o.msglen, "%s", why ? why : "The file could not be written");
         return OPE_FAILED;
     }
-    if (j->state == 0) {
-        if (!target_path(a.s(0), ring ? ".c64rering" : ".c64re", j->path, sizeof(j->path))) {
-            r_snprintf(o.msg, o.msglen, "No medium to save to");
-            return OPE_FAILED;
-        }
-        j->ring = ring;
-        j->idx = shown();
-        j->secs = 1;
-        j->bytes = 0;
-        j->entries = 0;
-        j->pct = 0;
-        j->why = NULL;
-        if (ring) {
-            int fps = trx_ring_fps() ? trx_ring_fps() : 50;
-            j->secs = trx_ring_count() / fps;
-            j->secs = j->secs < 1 ? 1 : (j->secs > 30 ? 30 : j->secs);
-        }
-        // T228 R20/R21: what the file says of the machine (the System Mode, the cartridge image as it stands, the GMod2's EEPROM, drive A and its image)
-        ring_machine_build(&j->mach, false);
-        if (job_step() && g_api->job) {
-            job_progress(0, j->path);
-            j->state = 1;
-            j->job = g_api->job->start(dump_task, j, DUMP_STACK);
-            if (j->job) {
-                o.more = true;
-                return OPE_OK;
-            }
-            j->state = 0;                               // no task: write on the caller, without the bar
-        }
-        dump_run(j);
-        j->state = 2;
-    }
-    if (j->state == 1) {                                // the task writes: the share it has written goes to the menu's progress
-        job_progress(j->pct, NULL);
-        o.more = true;
-        return OPE_OK;
-    }
-    j->state = 0;
-    if (j->job) {
-        g_api->job->join(j->job);
-        j->job = 0;
-    }
-    job_progress(0, "");
-    if (job_cancelled()) {                              // FW's write cannot be stopped half way: it ran to its end, the file goes
-        if (!j->why) {
-            rf_remove(j->path);
-        }
-        r_snprintf(o.msg, o.msglen, "Cancelled: nothing was written.");
-        return OPE_OK;
-    }
-    if (j->why) {
-        r_snprintf(o.msg, o.msglen, "%s", j->why);
-        return OPE_FAILED;
-    }
-    if (ring) {
-        r_snprintf(o.msg, o.msglen, "Saved %s: %d entries, %u KB", j->path, j->entries, (unsigned)((j->bytes + 1023) >> 10));
+    unsigned kb = (unsigned)((trx_dump_bytes(d) + 1023) >> 10);
+    if (kind == TRX_DUMP_RING) {
+        r_snprintf(o.msg, o.msglen, "Saved %s: %d entries, %u KB", trx_dump_path(d), trx_dump_entries(d), kb);
     } else {
-        r_snprintf(o.msg, o.msglen, "Saved %s (%u KB)", j->path, (unsigned)((j->bytes + 1023) >> 10));
+        r_snprintf(o.msg, o.msglen, "Saved %s (%u KB)", trx_dump_path(d), kb);
     }
     return OPE_OK;
 }
 
-static int op_dump(CoreCtx *, const OpArgs &a, OpOut &o) { return dump_op(a, o, false); }
-
-// "Save .C64RE Dump" (FW apps/c64re/manifest.json, category "C64 Machine"): the machine as it stands, no ring needed; the media that are in it go inside
-static int op_c64re_dump(CoreCtx *, const OpArgs &a, OpOut &o)
+static int dump_op(const OpArgs &a, OpOut &o, int kind, const char *ext)
 {
-    char p[260];
-    if (!target_path(a.s(0), ".c64re", p, sizeof(p))) {
+    o.more = false;
+    const bool step = job_step();
+    const char *why = NULL;
+    if (step && g_dump && g_dump_kind == kind && !strcmp(g_dump_name, a.s(0))) {
+        if (job_cancelled()) {
+            dump_drop();
+            r_snprintf(o.msg, o.msglen, "Cancelled: nothing was written.");
+            return OPE_OK;
+        }
+        int rc = trx_dump_step(g_dump, &why);
+        if (rc > 0) {
+            job_progress(trx_dump_pct(g_dump), NULL);
+            o.more = true;
+            return OPE_OK;
+        }
+        int res = dump_said(g_dump, kind, rc, why, o);
+        dump_drop();
+        return res;
+    }
+    if (step) {
+        dump_drop();                                // one the menu stopped stepping
+    }
+    char path[260];
+    if (!target_path(a.s(0), ext, path, sizeof(path))) {
         r_snprintf(o.msg, o.msglen, "No medium to save to");
         return OPE_FAILED;
     }
-    uint32_t bytes = 0;
-    const char *why = trx_c64re_dump_machine(p, &bytes);
-    if (why) {
+    int arg = 0;
+    if (kind == TRX_DUMP_FRAME) {
+        arg = shown();
+    } else if (kind == TRX_DUMP_RING) {
+        int fps = trx_ring_fps() ? trx_ring_fps() : 50;
+        arg = clampi(trx_ring_count() / fps, 1, 30);
+    }
+    TrxDump *d = trx_dump_begin(kind, path, arg, 5, &why);
+    if (!d) {
         r_snprintf(o.msg, o.msglen, "%s", why);
         return OPE_FAILED;
     }
-    r_snprintf(o.msg, o.msglen, "Saved %s (%u KB)", p, (unsigned)((bytes + 1023) >> 10));
-    return OPE_OK;
+    if (step) {                                     // this call set it up; the menu's next calls do the steps
+        g_dump = d;
+        g_dump_kind = kind;
+        r_snprintf(g_dump_name, sizeof(g_dump_name), "%s", a.s(0));
+        job_progress(0, path);
+        o.more = true;
+        return OPE_OK;
+    }
+    int rc;
+    while ((rc = trx_dump_step(d, &why)) > 0) {
+    }
+    int res = dump_said(d, kind, rc, why, o);
+    trx_dump_drop(d);
+    return res;
 }
+
+static int op_dump(CoreCtx *, const OpArgs &a, OpOut &o) { return dump_op(a, o, TRX_DUMP_FRAME, ".c64re"); }
+
+// "Save .C64RE Dump" (FW apps/c64re/manifest.json, category "C64 Machine"): the machine as it stands, no ring needed; the media that are in it go inside
+static int op_c64re_dump(CoreCtx *, const OpArgs &a, OpOut &o) { return dump_op(a, o, TRX_DUMP_MACHINE, ".c64re"); }
 
 static const char *st_suggest_c64re(CoreCtx *) { return "c64re"; }
 
-static int op_ringdump(CoreCtx *, const OpArgs &a, OpOut &o) { return dump_op(a, o, true); }
+static int op_ringdump(CoreCtx *, const OpArgs &a, OpOut &o) { return dump_op(a, o, TRX_DUMP_RING, ".c64rering"); }
 
 // The state goes in at once: MultiCore's app puts no machine state back when the menu closes (the menu draws on its own layer), so the menu's close does not
 // overwrite it (MultiCore's decision of 2026-11-22). The machine the file needs (System Mode, cartridge, drive A) is built by the load (ringmachine.cc).
@@ -566,9 +516,11 @@ static int op_poll(CoreCtx *, const OpArgs &, OpOut &)
 
 // ring.unfreeze: the menu closes; the core hook menu_closed (base library) calls it on the menu task with the machine still stopped and without the core
 // lock: the frame chosen in the Timewarp bar is where the machine runs on. A state file made pending (trx_c64re_set_pending, trx_trxring_set_pending) goes
-// in here as well.
+// in here as well. A dump the menu was still stepping is dropped with its partial file: the machine runs on from here, and its next step would describe
+// another machine (no register is touched by the drop).
 static int op_unfreeze(CoreCtx *, const OpArgs &, OpOut &)
 {
+    dump_drop();
     if (trx_ring_pending()) {
         trx_ring_unfreeze();
     }
