@@ -1,8 +1,9 @@
 # TRX64 Ultimate user manual
 
 How to use TRX64 Ultimate on the C64 Ultimate and the Ultimate 64 Elite II: every menu, every
-function and the apps. It describes release `0.3.0`, build `main-31e69921` (host `31e6992`, app
-`18af6de9`). The release before it is `0.3.0` as well, build `main-8f1dc184`; before that `0.2.0`, build `main-63761352`. For installing and going back to
+function and the apps. It describes release `0.3.1`, build `main-d94aa68e` (host `d94aa68`, app
+`eb3e6be6`), a patch of `0.3.0`: the P7 keyboard scan uses the 1.8 V I2C bus only. Before it: `0.3.0`, builds
+`main-31e69921` and `main-8f1dc184`; before that `0.2.0`, build `main-63761352`. For installing and going back to
 the stock firmware see [INSTALL.md](../../INSTALL.md).
 
 | Chapter | What it covers |
