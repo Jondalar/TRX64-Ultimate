@@ -240,3 +240,20 @@ Nothing decided yet.
     `trx_io` read32 / write32 / slim are ours (D20), each 4-byte access inside `sync.enter` / `leave`.
   - Three agents port base, ring and monitor against 3.1; calls that do not exist yet go into a `pending_api.h` per
     library under the 3.3 names.
+  - **Ring library ported** (`d12abfa9`): compiles; the link is open only on its `pending_api.h` (44 calls). Found:
+    `ops->state("set.<key>")` does not route through MultiCore's `LibLoader::svc_state` at `3b8e2955` (theirs, fixed with
+    3.3).
+  - **The ring's list (MultiCore, by Alex's delegation):**
+    - The C64 machine registers (stop, mode, DMA mem-only, cartridge type, REU enable and size, sampler enable, video
+      format) are ours: they go into our core's API TOML (D8); the base gives a generic `io` group (register read/write in
+      the core's window, `ddr_read` / `ddr_write`), addresses from our TOML, none from base headers.
+    - Exports of their shared libraries: "uci" 1 (the command interface slot), "c64cart" 1 (the cartridge calls, the
+      GMod2 EEPROM, the cartridge RAM window), "cbm1541" 1 (`slot_mount`, `drive_info(slot, Cbm1541Info *)` with a
+      size-first struct; the drive A image window). No raw addresses in our code.
+    - Base calls: `board.fpga_caps`, `sys.wall_time`, `sys.app_version`, `settings.override_value` + `settings.apply`,
+      `ctx.job_step` / `job_progress` / `job_cancelled`, `ctx.target_path` (was our `trx_target_path`; `diag.cc` uses it).
+    - Menu close: the generic app calls a core hook `menu_closed`, which our base library provides and which calls the
+      ring; no "ring.unfreeze" by name in generic code (D24). The engine does not start in `lib_register` (job, net and
+      trx are null there) but in the core's start hook or its first poll. The poll {"ring.poll", 100 ms} stays.
+    - Memory: the S13 budget declares a permanent figure (the ring: about 1.42 MiB) and a peak (a `.c64rering` dump: up
+      to about 4.2 MB more); trx64u's heap of 0x950000 holds it.
