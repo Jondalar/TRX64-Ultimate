@@ -92,6 +92,13 @@ sub-apps load on demand), D2, D5.
   our bitstream needs MultiCore again).
 - **D4 (Alex, 2026-11-20): one trxmon source, here.** Our firmware and the monitor library build from the same files;
   the drift (`mon.h`, `ring.h`) is merged once, here, and MultiCore drops its copy with the move.
+- **D6 (MultiCore, by Alex's delegation, 2026-11-22): the ring library's copy is the master; the firmware's ring is
+  frozen.** The library's ring files (`software/trx64u/ring/`) are brought once to the firmware's state (64 sections,
+  `load_entry`, `save_native` / `.trxring`) and are the master from then on. The firmware's copy (`trx_ring.cc`,
+  `trx_c64re*.cc`, `trx_trxring.cc` in the application submodule) takes bug fixes only, and every such fix goes into
+  the library in the same change; new ring features go only into the library. Asked against "one source with the
+  firmware, as trxmon (D4)": that refactors code with an end date (D2, U3) and needs a firmware build plus a board
+  check of Timewarp.
 - **D5 (Alex, 2026-11-20): one library per function, the cartridge tool stays a sub-app.** Alex asked: "Doesn't it make
   sense to build one lib per function? One for the ring, one for the monitor, one for the cartridge tool?" (translated).
   The cut:
