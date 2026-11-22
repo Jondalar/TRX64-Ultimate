@@ -267,3 +267,11 @@ Nothing decided yet.
     blank_rows, cursor, sig), named by a menu node with layout "terminal"; `save(path, buf, 0)` creates an empty file;
     `plat_firmware_version` / `plat_firmware_git` map to `sys.app_version` / `sys.app_git`; `net.gated` is "yes" while
     the REST token gate is active, null otherwise; `sleep_ms(0)` sleeps one 5 ms tick, `sys.yield` is the yield.
+  - `plat_media` (MultiCore, by Alex's delegation): generic, base 3.3 `ctx.media_source(slot, buf, len)` with a
+    media-slot name from the core's descriptor; our `plat_media` maps role 0 / 1 / 2 to the slot names our c64
+    descriptor TOML gives the cartridge, drive A and drive B.
+  - **Base library ported**: compiles; the link is open only on its `pending_api.h` (59 calls). The three 64 KiB static
+    buffers are gone (taken from `api->mem` while in use); about 54 KB of bss stay. `api->trx` and `api->c64` are null
+    while `lib_register` runs; the library reads them at each use. Play MOD is gone from the menu (T239.3 D5). Found
+    while porting: MultiCore's `u64cfg` passed the range index instead of the number for "UltiSID n 6581 Offset/Base"
+    (the offset was off by 1024 in `resid8_plan`), and `uci_drive_do` printed an uninitialised message; both fixed here.

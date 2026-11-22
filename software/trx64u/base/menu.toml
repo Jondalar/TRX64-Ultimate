@@ -980,16 +980,9 @@ ext = ".reu"
   bind = [ { arg = "path", file = true } ]
   key = "P"
 
-# FW filetype_reu.cc:42-48: .mod = Play MOD (through the sampler), Load into REU, Preload on Startup
+# FW filetype_reu.cc:42-48: .mod = Load into REU, Preload on Startup (FW's Play MOD is not in the trx64u library: MultiCore T239.3 D5)
 [[filetype]]
 ext = ".mod"
-  [[filetype.action]]
-  label = "Play MOD"
-  op = "reu.playmod"
-  bind = [ { arg = "path", file = true } ]
-  key = "M"
-  closes_menu = true
-  show_state = "reu.sampler"
   [[filetype.action]]
   label = "Load into REU"
   op = "reu.load"
@@ -2505,7 +2498,8 @@ default = 1
 when = "live"
 apply = "ui.fx"
 
-# FW userinterface.cc:163, 339, 1081: the keys of the lists and sheets (menuctl.cc nav_fold); the default of a machine that has never been set up is Quick Search, WASD Cursors on the C64 Ultimate product (fx_ui)
+# FW userinterface.cc:163, 339, 1081: the keys of the lists and sheets (menuctl.cc nav_fold); the default of a machine that has never been set up is Quick Search, WASD Cursors on the C64 Ultimate product
+# (U18: that default, like the look and the name squeeze, is the generic application's; the trx64u library's ui.fx does not set it)
 [[core_setting]]
 group = "Application"
 key = "Navigation Style"
