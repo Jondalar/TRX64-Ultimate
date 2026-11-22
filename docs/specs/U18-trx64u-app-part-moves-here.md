@@ -206,3 +206,12 @@ Nothing decided yet.
 - **2026-11-22, evening: R3 and R4 decided** (Alex, one at a time). R4: the TRX tables (`SvcTrx`, `SvcRing`, `SvcC64`)
   leave MultiCore's base API and come only from our libraries through `SvcLib`. R3: `lib.mk` refuses a library with
   constructors or destructors; the loader runs none.
+  MultiCore recorded them as T239.3 D19 and D20 (integration `5f49fe2f`). Proposed to MultiCore the same evening:
+  - `trx` and `ring` are ours: exports "trx" and "ring", major 1, with the firmware's ABI header (`app_api.h`) as their
+    one definition (`u2p_trx_api_t` with `detach`, `stop_requested`, `ui_request` and `ring` null in the library;
+    `u2p_ring_api_t` whole). The library's `LIB_VERSION` is the export's major; within a major, members are only
+    appended.
+  - `c64` gets an SDK header (MultiCore's; other C64-family cores may provide it). Our base library provides it for
+    trx64u. Today's `SvcC64` plus `dma_read_frozen`, `cart_preference` and `reset` (from `SvcTrx.reset_c64`).
+  - MultiCore's cartridge module (`c64_cart.cc`, D12) drives our bitstream's cartridge engine through its register map,
+    not through `SvcC64`; for a second core it needs the module's base address from the core's API TOML (T239.3 D8).
