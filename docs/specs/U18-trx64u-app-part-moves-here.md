@@ -139,14 +139,19 @@ trx64u units and does not run them again. Open:
 4. ~~One trxmon source here?~~ Answered: D4.
 5. ~~One library or two?~~ Answered: D5 (three libraries and a sub-app).
 
-### Requests to MultiCore for T239.3 (read by MultiCore 2026-11-20; R1 in SDK 0.1.0, R2 in work, R3 and R4 wait for Alex)
+### Requests to MultiCore for T239.3 (read by MultiCore 2026-11-20; R1 in SDK 0.1.0, R2 in work, R3 and R4 decided by Alex 2026-11-22)
 
 - **R1** The SDK release ships the app core image (`coreapp.bin`) with its version, so that a large core can be packed
   outside (§1 item 5).
 - **R2** The library poll (T239.3 S3) is served before trx64u moves (P4); the RPC server needs it from the start.
-- **R3** The loader runs `.init_array`, or `lib.mk` refuses a library that has one (§1 item 3).
+- **R3** The loader runs `.init_array`, or `lib.mk` refuses a library that has one (§1 item 3). **Decided (Alex,
+  2026-11-22): the build refuses** a library with constructors or destructors (`.init_array`, `.fini_array`,
+  `__cxa_atexit`); asked against "the loader runs them". Ours: `FileSystem_Root` and `mstring` in `ringfile` /
+  `ringops` go with the move to `SvcFs`.
 - **R4** T239.3 P1 records D3: the TRX service tables leave the app core and come from our libraries through `SvcLib`;
   the base API keeps no `trx` / `c64` implementation for the monolith.
+  **Decided (Alex, 2026-11-22): yes**, the tables leave the base API; asked against "they stay in the base API" (base
+  3.2 taking our ring layout). The ring library's own table through `SvcLib` (MultiCore's interim rule) is the rule now.
 - **R5** The trx64u share of today's app image is measured per library of D5 against `U2A3_IMAGE_MAX` before P4 is cut.
 - **R6** The golden ops file, `descrec.py` and the menu simulator are in the SDK, so that our CI tests the menu.
 - **R7** An ABI major change is announced before release, so that trx64u is rebuilt before a package ships it.
@@ -198,3 +203,6 @@ Nothing decided yet.
     at their first header from MultiCore's core application.
   - Menu speed (T239.3 D4): MultiCore builds a measurement in its menu simulator (`t239.3-speed`), flushed pixels per
     key press, trx64u against the A1200; both sessions exchange its numbers before and after each change.
+- **2026-11-22, evening: R3 and R4 decided** (Alex, one at a time). R4: the TRX tables (`SvcTrx`, `SvcRing`, `SvcC64`)
+  leave MultiCore's base API and come only from our libraries through `SvcLib`. R3: `lib.mk` refuses a library with
+  constructors or destructors; the loader runs none.
