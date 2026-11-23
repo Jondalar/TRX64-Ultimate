@@ -22,6 +22,7 @@
  */
 #include "ring.h"
 #include "mon.h"
+#include "rpc.h"
 #include "spans.h"
 #include "trace.h"
 
@@ -875,6 +876,242 @@ static int entry_now(void)
     return (cur < 0) ? -1 : target_at_or_before(v, cur + 1);
 }
 
+/* what dump and ringdump answer once their file is written */
+static int said_dump(sbuf_t *out, const char *path, uint32_t bytes, uint64_t cycles, int idx)
+{
+    sb_put(out, "dump: ");
+    sb_put(out, path);
+    sb_put(out, "  (");
+    sb_dec(out, bytes);
+    sb_put(out, " bytes) \xe2\x80\x94 the frame start at Cycle ");
+    sb_dec(out, cycles);
+    sb_put(out, " Frame ");
+    sb_dec(out, (uint64_t)idx + 1);
+    sb_put(out, " (this host writes frame starts from its ring)");
+    return MON_OK;
+}
+
+static int said_ringdump(sbuf_t *out, const char *path, int entries, uint32_t bytes, uint32_t secs, uint32_t stride)
+{
+    sb_put(out, "ringdump: ");
+    sb_dec(out, (uint64_t)entries);
+    sb_put(out, " anchor(s), 0 delta entr(ies), 0 cpu-history \xe2\x86\x92 ");
+    sb_put(out, path);
+    sb_put(out, "  (");
+    sb_dec(out, bytes);
+    sb_put(out, " bytes; the newest ");
+    sb_dec(out, secs);
+    sb_put(out, " s, one anchor in every ");
+    sb_dec(out, stride);
+    sb_put(out, " frames)");
+    return MON_OK;
+}
+
+/* ---- the screen's ring files from the platform's poll (ring.h) ----------
+ * One job at a time. Every field is used under the platform's engine guard
+ * (the poll's pass or a call of the screen, never both at once). */
+enum { J_NONE = 0, J_QUEUED, J_RUN, J_STEP, J_DONE };
+
+static const ring_steps_t *s_steps;
+
+static struct
+{
+    int state;
+    char line[128]; /* the screen's line (ui.h UI_CMD); a longer one is cut */
+    char op[16];    /* its verb, lower case, for the texts */
+    void *job;      /* the dump in steps (J_STEP) */
+    int kind;       /* RING_JOB_* */
+    char path[128];
+    int idx;        /* dump: the entry and its cycles */
+    uint64_t cycles;
+    uint32_t secs, stride; /* ringdump */
+    int pct;
+    int err;        /* the text is a failure */
+    char text[640]; /* the verb's answer; sb cuts one that does not fit */
+    int len;
+} RJ;
+
+void ring_set_steps(const ring_steps_t *s) { s_steps = s; }
+
+int ring_job_queue(const char *cmd)
+{
+    static const char *const files[] = { "dump", "snapshot", "ringdump", "ringsave", "undump", "ringload",
+                                         "loadsnapshot", 0 };
+    if (!s_steps || mon_asm_mode()) {
+        return 0;
+    }
+    /* the first word, as mon_exec takes the verb: case does not matter */
+    while ((*cmd == ' ') || (*cmd == '\t')) {
+        cmd++;
+    }
+    int n = 0;
+    while (cmd[n] && (cmd[n] != ' ') && (cmd[n] != '\t')) {
+        n++;
+    }
+    int hit = -1;
+    for (int i = 0; files[i] && (hit < 0); i++) {
+        if ((m_strlen(files[i]) == n) && m_strnieq(cmd, files[i], n)) {
+            hit = i;
+        }
+    }
+    if (hit < 0) {
+        return 0;
+    }
+    if (RJ.state != J_NONE) {
+        return -1;
+    }
+    int len = m_strlen(cmd);
+    if (len > (int)sizeof(RJ.line) - 1) {
+        len = (int)sizeof(RJ.line) - 1;
+    }
+    memcpy(RJ.line, cmd, (size_t)len);
+    RJ.line[len] = 0;
+    memcpy(RJ.op, files[hit], (size_t)m_strlen(files[hit]) + 1);
+    RJ.job = 0;
+    RJ.pct = 0;
+    RJ.state = J_QUEUED;
+    return 1;
+}
+
+/* The queued line runs (J_RUN): dump and ringdump set their dump up here and
+ * answer MON_QUEUED; ring_job_poll does the steps */
+static int job_begin(int kind, const char *op, const char *path, int arg, int stride, sbuf_t *out)
+{
+    const char *e = 0;
+    void *j = s_steps->begin(kind, path, arg, stride, &e);
+    if (!j) {
+        return fail(out, op, e ? e : "the file could not be started");
+    }
+    int n = m_strlen(path);
+    if (n > (int)sizeof(RJ.path) - 1) {
+        n = (int)sizeof(RJ.path) - 1;
+    }
+    memcpy(RJ.path, path, (size_t)n);
+    RJ.path[n] = 0;
+    n = m_strlen(op);
+    if (n > (int)sizeof(RJ.op) - 1) {
+        n = (int)sizeof(RJ.op) - 1;
+    }
+    memcpy(RJ.op, op, (size_t)n);
+    RJ.op[n] = 0;
+    RJ.job = j;
+    RJ.kind = kind;
+    RJ.pct = 0;
+    return MON_QUEUED;
+}
+
+static void job_done(sbuf_t *o, int rc)
+{
+    sb_str(o);
+    RJ.len = o->len;
+    RJ.err = rc == MON_ERR;
+    RJ.state = J_DONE;
+}
+
+static void job_end(void)
+{
+    if (RJ.job) {
+        s_steps->drop(RJ.job);
+        RJ.job = 0;
+    }
+}
+
+void ring_job_poll(void)
+{
+    sbuf_t o;
+    if (RJ.state == J_QUEUED) {
+        RJ.state = J_RUN;
+        sb_init(&o, RJ.text, (int)sizeof(RJ.text));
+        int rc = rpc_local_run(RJ.line, &o);
+        if ((rc == MON_QUEUED) && RJ.job) {
+            RJ.state = J_STEP;
+        } else if (rc == MON_PENDING) {
+            RJ.state = J_NONE; /* not a file verb after all: rpc_local_take gives its text */
+        } else {
+            job_done(&o, rc);
+        }
+        return;
+    }
+    if (RJ.state != J_STEP) {
+        return; /* J_DONE keeps its text for ring_job_take */
+    }
+    const char *e = 0;
+    int r = s_steps->step(RJ.job, &e);
+    if (r > 0) {
+        RJ.pct = s_steps->pct(RJ.job);
+        return;
+    }
+    sb_init(&o, RJ.text, (int)sizeof(RJ.text));
+    int rc;
+    if (r < 0) {
+        rc = fail(&o, RJ.op, e ? e : "the file could not be written");
+    } else if (RJ.kind == RING_JOB_FRAME) {
+        rc = said_dump(&o, RJ.path, s_steps->bytes(RJ.job), RJ.cycles, RJ.idx);
+    } else {
+        rc = said_ringdump(&o, RJ.path, s_steps->entries(RJ.job), s_steps->bytes(RJ.job), RJ.secs, RJ.stride);
+    }
+    job_end();
+    job_done(&o, rc);
+}
+
+int ring_job_state(void)
+{
+    return (RJ.state == J_NONE) ? 0 : (RJ.state == J_DONE) ? 2 : 1;
+}
+
+/* at once: a job that has not begun has nothing to undo, and a dump's drop
+ * touches no register (ring_steps_t) */
+void ring_job_cancel(void)
+{
+    if ((RJ.state != J_QUEUED) && (RJ.state != J_STEP)) {
+        return;
+    }
+    sbuf_t o;
+    sb_init(&o, RJ.text, (int)sizeof(RJ.text));
+    if (RJ.state == J_QUEUED) {
+        job_done(&o, fail(&o, RJ.op, "cancelled before it began"));
+    } else {
+        job_end();
+        job_done(&o, fail(&o, RJ.op, "cancelled; the partial file is removed"));
+    }
+}
+
+void ring_job_drop(void)
+{
+    job_end();
+    RJ.state = J_NONE;
+}
+
+void ring_job_progress(sbuf_t *out)
+{
+    if (RJ.state == J_NONE) {
+        return;
+    }
+    sb_put(out, RJ.op);
+    if (RJ.state == J_DONE) {
+        sb_put(out, ": done");
+        return;
+    }
+    if (RJ.state == J_STEP) {
+        sb_put(out, ": ");
+        sb_dec(out, (uint64_t)RJ.pct);
+        sb_putc(out, '%');
+    } else {
+        sb_put(out, ": starting");
+    }
+    sb_put(out, "   RUN/STOP cancels");
+}
+
+int ring_job_take(sbuf_t *out)
+{
+    if (RJ.state != J_DONE) {
+        return 0;
+    }
+    sb_putn(out, RJ.text, RJ.len);
+    RJ.state = J_NONE;
+    return RJ.err ? 2 : 1;
+}
+
 int ring_verb(const char *op, int argc, char **argv, sbuf_t *out)
 {
     static const char *const ours[] = { "rstep", "reverse", "rewind", "frame", "goto", "mark", "marks", "unmark",
@@ -1061,24 +1298,18 @@ int ring_verb(const char *op, int argc, char **argv, sbuf_t *out)
         if (M.running) {
             mach_pause();
         }
+        if (RJ.state == J_RUN) {
+            RJ.secs = secs;
+            RJ.stride = stride;
+            return job_begin(RING_JOB_RING, "ringdump", argv[1], (int)secs, (int)stride, out);
+        }
         uint32_t bytes = 0;
         int entries = 0;
         const char *e = hw_ring_save(argv[1], (int)secs, (int)stride, &bytes, &entries);
         if (e) {
             return fail(out, "ringdump", e);
         }
-        sb_put(out, "ringdump: ");
-        sb_dec(out, (uint64_t)entries);
-        sb_put(out, " anchor(s), 0 delta entr(ies), 0 cpu-history \xe2\x86\x92 ");
-        sb_put(out, argv[1]);
-        sb_put(out, "  (");
-        sb_dec(out, bytes);
-        sb_put(out, " bytes; the newest ");
-        sb_dec(out, secs);
-        sb_put(out, " s, one anchor in every ");
-        sb_dec(out, stride);
-        sb_put(out, " frames)");
-        return MON_OK;
+        return said_ringdump(out, argv[1], entries, bytes, secs, stride);
     }
     if (m_streq(op, "ringsave")) {
         /* the ring itself, not a picture of it: loading it back brings the
@@ -1114,21 +1345,17 @@ int ring_verb(const char *op, int argc, char **argv, sbuf_t *out)
         }
         ring_entry_t en;
         ring_entry(idx, &en);
+        if (RJ.state == J_RUN) {
+            RJ.idx = idx;
+            RJ.cycles = en.cycles;
+            return job_begin(RING_JOB_FRAME, op, argv[1], idx, 0, out);
+        }
         uint32_t bytes = 0;
         const char *e = hw_ring_dump(argv[1], idx, &bytes);
         if (e) {
             return fail(out, op, e);
         }
-        sb_put(out, "dump: ");
-        sb_put(out, argv[1]);
-        sb_put(out, "  (");
-        sb_dec(out, bytes);
-        sb_put(out, " bytes) \xe2\x80\x94 the frame start at Cycle ");
-        sb_dec(out, en.cycles);
-        sb_put(out, " Frame ");
-        sb_dec(out, (uint64_t)idx + 1);
-        sb_put(out, " (this host writes frame starts from its ring)");
-        return MON_OK;
+        return said_dump(out, argv[1], bytes, en.cycles, idx);
     }
     /* ringload, undump, loadsnapshot */
     if (argc < 2) {

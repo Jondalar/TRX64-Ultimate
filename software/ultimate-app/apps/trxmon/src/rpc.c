@@ -484,6 +484,19 @@ int rpc_quit_requested(void) { return s_quit || mon_quit_requested(); }
 
 int rpc_local_exec(const char *cmd, sbuf_t *out)
 {
+    int q = ring_job_queue(cmd);
+    if (q > 0) {
+        return MON_QUEUED;
+    }
+    if (q < 0) {
+        sb_put(out, "a ring file is still being written or read; RUN/STOP cancels it");
+        return MON_ERR;
+    }
+    return rpc_local_run(cmd, out);
+}
+
+int rpc_local_run(const char *cmd, sbuf_t *out)
+{
     M.owner = "human";
     rpc_poll();
     mon_set_narrow(1);

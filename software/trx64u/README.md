@@ -31,8 +31,7 @@ firmware's copy is frozen, bug fixes only, each also here).
 
 `./build.sh [trx64u] [ring] [monitor]` builds the libraries in `build/<name>/` (copies of the sources; the monitor
 also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. `build.sh --check`
-only checks that the unpacked SDK matches `sdk.pin`. The monitor compiles only with the trxmon change that waits in
-`pending/`.
+only checks that the unpacked SDK matches `sdk.pin`.
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
 (`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which

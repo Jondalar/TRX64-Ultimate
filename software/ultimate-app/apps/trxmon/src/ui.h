@@ -53,6 +53,27 @@ typedef struct
     int blank_rows; /* rows 0..blank_rows-1 are colour index 0: transparent on the overlay */
 } ui_screen_t;
 
+/* The rows of the screen that read the machine, as ui_render draws them: the status row, the registers (narrow two
+ * rows, wide one) and the wide device row; whether the machine ran and a log observer was on (the window shrinks) */
+typedef struct
+{
+    int running, live;
+    char status[UI_COLS_MAX + 1];
+    char regs[2][UI_COLS_MAX + 1];
+    char info[UI_COLS_MAX + 1];
+} ui_mrows_t;
+
+/* A platform whose screen calls may not reach the machine (the monitor library, U18: its keys, tick and render come
+ * on the menu task without the core lock, its poll holds the lock) hands the screen this (ui_set_polled). ui_key then
+ * only queues the line it would run (RETURN, the help key, RUN/STOP's pause) and ui_render draws the machine's rows
+ * from `rows`; the platform's poll calls ui_poll, which runs the line, ticks and reads the rows again. */
+typedef struct
+{
+    char line[UI_CMD + 1];
+    int queued; /* `line` waits for ui_poll */
+    ui_mrows_t rows;
+} ui_polled_t;
+
 typedef struct
 {
     int cols, rows; /* the window: UI_NARROW_* or UI_WIDE_* (ui_set_size) */
@@ -72,6 +93,7 @@ typedef struct
     int was_run;
     int leave; /* UI_STAY, UI_LEAVE_X, UI_LEAVE_QUIT */
     uint32_t olog_cur; /* the next observer log line to show live (mach_olog_next) */
+    ui_polled_t *pl; /* null: the screen's calls read and run the machine themselves (ui_set_polled) */
 } ui_t;
 
 void ui_init(ui_t *u);
@@ -96,12 +118,27 @@ int ui_map_key(int k);
 /* Which function keys the interface made PageUp, PageDown and Help (ui->fkey(1..8): the codes F1..F8 give);
  * the hint row and the opening text name them. Defaults: F1, F7, F3. */
 void ui_set_keys(ui_t *u, const int *fkey);
-/* One key. Returns UI_STAY, UI_LEAVE_X (`x` ran) or UI_LEAVE_QUIT (`/quit` ran). */
+/* One key. Returns UI_STAY, UI_LEAVE_X (`x` ran) or UI_LEAVE_QUIT (`/quit` ran); with ui_set_polled the line runs
+ * in ui_poll, and u->leave says so after it. */
 int ui_key(ui_t *u, int key);
 /* After rpc_poll: output of a run-to that finished, the stop text of a stop nobody waited for.
- * Returns 1 when something was printed. */
+ * Returns 1 when something was printed. With ui_set_polled only ui_poll calls it. */
 int ui_tick(ui_t *u);
-/* The rows as they are drawn now: the machine's state (M) is read here */
+/* The rows as they are drawn now: the machine's state (M) is read here; with ui_set_polled its rows come from
+ * the last ui_poll and nothing of the machine is read */
 void ui_render(const ui_t *u, ui_screen_t *s);
+
+/* ---- the screen run from the platform's poll (ui_polled_t) ------------- */
+/* p: the screen's calls queue their lines and draw the machine's rows from p (cleared here); null: they run and
+ * read the machine themselves (the default) */
+void ui_set_polled(ui_t *u, ui_polled_t *p);
+/* The platform's poll, holding what the machine needs: the queued line runs, a ring file job of the screen takes
+ * its step (ring_job_poll), ui_tick, the machine's rows are read again. Returns 1 when the screen changed (a line
+ * ran, output came, the machine's rows differ). */
+int ui_poll(ui_t *u);
+/* 1: a line waits for ui_poll */
+int ui_waiting(const ui_t *u);
+/* The screen goes: the line that waits is dropped, without a text */
+void ui_drop(ui_t *u);
 
 #endif

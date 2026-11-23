@@ -1,7 +1,8 @@
 /*
  * ring.h — the T20 frame ring as the monitor's timeline (T21 §4.10): the
  * TRX64 rewind transport (frame, goto, rewind), marks, the reverse step and
- * the ring files, over the firmware's ring table (hw_ring_*).
+ * the ring files, over the firmware's ring table (hw_ring_*) or, for the
+ * screen's file verbs, the platform's dumps in steps (ring_steps_t).
  *
  * Entries are frame starts (the snaps on line 0). A land puts the machine on
  * one and leaves it paused there without cutting the timeline; whatever the
@@ -71,5 +72,49 @@ const char *ring_mark_of(uint32_t seq);
 /* monitor verbs: rstep reverse rewind frame goto mark marks unmark ringdump
  * ringload dump undump; -1 when op is none of them */
 int ring_verb(const char *op, int argc, char **argv, sbuf_t *out);
+
+/* ---- the screen's ring files from the platform's poll (U18) ----------------
+ * A platform whose screen task may not call the ring (the monitor library: its
+ * keys come on the menu task without the core lock, its poll holds the lock)
+ * gives trxmon the dumps in steps. The screen's file verbs (dump, snapshot,
+ * ringdump, ringsave, undump, ringload, loadsnapshot) are then a job
+ * (rpc_local_exec answers MON_QUEUED) that ring_job_poll() runs, which the
+ * platform's poll calls (ui_poll, ui.h): the line in the first call, then one
+ * step of a dump per call. A load and ringsave run whole in that first call.
+ * Without the steps (the firmware, the host tests) every verb runs whole where
+ * the line runs, through hw_ring_*. */
+enum { RING_JOB_FRAME = 0, RING_JOB_RING = 1 }; /* begin's kind */
+typedef struct
+{
+    /* FRAME: timeline entry `arg` as a .c64re (stride 0); RING: the newest `arg`
+     * seconds, one entry in every `stride` frames, as a .c64rering. Writes
+     * nothing yet; NULL and *err set when it cannot start. */
+    void *(*begin)(int kind, const char *path, int arg, int stride, const char **err);
+    /* one piece: 1 more, 0 the file is complete, -1 failed (*err; the partial file is gone) */
+    int (*step)(void *job, const char **err);
+    int (*pct)(const void *job);        /* 0-100 */
+    uint32_t (*bytes)(const void *job); /* once step answered 0 */
+    int (*entries)(const void *job);    /* once step answered 0 (RING) */
+    void (*drop)(void *job);            /* ends it; a file that is not complete is removed; no register is touched */
+} ring_steps_t;
+/* NULL: every verb runs whole where the line runs (the default) */
+void ring_set_steps(const ring_steps_t *s);
+/* rpc_local_exec: 1 the line is a ring file verb and queued, 0 not one to
+ * queue (no steps, assemble mode, another verb), -1 a job is still on */
+int ring_job_queue(const char *cmd);
+/* The platform's poll (ui_poll), holding what the ring needs: one piece of the job */
+void ring_job_poll(void);
+/* 0 no job, 1 queued or running, 2 done and its text not taken yet */
+int ring_job_state(void);
+/* RUN/STOP: the job ends now (a dump's partial file is removed, no register
+ * is touched); the text says so */
+void ring_job_cancel(void);
+/* The screen goes away: the job ends now, without its text (a dump's partial
+ * file is removed; no register is touched) */
+void ring_job_drop(void);
+/* The command row while ring_job_state(): what runs and how far */
+void ring_job_progress(sbuf_t *out);
+/* The finished job's text, once: 0 none, 1 done, 2 failed or cancelled */
+int ring_job_take(sbuf_t *out);
 
 #endif

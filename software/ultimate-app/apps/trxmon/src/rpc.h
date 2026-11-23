@@ -44,8 +44,11 @@ void rpc_client_gone(int cid);
 int rpc_quit_requested(void);
 
 /* The person at the screen (ui.c, T21 §8). Runs a line as the screen's own: narrow formatting,
- * source "human". MON_PENDING: a run-to verb waits for its stop; rpc_local_take gives its text. */
+ * source "human". MON_PENDING: a run-to verb waits for its stop; rpc_local_take gives its text.
+ * MON_QUEUED: a ring file verb waits for the platform's poll (ring_job_queue, ring.h). */
 int rpc_local_exec(const char *cmd, sbuf_t *out);
+/* The same line run now, never queued (ring_job_poll runs a queued line with it) */
+int rpc_local_run(const char *cmd, sbuf_t *out);
 int rpc_local_take(sbuf_t *out); /* the text of the finished run-to, once; 0 when none */
 int rpc_local_waiting(void);
 /* A stop came that no run was waiting for (a `g` ran into a breakpoint, an observer): once */

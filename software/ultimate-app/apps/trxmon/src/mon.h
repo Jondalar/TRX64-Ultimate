@@ -10,7 +10,8 @@
 #include "mjson.h"
 #include "mach.h"
 
-enum { MON_OK = 0, MON_ERR = 1, MON_PENDING = 2 };
+/* MON_QUEUED: a ring file verb of the screen runs from the platform's poll, its text comes through ring_job_take() (ring.h) */
+enum { MON_OK = 0, MON_ERR = 1, MON_PENDING = 2, MON_QUEUED = 3 };
 enum { PK_NONE = 0, PK_UNTIL, PK_NEXT, PK_RET };
 
 /* A run-to verb that answers when the machine stops */

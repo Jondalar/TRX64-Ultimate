@@ -555,3 +555,7 @@ Nothing decided yet.
     the ue2emu re-run; the wide `heap_peak` stays until then and drops to keep + 1,444,975 in the same change. api.md
     4.4.12.4 now promises that a write past the end grows the file (the gap undefined until written: FAT leaves old
     cluster data, the network medium zero-fills).
+  - **trxmon's change committed (Alex, 2026-11-23: "comitte bitte"):** the polled mode and the stepped ring dumps are
+    commit `e67efa83` on branch `u18` of the application submodule (Gitea, not main); the superproject's `u18` points
+    the submodule at it, and `software/trx64u/pending/` is gone. The board test (F4 dump / ringdump with progress,
+    RUN/STOP removes the file, the same frame over RPC byte-identical) is still open.
