@@ -701,3 +701,14 @@ Nothing decided yet.
     after `package` (as `update`), then lint, apptests and emu. Asked of MultiCore (advisor) the same day: where CI fetches
     the SDK (R10, new: their builds are only in their repository's `.ci/sdk/`), the golden ops list (R6), the heap
     (their pin packs 0x950000, ours the image default 0x7A0000), the test rig (R9) and the icon.
+  - **Step 2 (2026-11-23): the SDK from our registry, our golden ops list, the `cor` stage.** MultiCore (advisor): the SDK
+    comes from `t239.3` and we keep a copy (their D26); a copy of the pinned tarball is TREX generic `trx64-sdk/0.3.0-e4f99648`
+    (`fetch_sdk.sh --download`). The golden ops list is ours (`base/ops_trx64u.txt`, from `e4f99648`; R6), `pack_cor.sh`
+    checks record 6 against it. The heap (D15, MultiCore corrected itself twice the same day): sized by trx64u's measured
+    need, kept in our core TOML (`heap`, as MultiCore's `core.toml`) and passed on by `pack_cor.sh` as `--heap`; **not measured yet**, so the image's 0x7A0000 applies, as on the board. SDK 0.3.0's
+    `coreapp.bin` allows at most 0x7B7878 because it is MultiCore's whole application (other cores' code, ~1.7 MB of their
+    buffers, the old `tm_mon`/`tm_rpc`): a defect of the SDK, a base image without core code is announced. `main` (U19) merged into `u18` so that its `.cor` gets the cache bitstream. Stage
+    `cor` (T31 decision 16): `ci/cor.sh` packs `trx64u_<commit8>.cor` into every package of a branch with `software/trx64u`.
+    Next: lint, apptests and emu from the rig of the pinned `t239.3` commit (MultiCore: `tests/coreapp`, `gen_menu_rec.py`,
+    `check_menu_concept.py` with `menu_c64.txt`, `tools/menusim`, `ci/emu/build.sh`); sorting out which of the 18 apptest
+    sources are trx64u's is ours.

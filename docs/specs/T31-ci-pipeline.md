@@ -13,6 +13,7 @@ script under `ci/` that also runs on the Mac:
 
 ```
 lint -> app -> bit-c64u -> package -> update
+                                  \-> cor
                                   \-> sims
 ```
 
@@ -59,6 +60,7 @@ own e2e suites (the app repo's CI does that on every push).
 | 13 | **One heavy stage at a time by lock, not only by group.** `heavy_lock` (`ci/lib.sh`): `flock` on `/cache/heavy.lock`, taken by `sims` (when it runs benches), `app` (when it builds) and `bitstream` (when it runs Vivado), held until the script exits. | The group only sees a run as busy while one of its jobs runs; between two jobs the run counts as idle and another pipeline is admitted. Seen twice (run 352 started between bit-c64u and package of run 351; run 357 started while run 356 was between sims and app). The group still orders pipelines; the lock stops two heavy stages from overlapping. Verified with two containers on the NAS (the second waits). Old single-job `build.yml` runs on other branches do not take the lock. |
 | 14 | **`update`** (Alex, 2026-10-10: "die .cfw per Pipeline nach Commit auf integ-m1 bauen"): stage after `package`, `ci/update.sh` in `u64-build-env:ci`. It downloads `c64_basic.bit` and `ultimate.app` **from the package version `package` just published** (not from the hand-over directory, which `package` removes), checks both against the manifest's SHA-256 and the run's commit, builds with `build_update` (`ci/lib.sh`, shared with `ci/release.sh`: app submodule + nested, commit check, ESP-IDF env, `tools/make_update.sh --native`, `trx_pkg_check.py`) and **adds `trx64_update_<commit8>_<YYYYMMDD>.cfw/.ue2` to the same two versions** (`<branch>-<sha8>`, `<branch>-latest`); its `SHA256SUMS` gets their lines (earlier update files of the same commit, e.g. another build date, are removed). A generic package accepts new files later (as `bit-ue2` already does), so no second package. `manifest.json` stays as `package` wrote it (it describes the stage outputs, not the update files). Runs only for `integ-m1`, `main` and tags (`ci/select.sh update`); any other ref prints `update SKIPPED: only integ-m1/main` and is green in seconds. Decided in the script plus a step-level `if:` (no job-level one, decision 2). The pipeline input `update: true` (dispatch) forces it on any branch. File-name hook: `TRX_UPDATE_NAME` replaces the base name in `make_update.sh`, for the release tag later (not built). Placed **before** `bit-ue2`, not parallel: the 100T build takes hours and a parallel job could wait for the runner behind it; the price is that a failing `update` leaves `bit-ue2` skipped. No heavy lock: the updater compile is small. | The testers want the file per commit without a release run; the release workflow keeps building its own from the same function. |
 | 15 | **The benches run behind `package`, not in front of it** (Alex, 2026-10-30: "Mach die Umstellung. Schamlos klauen von Multicore"; MultiCore's T100 D7 of 2026-10-14 decided the same there): `sims` needs `package`, `app` needs `lint`. `ci/sims.sh` calls neither `stage_dir` nor `need_stage`, so the benches produce nothing a later stage reads and the order costs nothing. In front of the package they decided whether the testers get an update file at all: runs 1064 and 1066 (2026-10-30) spent 44 and 40 minutes in bench timeouts and ended with no artefact, over `flash_gate` and `turbo` — benches the package does not touch. Behind it the benches still run on every push and a failing one still makes the run red; the files exist by then. | A bench says whether the gateware is right, not whether the package can be built. |
+| 16 | **`cor`** (Alex, 2026-11-23: *"unser CI anpassen"*, U18): stage after `package`, `ci/cor.sh` in `u64-build-env:ci`. It downloads `c64_basic.bit` from the package version (checked against the manifest and the run's commit), the pinned TRX64 SDK from our registry (`software/trx64u/fetch_sdk.sh --download`, `sdk.pin`), builds trx64u's libraries and packs **`trx64u_<commit8>.cor`** with `software/trx64u/pack_cor.sh`, which also checks it, and adds it to the same two versions with its `SHA256SUMS` lines (earlier `.cor` files of the commit go). Runs on every branch that has `software/trx64u`; any other prints `cor SKIPPED` and is green in seconds (decided in the script, decision 2). Parallel to `update` and `sims`; no heavy lock. | trx64u is built here, only the SDK comes from MultiCore (U18 §3, Alex 2026-11-23). |
 | 11 | **Timeouts**: lint 10 min, sims 120, app 90, bitstream 150, package 10: a stage may wait for the heavy lock first, and the wait counts. The app repo's note that act_runner's reporter fails past about 45 minutes was not seen here: run 351's Vivado job ran 27 minutes without trouble; longer ones are not tested. | Same limits as the single job had. |
 
 ## 4. Caches
@@ -70,7 +72,7 @@ own e2e suites (the app repo's CI does that on every push).
 | Bitstream and reports | `gateware_key` (above), per board; the generated `cores/gideon` counts except `.stamp` and `VENDOR.md` | `/cache/bit/<board>-<key>/` |
 | Sims passed | per-bench content key (section 4a) | `/cache/sims-ok/bench/<bench>.<key>` |
 | Boot state of a Verilator bench | binary + boot inputs (section 4a) | `/cache/boot-state/<name>-<key>/` |
-| App objects | ccache | `/share/Container/1541ultimate-ci/ccache` (the app CI's volume) |
+| App objects | ccache | `/srv/Container/1541ultimate-ci/ccache` (the app CI's volume) |
 | Sim build trees | none | each bench builds in the job's work directory; Verilator tier 2 uses ccache in `/cache/ccache-sim` |
 | Images | tag | NAS docker |
 
@@ -242,8 +244,8 @@ cancels in the UI.
 ## 7. As built
 
 Files: `.gitea/workflows/pipeline.yml` (top: triggers, group, the chain), `lint.yml`, `sims.yml`, `app.yml`,
-`bitstream.yml`, `package.yml`, `update.yml` (fragments); `ci/lib.sh`, `lint.sh`, `sims.sh`, `sims.txt`, `sims.deps`, `bootstate.sh`, `sim_iv.sh`, `app.sh`,
-`bitstream.sh`, `package.sh`, `update.sh`, `select.sh`, `submodule.sh`; `ci/sim/Dockerfile` + `build_image.sh` (image
+`bitstream.yml`, `package.yml`, `update.yml`, `cor.yml` (fragments); `ci/lib.sh`, `lint.sh`, `sims.sh`, `sims.txt`, `sims.deps`, `bootstate.sh`, `sim_iv.sh`, `app.sh`,
+`bitstream.sh`, `package.sh`, `update.sh`, `cor.sh`, `select.sh`, `submodule.sh`; `ci/sim/Dockerfile` + `build_image.sh` (image
 `trx64-sim-env:4`, built on the NAS from the repo: OSS CAD Suite 2026-09-27 on Ubuntu 24.04, g++, make, ccache,
 64tass, a RISC-V assembler, shellcheck, ruff, PIL).
 
@@ -286,7 +288,7 @@ Found on the way, all fixed in this branch:
 
 ## 8. Builder runner (2026-10-05, branch ci-builder)
 
-A second machine, `builder` (Debian 13, 16 cores, 27 GB, 192.168.242.166), takes the heavy
+A second machine, `builder` (Debian 13, 16 cores, 27 GB, 192.0.2.166), takes the heavy
 iteration. The NAS is enough for tier 1 and the bitstream, not for tier 2: six of its benches end in
 their timeouts there (run 1785, history 2026-11-13), so a run with tier 2 goes to the builder.
 
@@ -297,7 +299,7 @@ their timeouts there (run 1785, history 2026-11-13), so a run with tier 2 goes t
   NAS, package on the builder, which found nothing in `/cache/runs/431/app`): Gitea hands a job to
   whichever runner's long poll is open, a shorter fetch interval gives no priority.
 - **Caches per machine, no NFS (Alex):** the builder has its own `/cache` at the same host path
-  `/share/CACHEDEV2_DATA/trx64-build/cache` (seeded once from the NAS). Keys are content hashes, so
+  `/srv/trx64-build/cache` (seeded once from the NAS). Keys are content hashes, so
   a switch costs at most one rebuild, never a wrong result.
 - **CPU limit belongs to the runner:** the workflows carry only `--init`. NAS runners:
   `container.options: --cpus=3`, envs `CI_SIMS_JOBS=3`, `TRX_VIVADO_THREADS=3`. Builder: no limit,
@@ -369,6 +371,7 @@ Moved from the TODO.md row on 2026-10-07, wording unchanged. Dated entries, newe
 
 - **2026-10-30, `VENDOR.md` out of the gateware key:** `cores/gideon` is generated, not tracked (`ci/submodule.sh` -> `tools/gideon_sources.sh`), and `tree_key` hashed every file in it bar `.stamp`. `tools/vendor_gideon.sh` writes `cores/gideon/VENDOR.md` with the app submodule's commit, so the key hung on the app: the bump 234a0abb -> 558a8ed5, which touches only `update_u2p/*` and `app_loader/app_api.h` and nothing under `fpga/`, changed the key from `f163109ecb77d3d6` to `bd76aed6ca69ef17` and cost a full Vivado run (both manifests say `bitstream_from: built`). The `gateware_key` comment already claimed the behaviour this restores. Nothing is hidden: a change under `fpga/` moves the vendored `.vhd` themselves, which are hashed. MultiCore has the same exclusion since its run 898.
 
+- **2026-11-23 stage `cor` (branch u18, decision 16):** `trx64u_<commit8>.cor` per commit on every branch with `software/trx64u`, added to the package version (`ci/cor.sh`, `cor.yml`).
 - **2026-10-30, the benches moved behind `package` (decision 15):** the chain is now `lint -> app -> bit-c64u -> package -> update`, with `sims` hanging off `package` beside `update`. Two runs of 527daa0 paid for the old order: 1064 (44 min) and 1066 (40 min) both ended red with no artefact, and both over benches the package does not touch. 1066 showed the split clearly — with the other benches served from the cache, `flash_boot` (277s), `dbgsess` (487s) and `ultsys` (283s) passed, so their failures in 1064 were the parallel load, while `flash_gate` (FAIL in 49s, all 9 script stages) and `turbo` (TIMEOUT 2400s on an idle builder) are real and still open. Taken from MultiCore's T100 D7 (2026-10-14), which records the same two symptoms there (its runs 31 and 32).
 
 - **2026-10-10 stage `update` (branch ci-update-stage):** `.cfw`/`.ue2` per commit on integ-m1/main/tags, added to the package version (decision 14; `ci/update.sh`, `update.yml`, `build_update` in `ci/lib.sh` shared with the release).

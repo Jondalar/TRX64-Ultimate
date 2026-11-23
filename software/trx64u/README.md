@@ -70,6 +70,9 @@ What goes in:
 | bitstream | `--bit`, with `--bit-commit` |
 | check of record 6 | `base/ops_trx64u.txt`: the operations and states the application exports, ours (U18 R6); taken from MultiCore's `tests/coreapp/golden/ops_trx64u.txt` at the pinned `e4f99648`. MultiCore names every op the base adds or drops in its note for that SDK commit (D25 adds `mouse.sens`, `mouse.accel`) |
 
-The heap is the image's own (0x7A0000 in SDK 0.3.0). MultiCore's T239.3 D15 value for trx64u, 0x950000, does not fit
-base 3.3's image: `cor_pack.py` refuses it (image end 0x6B8788 + heap + stack reserve 0x20000 must stay below 0xE90000; at
-most 0x7B7878). `trx64u_u19.cor`, on the board on 2026-11-23, is what `pack_cor.sh` makes from the same inputs, byte for byte.
+The heap (MultiCore T239.3 D15, D11, D13): sized by trx64u's measured need, kept in the core's TOML (`heap`, as MultiCore's
+`core.toml`) and passed on by `pack_cor.sh` as `--heap`, the SDK's interface (its tools read no heap key themselves). **Not measured yet** (open, U18): until it is, the image's own 0x7A0000 applies, as on the board. The SDK
+0.3.0 image allows at most 0x7B7878 (image end 0x6B8788 + heap + stack reserve 0x20000 below 0xE90000); that image is
+MultiCore's whole application with the other cores' code and about 1.7 MB of their static buffers and the old trx64u
+monitor, a defect on their side; a base image without any core's code is announced (MultiCore, 2026-11-23).
+`trx64u_u19.cor`, on the board on 2026-11-23, is what `pack_cor.sh` makes from the same inputs, byte for byte.

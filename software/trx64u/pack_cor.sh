@@ -4,9 +4,9 @@
 # (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565), the SID player's files
 # (record 8, built from the submodule's 6502 sources) and a c64_basic bitstream. Record 6 is checked against
 # base/ops_trx64u.txt, the operations and states the application exports (ours, U18 R6: MultiCore names each op the base
-# adds or drops in its SDK note). No --heap: the image's own heap applies (0x7A0000 in SDK 0.3.0). MultiCore's D15 value
-# 0x950000 does not fit this image: cor_pack.py refuses it (image end 0x6B8788 + heap + stack reserve 0x20000 must stay
-# below the application region's end 0xE90000, so at most 0x7B7878).
+# adds or drops in its SDK note). No --heap yet: D15 sizes the heap by trx64u's measured need, kept in the core's TOML (`heap`)
+# and passed on here; it is not measured (U18);
+# until then the image's own 0x7A0000 applies. SDK 0.3.0's image allows at most 0x7B7878 (README, "Packing").
 #   software/trx64u/pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build]
 # --bit is the c64_basic.bit of our CI package <branch>-<commit8> (.../api/packages/TREX/generic/trx64-ultimate/...);
 # --bit-commit names that commit. --no-build packs the libraries already in build/. Default --out: build/cor/trx64u.cor.

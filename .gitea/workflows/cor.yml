@@ -1,0 +1,41 @@
+name: Core
+
+# Stage cor: trx64u.cor (U18) from the package's bitstream, the pinned TRX64 SDK and software/trx64u, added to the same
+# package version (ci/cor.sh). Called by pipeline.yml (workflow_call) and runnable alone (workflow_dispatch). A branch
+# without software/trx64u stays green after seconds with "cor SKIPPED" (decided in the script). No concurrency group,
+# as in the other stages.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  cor:
+    name: Core (.cor)
+    runs-on: ${{ vars.CI_RUNNER || 'dockerbuild' }}
+    container:
+      image: u64-build-env:ci
+      options: --init
+      volumes:
+        - /srv/trx64-build/cache:/cache
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch the source
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          SERVER="${GITHUB_SERVER_URL#*://}"
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
+          git -C src log --oneline -1
+      - name: Fetch the application submodule
+        env:
+          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: src/ci/submodule.sh
+      - name: Build, pack and publish trx64u.cor
+        env:
+          PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        run: src/ci/cor.sh
