@@ -254,10 +254,12 @@ const char *plat_firmware_version(void)
 // core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and every call of the export "textgrid" (textgrid.h:
 // enter, tick and the drawing calls, one after the other). The poll and the textgrid's calls skip their pass while the other task has the engine, so the
 // menu never waits in them; the operations sleep until it is free. sync.enter / sync.leave guard only the flag; a base without the group (before 3.3)
-// has no critical section to offer, and the flag is then tested and set unguarded. The ring's file verbs typed on the screen (dump, ringdump, ringsave,
-// undump, ringload) do not run in monitor.key: it queues them and the poll runs them, a dump one step per pass (trxmon's ring.h, monitor.cc mon_serve).
+// has no critical section to offer, and the flag is then tested and set unguarded. Of the menu task's calls only monitor.release reaches the machine (the
+// debugger's hold, core_hooks.h menu_closed): the session starts in the poll, every line typed on the screen waits for the poll and runs there (a ring
+// file one step per pass), and the screen's machine rows are what the poll read last (monitor.cc).
 static volatile bool s_engine;
-// The textgrid's enter found the engine taken: the session opens at the next tick or render that gets it. Read and written on the menu task only.
+// The textgrid's enter found the engine taken: mon_open (the session is wanted; the poll starts it) comes with the next tick or render that gets it. Read
+// and written on the menu task only.
 static bool s_open_due;
 
 static bool engine_try(void)
@@ -283,6 +285,27 @@ static void engine_take(void)
 
 static void engine_give(void) { s_engine = false; }
 
+// A key or a command waits here for what the screen left to the poll, at most KEY_WAIT_MS: before it is taken for the session's start (monitor.h
+// mon_starting), after it for the line, the release of `diag` (mon_pending). The poll takes it within a pass or two, and the answer of monitor.key then
+// knows whether the line left the screen (`x`, `/quit`; the answer is the only way to close the menu) and the base draws the screen with the line's
+// output. A ring file runs on in the poll after its first pass. True with the engine held; false when the time ran out, and the engine is not held then.
+static const uint32_t KEY_WAIT_MS = 100;
+
+static bool pending_wait(bool (*pending)(void))
+{
+    uint32_t t0 = plat_ms();
+    while (pending()) {
+        engine_give();
+        do {
+            if (plat_ms() - t0 >= KEY_WAIT_MS) {
+                return false;
+            }
+            plat_sleep(PLAT_SLEEP_MIN_MS);
+        } while (!engine_try());
+    }
+    return true;
+}
+
 // ---- operations ------------------------------------------------------------------------------------------------------------------------------------------------
 static void put_msg(OpOut &o, const char *s)
 {
@@ -292,38 +315,50 @@ static void put_msg(OpOut &o, const char *s)
     sb_str(&b);
 }
 
-// The Help node of the tab runs a command in the monitor.
+// The Help node of the tab runs a command in the monitor: the session started (by the poll), the line typed; the poll runs it.
 static int op_run(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     engine_take();
-    mon_run(a.s(0));
-    engine_give();
+    mon_open();
+    if (pending_wait(mon_starting)) {
+        mon_run(a.s(0));
+        engine_give();
+    }
     put_msg(o, a.s(0));
     return OPE_OK;
 }
 static const ArgSpec line_arg[] = { ARG_STRING("line", 60) };
 
 // T192.3 leak 2: the monitor's keys are an operation, not a branch of the menu controller. The key table (menukeytab.cc) sends every key of the monitor's
-// screen to it; the answer is what the controller does next: "goto F8" (the line `diag`: the System tab, F8; the session is released first), "close" (`x`:
-// resume and leave), else nothing.
+// screen to it; the answer is what the controller does next: "goto F8" (the line `diag`: the System tab, F8; the poll releases the session first, or
+// later when the wait ran out), "close" (`x`, `/quit`: the poll ran the line), else nothing. A key before the poll started the session is dropped; a line
+// that the poll has not taken when the wait runs out runs all the same, and a leave it asks for closes the menu with the next key. While it waits, the
+// keys are trxmon's rule for it (ui.c ui_key): RUN/STOP cancels it, PageUp and PageDown scroll, the others are dropped.
 static int op_key(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    engine_take();
-    mon_key(a.i(0));
     o.msg[0] = 0;
-    if (mon_diag_requested()) {
-        mon_release();
+    engine_take();
+    mon_open();
+    if (!pending_wait(mon_starting)) {
+        return OPE_OK;
+    }
+    mon_key(a.i(0));
+    bool held = pending_wait(mon_pending);
+    if (mon_diag_requested()) {                     // set and read on this task only
         put_msg(o, "goto F8");
-    } else if (mon_leave_requested()) {
+    } else if (held && mon_leave_requested()) {
         put_msg(o, "close");
     }
-    engine_give();
+    if (held) {
+        engine_give();
+    }
     return OPE_OK;
 }
 static const ArgSpec key_arg[] = { ARG_INT("key", 0, 0x1FFF) };
 
 // The menu closed (any way): the base library's core hook menu_closed calls this, where MultiCore's run.cc called mon_release. It runs on the menu task
-// without the core lock while the poll (when_frozen) may be in a pass: it waits for the engine like the other operations.
+// without the core lock while the poll (when_frozen) may be in a pass: it waits for the engine like the other operations. The one call of the menu task
+// that reaches the machine: the release gives the debugger's hold back (core_hooks.h menu_closed).
 static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
@@ -335,9 +370,10 @@ static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
 }
 
 // The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass),
-// and the steps of a ring file verb the screen queued. It is declared when_frozen, so a base that honours the flag (3.3) runs it with the menu open too;
-// a base before 3.3 (SDK 0.2.0's 3.2 too) does not read the flag and runs it only while the machine is not frozen, and a queued verb then waits until the
-// menu closes, which drops it.
+// and everything of the screen that reaches the machine: the session's start, the lines typed, a ring file's steps, the machine's rows. It is declared
+// when_frozen, so a base that honours the flag (3.3) runs it with the menu open too; a base before 3.3 (SDK 0.2.0's 3.2 too) does not read the flag and
+// runs it only while the machine is not frozen: the screen's session then does not start while the menu is open (F4 stays empty, a key waits
+// KEY_WAIT_MS and is dropped).
 static int op_serve(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
@@ -361,10 +397,11 @@ static const LibStateDecl s_states[] = {
 };
 
 // ---- the export "textgrid" (major 1, textgrid.h): the F4 screen ----------------------------------------------------------------------------------------------
-// Every call runs on the base's menu task, one after the other: enter and tick drive the session, render builds the rows from the engine and the other calls
-// read what it built (s_scr of monitor.cc, which only render and tick write). None of them may block: while the poll has the engine, enter leaves the open
-// due (s_open_due), tick reports no change and render builds nothing (the rows and sig stay those of the last build); the next pass of the menu loop tries
-// again. The row attributes are trxmon's UA_* (ui.h), the same numbers as TG_*.
+// Every call runs on the base's menu task, one after the other: enter asks for the session, tick reports what the poll changed, render builds the rows
+// from the session (its machine rows as the poll read them last) and the other calls read what it built (s_scr of monitor.cc, which only render and tick
+// write). None of them reaches the machine, and none may block: while the poll has the engine, enter leaves the open due (s_open_due), tick reports no
+// change and render builds nothing (the rows and sig stay those of the last build); the next pass of the menu loop tries again. The row attributes are
+// trxmon's UA_* (ui.h), the same numbers as TG_*.
 static void open_due(void)
 {
     if (s_open_due) {
@@ -373,7 +410,7 @@ static void open_due(void)
     }
 }
 
-// The node was entered (what the operation monitor.open did): the session starts, once until mon_release().
+// The node was entered (what the operation monitor.open did): the session starts in the poll's next pass, once until mon_release().
 static void tg_enter(void)
 {
     s_open_due = true;
@@ -383,7 +420,8 @@ static void tg_enter(void)
     }
 }
 
-// A pass of the menu loop while the screen is shown (what the operation monitor.tick did): stops, finished run-tos, the live log. True: redraw.
+// A pass of the menu loop while the screen is shown (what the operation monitor.tick did): true (redraw) when the poll changed the screen (the session
+// started, a line's output, stops, finished run-tos, the live log) or the rows built from its last read differ.
 static bool tg_tick(void)
 {
     if (!engine_try()) {

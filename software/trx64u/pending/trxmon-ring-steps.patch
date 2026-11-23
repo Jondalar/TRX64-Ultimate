@@ -327,7 +327,7 @@ index 7bbedad4..1d98eceb 100644
      /* ringload, undump, loadsnapshot */
      if (argc < 2) {
 diff --git a/apps/trxmon/src/ring.h b/apps/trxmon/src/ring.h
-index 159f0d0e..806b20e5 100644
+index 159f0d0e..996f8890 100644
 --- a/apps/trxmon/src/ring.h
 +++ b/apps/trxmon/src/ring.h
 @@ -1,7 +1,8 @@
@@ -348,12 +348,12 @@ index 159f0d0e..806b20e5 100644
 + * A platform whose screen task may not call the ring (the monitor library: its
 + * keys come on the menu task without the core lock, its poll holds the lock)
 + * gives trxmon the dumps in steps. The screen's file verbs (dump, snapshot,
-+ * ringdump, ringsave, undump, ringload, loadsnapshot) are then queued by the
-+ * key (rpc_local_exec answers MON_QUEUED) and run by ring_job_poll(), which the
-+ * platform calls from its poll: the line in the first call, then one step of a
-+ * dump per call. A load and ringsave run whole in that first call. Without the
-+ * steps (the firmware, the host tests) every verb runs whole where it is typed,
-+ * through hw_ring_*. */
++ * ringdump, ringsave, undump, ringload, loadsnapshot) are then a job
++ * (rpc_local_exec answers MON_QUEUED) that ring_job_poll() runs, which the
++ * platform's poll calls (ui_poll, ui.h): the line in the first call, then one
++ * step of a dump per call. A load and ringsave run whole in that first call.
++ * Without the steps (the firmware, the host tests) every verb runs whole where
++ * the line runs, through hw_ring_*. */
 +enum { RING_JOB_FRAME = 0, RING_JOB_RING = 1 }; /* begin's kind */
 +typedef struct
 +{
@@ -368,12 +368,12 @@ index 159f0d0e..806b20e5 100644
 +    int (*entries)(const void *job);    /* once step answered 0 (RING) */
 +    void (*drop)(void *job);            /* ends it; a file that is not complete is removed; no register is touched */
 +} ring_steps_t;
-+/* NULL: every verb runs whole where it is typed (the default) */
++/* NULL: every verb runs whole where the line runs (the default) */
 +void ring_set_steps(const ring_steps_t *s);
 +/* rpc_local_exec: 1 the line is a ring file verb and queued, 0 not one to
 + * queue (no steps, assemble mode, another verb), -1 a job is still on */
 +int ring_job_queue(const char *cmd);
-+/* The platform's poll, holding what the ring needs: one piece of the job */
++/* The platform's poll (ui_poll), holding what the ring needs: one piece of the job */
 +void ring_job_poll(void);
 +/* 0 no job, 1 queued or running, 2 done and its text not taken yet */
 +int ring_job_state(void);
@@ -431,7 +431,7 @@ index 17e7f7d0..1108e63c 100644
  int rpc_local_waiting(void);
  /* A stop came that no run was waiting for (a `g` ran into a breakpoint, an observer): once */
 diff --git a/apps/trxmon/src/ui.c b/apps/trxmon/src/ui.c
-index 05d28968..4803b849 100644
+index 05d28968..1a38387e 100644
 --- a/apps/trxmon/src/ui.c
 +++ b/apps/trxmon/src/ui.c
 @@ -5,6 +5,7 @@
@@ -442,7 +442,192 @@ index 05d28968..4803b849 100644
  #include "rpc.h"
  #include "spans.h"
  
-@@ -417,17 +418,28 @@ void ui_render(const ui_t *u, ui_screen_t *s)
+@@ -20,14 +21,14 @@ void ui_init(ui_t *u)
+ static int is_wide(const ui_t *u) { return u->cols >= UI_WIDE_COLS; }
+ 
+ /* The first row of the window that is drawn: the machine running shrinks the window to the rows that stay on top of
+- * the C64's picture. With a log observer on, the live log gets more of them. */
+-static int run_top(const ui_t *u)
++ * the C64's picture. With a log observer on (`live`), the live log gets more of them. */
++static int run_top_of(const ui_t *u, int running, int live)
+ {
+-    if (!M.running) {
++    if (!running) {
+         return 0;
+     }
+     int keep = is_wide(u) ? UI_WIDE_SHRUNK_ROWS : UI_SHRUNK_ROWS;
+-    if (mach_live_log_active()) {
++    if (live) {
+         keep += UI_LIVE_EXTRA_ROWS;
+         if (keep > u->rows - 6) {
+             keep = u->rows - 6;
+@@ -36,6 +37,15 @@ static int run_top(const ui_t *u)
+     return u->rows - keep;
+ }
+ 
++/* the same for the screen as it is drawn now: with ui_set_polled what the last ui_poll read */
++static int run_top(const ui_t *u)
++{
++    if (u->pl) {
++        return run_top_of(u, u->pl->rows.running, u->pl->rows.live);
++    }
++    return run_top_of(u, M.running, mach_live_log_active());
++}
++
+ /* the first and last output row of the window, whose top `top` rows are blank (the machine runs) */
+ static void out_range(const ui_t *u, int top, int *first, int *last)
+ {
+@@ -224,13 +234,23 @@ static void put_row(ui_screen_t *s, int y, const char *t, int n, int attr)
+ 
+ static void put_sbuf(ui_screen_t *s, int y, sbuf_t *b, int attr) { put_row(s, y, b->p, b->len, attr); }
+ 
+-static void regs_rows(ui_screen_t *s, int y0)
++/* one of the machine's rows (ui_mrows_t): its text, cut at the widest window */
++static void mrow(char *d, const char *t, int n)
++{
++    if (n > UI_COLS_MAX) {
++        n = UI_COLS_MAX;
++    }
++    memcpy(d, t, (size_t)n);
++    d[n] = 0;
++}
++
++static void regs_rows(ui_mrows_t *m)
+ {
+     char t[160];
+     sbuf_t b;
+     if (M.running) {
+-        put_row(s, y0, "registers: running", 18, UA_REGS);
+-        put_row(s, y0 + 1, "", 0, UA_REGS);
++        mrow(m->regs[0], "registers: running", 18);
++        mrow(m->regs[1], "", 0);
+         return;
+     }
+     sb_init(&b, t, sizeof(t));
+@@ -250,17 +270,18 @@ static void regs_rows(ui_screen_t *s, int y0)
+     sb_putn(&c, b.p + n1 + 1, b.len - n1 - 1);
+     sb_putc(&c, ' ');
+     sb_HEX(&c, mach_port(), 2);
+-    put_sbuf(s, y0, &a, UA_REGS);
+-    put_sbuf(s, y0 + 1, &c, UA_REGS);
++    mrow(m->regs[0], a.p, a.len);
++    mrow(m->regs[1], c.p, c.len);
+ }
+ 
+ /* the wide registers row: "PC c012  A 00  X 00  Y 00  SP f6  NV-BDIZC nv-bdIzc" from TRX64's own dump */
+-static void wide_regs_row(ui_screen_t *s, int y)
++static void wide_regs_row(ui_mrows_t *m)
+ {
+     char t[160];
+     sbuf_t b;
++    m->regs[1][0] = 0;
+     if (M.running) {
+-        put_row(s, y, "registers: running", 18, UA_REGS);
++        mrow(m->regs[0], "registers: running", 18);
+         return;
+     }
+     sb_init(&b, t, sizeof(t));
+@@ -308,11 +329,11 @@ static void wide_regs_row(ui_screen_t *s, int y)
+         sb_put(&r, "  NV-BDIZC ");
+         sb_put(&r, w[5]);
+     }
+-    put_sbuf(s, y, &r, UA_REGS);
++    mrow(m->regs[0], r.p, r.len);
+ }
+ 
+ /* the wide device row: the CPU port, the lens `m` and `d` read through, the device, the ring and the trace */
+-static void wide_info_row(ui_screen_t *s, int y)
++static void wide_info_row(ui_mrows_t *m)
+ {
+     char t[120];
+     sbuf_t b;
+@@ -349,9 +370,31 @@ static void wide_info_row(ui_screen_t *s, int y)
+     } else {
+         sb_put(&b, "  trace -");
+     }
+-    put_sbuf(s, y, &b, UA_REGS);
++    mrow(m->info, b.p, b.len);
+ }
+ 
++/* The rows that read the machine, into m: what ui_render draws, or ui_poll keeps for it (ui_set_polled) */
++static const ui_mrows_t *machine_rows(const ui_t *u, ui_mrows_t *m)
++{
++    char t[96];
++    sbuf_t b;
++    m->running = M.running;
++    m->live = mach_live_log_active();
++    sb_init(&b, t, sizeof(t));
++    status_text(u, &b);
++    mrow(m->status, b.p, b.len);
++    if (is_wide(u)) {
++        wide_regs_row(m);
++        wide_info_row(m);
++    } else {
++        regs_rows(m);
++        m->info[0] = 0;
++    }
++    return m;
++}
++
++static void put_text(ui_screen_t *s, int y, const char *t, int attr) { put_row(s, y, t, m_strlen(t), attr); }
++
+ static void sep_row(ui_screen_t *s, int y, int scrolled)
+ {
+     char t[UI_COLS_MAX + 1];
+@@ -373,33 +416,43 @@ static void sep_row(ui_screen_t *s, int y, int scrolled)
+     put_row(s, y, t, n, UA_SEP);
+ }
+ 
++/* the machine's rows of a screen that reads them where it draws (static: the screen runs on the UI task's stack) */
++static ui_mrows_t s_live;
++
++static int first_word(const char *line, char *w, int cap, const char **rest);
++
++/* the verb of the line that waits for ui_poll, "line" for the empty one (it ends assemble mode) */
++static const char *waiting_verb(const ui_t *u, char *w, int cap)
++{
++    first_word(u->pl->line, w, cap, 0);
++    return w[0] ? w : "line";
++}
++
+ void ui_render(const ui_t *u, ui_screen_t *s)
+ {
+-    char t[96];
+-    sbuf_t b;
+     memset(s, 0, sizeof(*s));
+     s->cols = u->cols;
+     s->rows = u->rows;
+     const int wide = is_wide(u);
+-    int top = run_top(u);
++    const ui_mrows_t *mr = u->pl ? &u->pl->rows : machine_rows(u, &s_live);
++    int top = run_top_of(u, mr->running, mr->live);
+     s->blank_rows = top;
+     for (int y = 0; y < top; y++) {
+         put_row(s, y, "", 0, UA_BLANK);
+     }
+-    sb_init(&b, t, sizeof(t));
+-    status_text(u, &b);
+-    put_sbuf(s, top, &b, UA_STATUS);
++    put_text(s, top, mr->status, UA_STATUS);
+     int first, last;
+     out_range(u, top, &first, &last);
+     int rows = last - first + 1;
+     int max_scroll = u->hn > rows ? u->hn - rows : 0;
+     int sc = u->scroll > max_scroll ? max_scroll : u->scroll;
+     if (wide) {
+-        wide_regs_row(s, top + 1);
+-        wide_info_row(s, top + 2);
++        put_text(s, top + 1, mr->regs[0], UA_REGS);
++        put_text(s, top + 2, mr->info, UA_REGS);
+         sep_row(s, top + 3, 0);
+     } else {
+-        regs_rows(s, top + 1);
++        put_text(s, top + 1, mr->regs[0], UA_REGS);
++        put_text(s, top + 2, mr->regs[1], UA_REGS);
+     }
+     for (int r = 0; r < rows; r++) {
+         int back = sc + (rows - 1 - r);
+@@ -417,17 +470,38 @@ void ui_render(const ui_t *u, ui_screen_t *s)
       * overlay), so there is one cell less. Wide, the hint row is the last. */
      int cy = wide ? u->rows - 2 : u->rows - 1;
      int room = u->cols - (wide ? 2 : 3);
@@ -466,6 +651,16 @@ index 05d28968..4803b849 100644
 +        put_sbuf(s, cy, &j, UA_PROMPT);
 +        s->cursor_x = j.len;
 +        s->cursor_y = cy;
++    } else if (ui_waiting(u)) {
++        /* a line waits for the platform's poll (ui_poll): shown as a ring file that has not begun */
++        char jt[UI_COLS_MAX + 1], w[16];
++        sbuf_t j;
++        sb_init(&j, jt, room + 2);
++        sb_put(&j, waiting_verb(u, w, sizeof(w)));
++        sb_put(&j, ": starting   RUN/STOP cancels");
++        put_sbuf(s, cy, &j, UA_PROMPT);
++        s->cursor_x = j.len;
++        s->cursor_y = cy;
 +    } else {
 +        int from = u->clen > room ? u->clen - room : 0;
 +        if (u->cpos < from) {
@@ -482,7 +677,17 @@ index 05d28968..4803b849 100644
      if (wide) {
          sep_row(s, u->rows - 3, sc);
          char ht[UI_COLS_MAX + 1];
-@@ -629,6 +641,8 @@ static void run_line(ui_t *u, const char *line)
+@@ -611,7 +685,8 @@ static void prompt_prefill(ui_t *u)
+     }
+ }
+ 
+-static void run_line(ui_t *u, const char *line)
++/* the line runs here and now (ui_set_polled: in ui_poll) */
++static void run_now(ui_t *u, const char *line)
+ {
+     char w[16];
+     const char *rest;
+@@ -629,6 +704,8 @@ static void run_line(ui_t *u, const char *line)
              sb_put(&d, (w[0] == 'r') ? "ret" : "next");
          }
          sb_str(&d);
@@ -491,14 +696,45 @@ index 05d28968..4803b849 100644
      } else {
          sb_str(&o);
          u->run_desc[0] = 0;
-@@ -660,6 +674,16 @@ static int page(const ui_t *u)
+@@ -649,6 +726,22 @@ static void run_line(ui_t *u, const char *line)
+     prompt_prefill(u);
+ }
+ 
++/* What the keys run. With ui_set_polled the line waits for ui_poll: nothing reaches the machine from a key. */
++static void run_line(ui_t *u, const char *line)
++{
++    if (!u->pl) {
++        run_now(u, line);
++        return;
++    }
++    int n = m_strlen(line);
++    if (n > UI_CMD) {
++        n = UI_CMD;
++    }
++    memcpy(u->pl->line, line, (size_t)n);
++    u->pl->line[n] = 0;
++    u->pl->queued = 1;
++}
++
+ /* the output rows on the screen now (the machine running shrinks the window) */
+ static int page(const ui_t *u)
+ {
+@@ -660,6 +753,24 @@ static int page(const ui_t *u)
  
  int ui_key(ui_t *u, int key)
  {
-+    if (ring_job_state()) {
-+        /* a ring file of the screen runs from the platform's poll: RUN/STOP cancels it, the output scrolls, the other
-+         * keys are dropped (no line runs and nothing reaches the machine until it is done) */
-+        if (key == UI_K_STOP) {
++    if (ring_job_state() || ui_waiting(u)) {
++        /* a line of the screen waits for the platform's poll, or a ring file of it runs there: RUN/STOP cancels it, the
++         * output scrolls, the other keys are dropped (no line runs and nothing reaches the machine until it is done) */
++        if ((key == UI_K_STOP) && ui_waiting(u)) {
++            char t[48], w[16];
++            sbuf_t b;
++            sb_init(&b, t, sizeof(t));
++            sb_put(&b, waiting_verb(u, w, sizeof(w)));
++            sb_put(&b, ": cancelled before it began");
++            u->pl->queued = 0;
++            ui_print(u, sb_str(&b), UA_ERR);
++        } else if (key == UI_K_STOP) {
 +            ring_job_cancel();
 +        }
 +        if ((key != UI_K_PGUP) && (key != UI_K_PGDN)) {
@@ -508,7 +744,7 @@ index 05d28968..4803b849 100644
      switch (key) {
      case UI_K_RETURN: {
          /* trim */
-@@ -809,6 +833,14 @@ int ui_tick(ui_t *u)
+@@ -809,6 +920,14 @@ int ui_tick(ui_t *u)
          ui_print(u, s_out, UA_NORMAL);
          printed = 1;
      }
@@ -523,3 +759,122 @@ index 05d28968..4803b849 100644
      int unclaimed = rpc_take_unclaimed();
      int stopped = u->was_run && !M.running;
      u->was_run = M.running;
+@@ -825,6 +944,47 @@ int ui_tick(ui_t *u)
+     return printed;
+ }
+ 
++/* ---- the screen run from the platform's poll --------------------------- */
++
++void ui_set_polled(ui_t *u, ui_polled_t *p)
++{
++    if (p) {
++        memset(p, 0, sizeof(*p));
++    }
++    u->pl = p;
++}
++
++int ui_poll(ui_t *u)
++{
++    int printed = 0;
++    if (u->pl && u->pl->queued) {
++        u->pl->queued = 0;
++        run_now(u, u->pl->line);
++        printed = 1;
++    }
++    ring_job_poll();
++    printed |= ui_tick(u);
++    if (u->pl) {
++        /* read into the scratch of a screen that reads where it draws (unused here), kept when it differs */
++        const ui_mrows_t *n = machine_rows(u, &s_live), *o = &u->pl->rows;
++        if ((n->running != o->running) || (n->live != o->live) || !m_streq(n->status, o->status) ||
++            !m_streq(n->regs[0], o->regs[0]) || !m_streq(n->regs[1], o->regs[1]) || !m_streq(n->info, o->info)) {
++            u->pl->rows = *n;
++            printed = 1;
++        }
++    }
++    return printed;
++}
++
++int ui_waiting(const ui_t *u) { return u->pl && u->pl->queued; }
++
++void ui_drop(ui_t *u)
++{
++    if (u->pl) {
++        u->pl->queued = 0;
++    }
++}
++
+ void ui_show_stop(ui_t *u)
+ {
+     sbuf_t o;
+diff --git a/apps/trxmon/src/ui.h b/apps/trxmon/src/ui.h
+index a72f9bb1..a6101b94 100644
+--- a/apps/trxmon/src/ui.h
++++ b/apps/trxmon/src/ui.h
+@@ -53,6 +53,27 @@ typedef struct
+     int blank_rows; /* rows 0..blank_rows-1 are colour index 0: transparent on the overlay */
+ } ui_screen_t;
+ 
++/* The rows of the screen that read the machine, as ui_render draws them: the status row, the registers (narrow two
++ * rows, wide one) and the wide device row; whether the machine ran and a log observer was on (the window shrinks) */
++typedef struct
++{
++    int running, live;
++    char status[UI_COLS_MAX + 1];
++    char regs[2][UI_COLS_MAX + 1];
++    char info[UI_COLS_MAX + 1];
++} ui_mrows_t;
++
++/* A platform whose screen calls may not reach the machine (the monitor library, U18: its keys, tick and render come
++ * on the menu task without the core lock, its poll holds the lock) hands the screen this (ui_set_polled). ui_key then
++ * only queues the line it would run (RETURN, the help key, RUN/STOP's pause) and ui_render draws the machine's rows
++ * from `rows`; the platform's poll calls ui_poll, which runs the line, ticks and reads the rows again. */
++typedef struct
++{
++    char line[UI_CMD + 1];
++    int queued; /* `line` waits for ui_poll */
++    ui_mrows_t rows;
++} ui_polled_t;
++
+ typedef struct
+ {
+     int cols, rows; /* the window: UI_NARROW_* or UI_WIDE_* (ui_set_size) */
+@@ -72,6 +93,7 @@ typedef struct
+     int was_run;
+     int leave; /* UI_STAY, UI_LEAVE_X, UI_LEAVE_QUIT */
+     uint32_t olog_cur; /* the next observer log line to show live (mach_olog_next) */
++    ui_polled_t *pl; /* null: the screen's calls read and run the machine themselves (ui_set_polled) */
+ } ui_t;
+ 
+ void ui_init(ui_t *u);
+@@ -96,12 +118,27 @@ int ui_map_key(int k);
+ /* Which function keys the interface made PageUp, PageDown and Help (ui->fkey(1..8): the codes F1..F8 give);
+  * the hint row and the opening text name them. Defaults: F1, F7, F3. */
+ void ui_set_keys(ui_t *u, const int *fkey);
+-/* One key. Returns UI_STAY, UI_LEAVE_X (`x` ran) or UI_LEAVE_QUIT (`/quit` ran). */
++/* One key. Returns UI_STAY, UI_LEAVE_X (`x` ran) or UI_LEAVE_QUIT (`/quit` ran); with ui_set_polled the line runs
++ * in ui_poll, and u->leave says so after it. */
+ int ui_key(ui_t *u, int key);
+ /* After rpc_poll: output of a run-to that finished, the stop text of a stop nobody waited for.
+- * Returns 1 when something was printed. */
++ * Returns 1 when something was printed. With ui_set_polled only ui_poll calls it. */
+ int ui_tick(ui_t *u);
+-/* The rows as they are drawn now: the machine's state (M) is read here */
++/* The rows as they are drawn now: the machine's state (M) is read here; with ui_set_polled its rows come from
++ * the last ui_poll and nothing of the machine is read */
+ void ui_render(const ui_t *u, ui_screen_t *s);
+ 
++/* ---- the screen run from the platform's poll (ui_polled_t) ------------- */
++/* p: the screen's calls queue their lines and draw the machine's rows from p (cleared here); null: they run and
++ * read the machine themselves (the default) */
++void ui_set_polled(ui_t *u, ui_polled_t *p);
++/* The platform's poll, holding what the machine needs: the queued line runs, a ring file job of the screen takes
++ * its step (ring_job_poll), ui_tick, the machine's rows are read again. Returns 1 when the screen changed (a line
++ * ran, output came, the machine's rows differ). */
++int ui_poll(ui_t *u);
++/* 1: a line waits for ui_poll */
++int ui_waiting(const ui_t *u);
++/* The screen goes: the line that waits is dropped, without a text */
++void ui_drop(ui_t *u);
++
+ #endif

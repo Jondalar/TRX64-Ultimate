@@ -418,8 +418,7 @@ Nothing decided yet.
     more, 177,720 B RAM above the image; `app_space.py` not run), trxmon's host tests pass (1131 / 74 / 29), a scratch
     harness compares stepped against whole-call results (100 checks). Board test for Alex: in F4 `dump /usb0/t.c64re`
     and `ringdump /usb0/t.c64rering 4 5`, watch the progress row, RUN/STOP mid-dump removes the file, the same frame
-    over RPC (`monitor/exec dump`) is byte-identical. Open: the info row (`trx_ring_status`, register reads) and
-    `rstep` / `frame` / `goto` / `mark` still reach the ring on the menu task.
+    over RPC (`monitor/exec dump`) is byte-identical. (The open info row and verbs: see the next entry but one.)
   - **More of F4 through the queue, and RingSteps (MultiCore, by Alex's delegation):** the verbs rstep, frame, goto,
     mark and the trace status go through the same queue and run in `monitor.serve` one pass later; the info row draws
     from a snapshot the poll refreshes (at most 5 ms old). One rule: register calls only under the lock, no exception
@@ -460,3 +459,16 @@ Nothing decided yet.
     `reset(msg, n)` (drive A if there is one, never creates one). MultiCore exports its program loader as "cbmprg"
     (`cbmprg_api.h`; five cores use it): our copy goes once it is built. `menuvlist.cc`'s T64 names stay until the cut
     (P4: a container row in the UI TOML). The first boot reset comes after the libraries and groups are loaded.
+  - **F4: nothing reaches the machine from the menu task (waits for Alex with the same patch):** trxmon gets
+    `ui_set_polled()`; the library sets it, the firmware does not and keeps today's path. In polled mode every terminal
+    line (all verbs) is only queued; `ui_poll()` in `monitor.serve` (lock held) runs it, starts a ring file job in the
+    same pass, and refreshes a snapshot of the screen's rows (status, registers, the wide info row with ring and trace
+    status); render draws only from the snapshot; tick reports what the poll changed. The session start and `diag`'s
+    release run in the poll. `monitor.key` waits up to 100 ms for the poll so quick verbs (and `x` / `/quit`, which
+    close the menu through the key's answer) never show a queued state; a line still waiting after that shows
+    "starting", RUN/STOP cancels it. Only `monitor.release` (the `menu_closed` hook, by the contract) still touches the
+    debug block from the menu task. Checked: trxmon host tests 1131 / 74 / 29, screen goldens identical; a scratch
+    harness compares queued against immediate for 22 verbs, narrow and wide, plus the three ring files (510 checks);
+    the firmware builds with the final sources (exit 0); the monitor library links with a stub of the 3.3 accessors,
+    passes D19 and packs (image + bss 682,500 B, .u2a 211,488 B). On base 3.2 (no when_frozen poll) the F4 session
+    never starts while the menu is open. `software/trx64u/pending/trxmon-ring-steps.patch` holds both trxmon changes.

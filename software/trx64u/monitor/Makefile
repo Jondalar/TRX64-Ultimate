@@ -15,7 +15,7 @@ LIB_EXPORTS = textgrid=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as packed on 2026-11-23,
 # the base 3.3 accessors stubbed (56 bytes); heap (U18 S13): no block held while idle, at most 50,240 bytes at once (one RPC client while gated); the
 # counts: lib_register's record.
-LIB_BUDGET = image=679752 heap_keep=0 heap_peak=50240 ops=4 states=1 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
+LIB_BUDGET = image=682500 heap_keep=0 heap_peak=50240 ops=4 states=1 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
 include $(SDK)/mk/lib.mk
 
 # trxmon is built against the firmware's application ABI (u2p_app.h with the whole ring table), not the SDK's ABI 2 shim: one source for both (D4), and the

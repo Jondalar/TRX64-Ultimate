@@ -7,31 +7,38 @@
 
 #include <stdint.h>
 
-// The monitor's screen is entered (the textgrid's enter, lib_monitor.cc): the session starts (once, until mon_release()).
+// The monitor's screen wants the session (the textgrid's enter, a key, mon.run; lib_monitor.cc): the poll's next pass starts it (once, until
+// mon_release()). Nothing here reaches the machine.
 void mon_open(void);
-// A key typed while the monitor has the focus (every key is the monitor's). True when the monitor took it.
+// The poll has the session's start to do (mon_open). A key waits for it before it is taken (lib_monitor.cc).
+bool mon_starting(void);
+// The poll has something of the screen's to do: the session's start, a typed line, the release of `diag`. A key waits for it after it was taken.
+bool mon_pending(void);
+// A key typed while the monitor has the focus (every key is the monitor's): it edits the line, a line it runs waits for the poll. Dropped before the
+// session started. True when the monitor took it.
 bool mon_key(int k);
-// Does RUN/STOP belong to the monitor now? While the machine runs it pauses it, while a ring file job of the screen is on it cancels that (trxmon's
-// ui.c); else RUN/STOP closes the menu.
+// Does RUN/STOP belong to the monitor now? While the machine runs it pauses it, while a line or a ring file job of the screen waits for the poll or runs
+// there it cancels that (trxmon's ui.c); else RUN/STOP closes the menu.
 bool mon_wants_stop(void);
 // `x` ran (resume and leave): read once.
 bool mon_leave_requested(void);
-// The line `diag` was typed: the menu goes to Diagnostics (read once; the monitor session ends).
+// The line `diag` was typed: the menu goes to Diagnostics (read once; the poll ends the monitor session).
 bool mon_diag_requested(void);
-// The library's poll (monitor.serve): the RPC server on TCP 4312 (monsrv.h) and what its clients ask, and one step of a ring file verb the screen queued
-// (dump, ringdump, ringsave, undump, ringload: trxmon's ring.h), which reaches the ring only here, under the core lock. The session is claimed only when a
-// client sends a command.
+// The library's poll (monitor.serve), the one place that reaches the machine and the ring, under the core lock: the RPC server on TCP 4312 (monsrv.h)
+// and what its clients ask; for the screen its session's start and `diag`'s release, the line it typed, one step of a ring file verb (dump, ringdump:
+// trxmon's ring.h), and its machine rows read again each pass (trxmon's ui_poll). The session is claimed for the RPC only when a client sends a command.
 void mon_serve(void);
 // An RPC client sent a command: the engine is needed now (monsrv.cc calls this before rpc_request). False: the debug block is not there.
 bool mon_claim(void);
-// Called each pass of the menu loop while the screen is shown (the textgrid's tick): the stops that came, the run-tos that finished, the live log. True
-// when the screen changed.
+// Called each pass of the menu loop while the screen is shown (the textgrid's tick): true when the poll changed the screen (output, stops, run-tos that
+// finished, the live log) or, every 250 ms, when the rows built from what it read last differ.
 bool mon_tick(void);
-// The menu closes (any way): the debugger's hold is given back, breakpoints and observers are disarmed, the next open starts a new session. The
-// operation monitor.release (lib_monitor.cc), which the base library's core hook menu_closed calls.
+// The menu closes (any way): the debugger's hold is given back, breakpoints and observers are disarmed, the next open starts a new session; a line
+// that waits for the poll is dropped. The operation monitor.release (lib_monitor.cc), which the base library's core hook menu_closed calls on the menu
+// task, and the poll after `diag`.
 void mon_release(void);
 // The window, the export "textgrid" (lib_monitor.cc) the base draws for a node with the layout "terminal": mon_render() builds the rows of the screen as
-// ui.c has them now; the accessors read them.
+// ui.c has them now, its machine rows as the poll read them last; the accessors read them.
 void mon_render(void);
 int mon_cols(void);
 int mon_rows(void);
@@ -41,7 +48,7 @@ int mon_blank_rows(void);
 void mon_cursor(int *x, int *y);
 uint32_t mon_sig(void);                 // a hash of what mon_render() built
 
-// A command run as if typed.
+// A command typed as if on the screen (the session started; the poll runs it).
 void mon_run(const char *line);
 
 #endif

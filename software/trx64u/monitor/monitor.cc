@@ -1,6 +1,6 @@
 // The monitor of F4: trxmon's engine in the monitor library (monitor.h). PROVENANCE: monitor.cc of MultiCore's core application (TRX64U-MultiCore 3b8e2955,
 // coreapp/src); the session is ui_session() of trxmon's main.c (ui_set_size, ui_set_keys, ui_open, ui_map_key, ui_key, ui_tick, ui_render) without the
-// overlay; the RPC server is monsrv.cc, the platform calls are lib_monitor.cc.
+// overlay, with what reaches the machine moved into the poll (ui_set_polled, ui_poll); the RPC server is monsrv.cc, the platform calls are lib_monitor.cc.
 // This file reads the firmware's application ABI (u2p_app.h, app_api.h), as trxmon does, and no header of the SDK: svctab.h defines u2p_video_t and the ring
 // records again. The base's tables reach it through monlib.h.
 #include "monitor.h"
@@ -31,9 +31,9 @@ static u2p_trx_api_t s_trx;
 
 static int trx_video(u2p_video_t *v) { return monlib_trx_video(v); }
 
-// The ring library's dumps in steps, its export "ringsteps" (ring_steps.h), handed to trxmon (ring.h): the screen's file verbs then run from the poll
-// (mon_serve), one step per pass under the core lock. Without the export, or with a table that does not reach `drop` (the size find reports and the
-// table's own size both have to) or lacks a member, trxmon gets none and runs every verb whole where it is typed.
+// The ring library's dumps in steps, its export "ringsteps" (ring_steps.h), handed to trxmon (ring.h): the screen's dumps then run in the poll
+// (mon_serve) one step per pass, so the core lock is held one step at a time. Without the export, or with a table that does not reach `drop` (the size
+// find reports and the table's own size both have to) or lacks a member, trxmon gets none and the poll runs each file verb whole in one pass.
 static ring_steps_t s_steps;
 
 static void steps_table(void)
@@ -86,12 +86,20 @@ static void trx_table(void)
 }
 
 // ---- the session ---------------------------------------------------------------------------------------------------------------------------------------------
+// Only the poll (mon_serve, under the core lock) reaches the machine: it starts the session, runs what the screen typed (trxmon's ui_poll) and reads the
+// screen's machine rows for it. The calls of the menu task (mon_open, mon_key, mon_run, mon_tick, mon_render) edit the line, queue it and draw from what the
+// poll read; they leave the session's start and the release of `diag` to the poll as well. mon_release is the exception the core hook menu_closed makes
+// (core_hooks.h: it gives the debugger's hold back on the menu task).
 static ui_t s_ui;
+static ui_polled_t s_polled;                    // the screen's queued line and its machine rows (trxmon's ui.h)
 static ui_screen_t s_scr;
 static bool g_open;                             // a session stands (the engine is initialised, the debug block may be owned)
 static bool g_ok;                               // the debug block is there
 static bool g_leave, g_diag;
 static bool g_menu;                             // the menu's monitor tab uses the session (an RPC client may use it too: monsrv_has_client())
+static bool g_open_due;                         // the screen wants the session: the poll starts it
+static bool g_release_due;                      // `diag` was typed: the poll ends the screen's session
+static bool g_dirty;                            // the poll changed the screen (output, a started session): the next tick redraws
 static uint32_t g_hash, g_last;
 static uint32_t g_try;                          // the last time mon_serve() tried to listen
 
@@ -101,9 +109,11 @@ static void session_open(void)
         return;
     }
     g_open = true;
+    g_dirty = true;
     trx_table();
     g_ok = hw_init(&s_trx);                     // 0 without regs or without the debug page (CAPS b3)
     ui_init(&s_ui);
+    ui_set_polled(&s_ui, &s_polled);            // the screen's keys queue their lines, its render reads what ui_poll read
     ui_set_size(&s_ui, UI_WIDE_COLS, UI_WIDE_ROWS);
     int fkey[9] = { 0, KEY_PAGEUP, 0, KEY_HELP, 0, KEY_TASKS, 0, KEY_PAGEDOWN, 0 };       // the Ultimate interface: F1 F3 F5 F7 (ui_set_keys names them in the hint row)
     ui_set_keys(&s_ui, fkey);
@@ -126,8 +136,14 @@ static void session_open(void)
 void mon_open(void)
 {
     g_menu = true;
-    session_open();
+    if (!g_open) {
+        g_open_due = true;
+    }
 }
+
+bool mon_starting(void) { return g_open_due; }
+
+bool mon_pending(void) { return g_open_due || g_release_due || ui_waiting(&s_ui); }
 
 bool mon_claim(void)
 {
@@ -149,6 +165,13 @@ void mon_serve(void)
         g_try = plat_ms() | 1;
         monsrv_start();
     }
+    if (g_release_due) {                        // `diag`: the screen's session ends here, where the debugger's hold may be given back
+        mon_release();
+    }
+    if (g_open_due) {                           // the screen came: the session starts here (the ring's status, the machine's state)
+        g_open_due = false;
+        session_open();
+    }
     // The screen's ring file job (ring.h) runs below, one step per pass. Between two of its steps the machine stays as it is: the RPC's requests wait in
     // their socket while it is queued or running.
     if (ring_job_state() != 1) {
@@ -162,7 +185,14 @@ void mon_serve(void)
                 g_leave = true;
             }
         }
-        ring_job_poll();
+        if (g_menu) {
+            // the line the screen typed, a step of its ring file job, the stops and texts that came, the machine's rows for its render
+            g_dirty |= ui_poll(&s_ui) != 0;
+            if (s_ui.leave != UI_STAY) {            // `x` or `/quit` ran: the next answer of monitor.key closes the menu
+                s_ui.leave = UI_STAY;
+                g_leave = true;
+            }
+        }
     }
     if (g_open && !g_menu && !monsrv_has_client()) {
         session_end();
@@ -171,10 +201,14 @@ void mon_serve(void)
 
 void mon_release(void)
 {
+    g_open_due = false;                         // the screen is gone: a start still due is not wanted any more
+    g_release_due = false;
+    g_leave = false;
     if (!g_open) {
         return;
     }
     ring_job_drop();                            // the screen's ring file job goes with the screen (a dump's partial file is removed)
+    ui_drop(&s_ui);                             // so does a line that waits for the poll
     g_menu = false;
     if (monsrv_has_client()) {                  // an RPC client still holds the session (breakpoints, observers)
         return;
@@ -182,13 +216,15 @@ void mon_release(void)
     session_end();
 }
 
-// RUN/STOP pauses the running machine, and cancels the screen's ring file job while one is on (ui.c)
-bool mon_wants_stop(void) { return g_open && g_ok && (M.running || ring_job_state() != 0); }
+// RUN/STOP pauses the running machine, and cancels the screen's queued line or ring file job while one is on (ui.c)
+bool mon_wants_stop(void) { return g_open && g_ok && (M.running || ring_job_state() != 0 || ui_waiting(&s_ui)); }
 
 bool mon_key(int k)
 {
-    g_menu = true;
-    session_open();
+    mon_open();
+    if (!g_open) {
+        return true;                            // the poll has not started the session yet: the key is dropped
+    }
     switch (k) {                                // the keyboards deliver F1 F3 F5 F7 as function keys; trxmon names them PAGEUP HELP TASKS PAGEDOWN
     case KEY_F1: k = KEY_PAGEUP; break;
     case KEY_F3: k = KEY_HELP; break;
@@ -203,6 +239,7 @@ bool mon_key(int k)
         s_ui.clen = s_ui.cpos = 0;
         s_ui.cmd[0] = 0;
         g_diag = true;
+        g_release_due = true;                   // the poll ends the session
         return true;
     }
     int m = ui_map_key(k);
@@ -231,11 +268,14 @@ bool mon_diag_requested(void)
 
 bool mon_tick(void)
 {
-    if (!g_open || !g_ok) {
+    if (!g_open) {
         return false;
     }
-    rpc_poll();
-    bool d = ui_tick(&s_ui) != 0;
+    bool d = g_dirty;                           // what the poll printed (mon_serve: ui_poll did trxmon's ui_tick)
+    g_dirty = false;
+    if (!g_ok) {
+        return d;
+    }
     uint32_t now = plat_ms();
     if (now - g_last >= 250) {                  // the status rows follow the machine, the command row a ring file job's progress
         g_last = now;
@@ -248,9 +288,8 @@ bool mon_tick(void)
 
 void mon_run(const char *line)
 {
-    g_menu = true;
-    session_open();
-    if (!g_ok) {
+    mon_open();
+    if (!g_open || !g_ok) {
         return;
     }
     for (const char *p = line; *p; p++) {
