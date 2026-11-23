@@ -189,12 +189,18 @@ int  trx_ring_materialize(int index, uint8_t *ram, uint8_t *color, uint8_t *cart
 // undo walked back from the head once. ram/color: n buffers each.
 int  trx_ring_materialize_many(const int *idx, int n, uint8_t **ram, uint8_t **color, uint8_t **carts = 0);
 // The same one target per call, for a caller that steps (a .c64rering dump the menu steps): begin makes the pause, reads the memories and finds the
-// targets (idx[] oldest first, as above; carts: read the cartridge RAM too); each next gives one target, newest first, its position in idx[] in *which
-// (cart may be NULL); end frees the walk, at any point. A next after the timeline or the log counts changed (a land, a restart, a parse that found
-// new records) refuses (trx_ring_error: "the timeline changed ..."). Returns 0 or a negative error, as above.
+// targets (idx[] oldest first, as above; carts: read the cartridge RAM too); each next gives one target, newest first, its position in idx[] in *which;
+// end frees the walk, at any point. A next after the timeline or the log counts changed (a land, a restart, a parse that found new records) refuses
+// (trx_ring_error: "the timeline changed ..."). Returns 0 or a negative error, as above.
+// next copies the target into ram / color / cart where they are not NULL; trx_ring_mat_mem gives the walk's own copies, which hold the head's memories
+// after begin and the target next gave after each next (a caller may change bytes there if it puts them back before the next call of next).
+// col_next gives the targets' colour RAM, newest first, from a walk of its own over stream 1 alone (independent of next's): the same nibbles next
+// gives for that target, at the cost of the colour records, not of the C64 RAM's. *color is that walk's copy, valid until the next col_next.
 struct TrxMat;
 int  trx_ring_mat_begin(const int *idx, int n, bool carts, TrxMat **out);
 int  trx_ring_mat_next(TrxMat *m, int *which, uint8_t *ram, uint8_t *color, uint8_t *cart);
+int  trx_ring_mat_col_next(TrxMat *m, int *which, const uint8_t **color);
+void trx_ring_mat_mem(TrxMat *m, uint8_t **ram, uint8_t **color);
 void trx_ring_mat_end(TrxMat *m);
 
 // The freeze menu's deferred rewind: the menu chooses an entry, the restore

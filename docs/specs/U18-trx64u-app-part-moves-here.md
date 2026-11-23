@@ -540,3 +540,14 @@ Nothing decided yet.
     4312 is ours. M5: our `.c64rering` dump streams entry by entry (materialize, write, free), sized against the largest
     free block; the shared image's heap does not grow; within that, the order fix with the shorter time (a seek-back on
     FAT is cheap, a second pass costs a materialize per entry). The firmware's dump gets the same fix (Alex's, D6).
+  - **M5 done in the library: the `.c64rering` dump streams.** The ring stores the head plus undo records, so entries
+    come newest first while the file wants them oldest first, and each entry's length depends on its own data (colour RAM
+    as decimal numbers). Chosen: a colour-only walk sizes every entry first (about a tenth of the records of a full
+    walk), then each entry is materialized newest first and written at its offset (`SvcFs::write` takes an offset; a
+    write past the end grows the file on FAT and FTP), the gzip CRC joined from the pieces (`crc32_combine`). One entry
+    per step (n + 1 steps instead of 2n + 1). Peak on top of the idle heap for 64 entries: 4,349,536 -> 107,152 B
+    (largest block 65,536). 15 of 15 files byte-identical old against new (rings of 1 / 4 / 64 entries x no cartridge
+    / cartridge / GMod2, frame and machine dumps) in a host harness, block-edge cases identical, the ring walk run on
+    the host over a synthetic log; not run in ue2emu or on the board. Image + bss 138,528 B. Open: a format 1 load
+    holds the whole file and its unpacked JSON at once (the next candidate for the same treatment); `heap_peak` keeps
+    the earlier ceiling until that is decided. The firmware's dump needs the same change (Alex's, D6).

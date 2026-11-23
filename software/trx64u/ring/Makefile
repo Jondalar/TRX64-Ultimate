@@ -10,7 +10,12 @@ LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_ring.cc).
 LIB_EXPORTS = ring=1 ringsteps=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as linked against SDK
-# 0.3.0 (base 3.3) on 2026-11-23, 120,436 + 15,828 bytes; heap (U18 S13): 1,486,893 bytes held while idle (the timeline 1,146,880 of it), the peak that
-# plus the 4,349,536 bytes of a 64-entry .c64rering dump; the counts: lib_register's record (ops 20, states 16, the poll ring.poll).
-LIB_BUDGET = image=136264 heap_keep=1486893 heap_peak=5836429 ops=20 states=16 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
+# 0.3.0 (base 3.3) on 2026-11-23, 122,700 + 15,828 bytes; heap (U18 S13): 1,486,893 bytes held while idle (the timeline 1,146,880 of it); the peak is
+# that plus the most one operation holds on top. Measured from the allocations: the .trxring save (save_native) with cartridge RAM and a full
+# timeline 1,444,975 bytes (the timeline copied, 1,146,880, the memories, the walk with its cartridge RAM, the 32 KB buffer); a .c64rering dump of 64
+# entries 107,152 (one entry's walk and the 16 KB block: it streams); a frame .c64re 287,648. A format 1 load holds the file and its unpacked JSON at
+# once, so its need grows with the file: heap_peak keeps the earlier ceiling (keep + 4,349,536) until that is decided, which lets files up to about
+# 2.1 MB load where the heap has room. heap_peak is a ceiling, the base reserves nothing for it (api.md 8.4.3, 8.4.4). The
+# counts: lib_register's record (ops 20, states 16, the poll ring.poll).
+LIB_BUDGET = image=138528 heap_keep=1486893 heap_peak=5836429 ops=20 states=16 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
 include $(SDK)/mk/lib.mk

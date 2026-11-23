@@ -48,6 +48,7 @@
 
 // ---- gzip with stored blocks, written as the document is produced ----------------
 #define GZ_BLOCK 16384
+#define GZ_HEAD  5          // a stored block's header: final flag, LEN, NLEN
 
 // The rvlite core reads DDR2 without a cache (about a microsecond per load),
 // so the hot paths keep their state in locals: one load per input byte, the
@@ -66,12 +67,21 @@ static inline char b64c(uint32_t v)
     return v < 26 ? char('A' + v) : v < 52 ? char('a' + v - 26) : v < 62 ? char('0' + v - 52) : v == 62 ? '+' : '/';
 }
 
+// Three ways to use it. init(): the stream in order, from the file's position on. init_count(): nothing kept or written, isize counts the bytes the
+// same calls would give. init_pieces(): a stream whose length is known, written as pieces in any order, each at its place in the file (block
+// headers where its bytes start a block); piece_end() gives a piece's own CRC-32, the caller joins them (crc32_combine) for finish_pieces().
 class Gz {
     RFile *f;
     uint8_t *buf;
     int fill;
+    int lim;                    // the fill that ends the block: GZ_BLOCK, less for a piece that starts inside a block
     uint32_t crc, isize;
     bool hash;
+    bool count;
+    bool pieces;
+    uint64_t data;              // pieces: the file offset of block 0's header
+    uint32_t total;             // pieces: the stream's length
+    uint32_t at;                // pieces: the stream offset of buf[0]
 public:
     TrxSha256 sha;
     bool failed;
@@ -83,9 +93,12 @@ public:
     {
         f = file;
         fill = 0;
+        lim = GZ_BLOCK;
         crc = 0xFFFFFFFFu;
         isize = 0;
         hash = with_hash;
+        count = false;
+        pieces = false;
         written = 0;
         write_ms = 0;
         trx_sha_init(&sha);
@@ -94,6 +107,72 @@ public:
         static const uint8_t header[10] = { 0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0, 0, 0x03 };
         raw(header, sizeof(header));
     }
+    void init_count()
+    {
+        f = 0;
+        buf = 0;
+        fill = 0;
+        lim = GZ_BLOCK;
+        crc = 0xFFFFFFFFu;
+        isize = 0;
+        hash = false;
+        count = true;
+        pieces = false;
+        failed = false;
+        written = 0;
+        write_ms = 0;
+    }
+    // The gzip header at the file offset `member`; `len` bytes of stream follow.
+    void init_pieces(RFile *file, uint64_t member, uint32_t len)
+    {
+        rf_seek(file, member);
+        init(file, false);
+        pieces = true;
+        data = member + 10;
+        total = len;
+    }
+    // A piece from stream offset `from` on.
+    void piece(uint32_t from)
+    {
+        at = from;
+        fill = 0;
+        lim = GZ_BLOCK - int(from % GZ_BLOCK);
+        crc = 0xFFFFFFFFu;
+        isize = 0;
+    }
+    uint32_t piece_end()
+    {
+        if (fill) {
+            flush(false);
+        }
+        return crc ^ 0xFFFFFFFFu;
+    }
+    // The file offset of stream byte `u` (pieces).
+    uint64_t file_at(uint32_t u) const
+    {
+        return data + uint64_t(u / GZ_BLOCK) * (GZ_HEAD + GZ_BLOCK) + GZ_HEAD + u % GZ_BLOCK;
+    }
+    // The empty final block when the stream ends on a block boundary, then the trailer: crc32 is the whole stream's.
+    bool finish_pieces(uint32_t crc32)
+    {
+        if (!(total % GZ_BLOCK)) {
+            static const uint8_t last[GZ_HEAD] = { 1, 0, 0, 0xFF, 0xFF };
+            rf_seek(f, file_at(total) - GZ_HEAD);
+            raw(last, GZ_HEAD);
+        }
+        uint8_t tail[8];
+        for (int i = 0; i < 4; i++) {
+            tail[i] = uint8_t(crc32 >> (8 * i));
+            tail[4 + i] = uint8_t(total >> (8 * i));
+        }
+        rf_seek(f, file_at(total));
+        raw(tail, 8);
+        return !failed;
+    }
+    // The file's length once finish_pieces wrote the trailer.
+    uint64_t pieces_size() const { return file_at(total) + 8; }
+    // The stream's bytes so far: counted (init_count), or the piece's own since piece().
+    uint32_t length() const { return isize; }
     void done()
     {
         r_free(buf);
@@ -116,15 +195,30 @@ public:
         written += len;
     }
 
+    // In order: the block's header, then its bytes. A piece: the bytes at their place, the header in front when they start the block (the stream's
+    // length says whether it is the final one and how long).
     void flush(bool final)
     {
-        uint8_t head[5];
-        head[0] = final ? 1 : 0;
-        head[1] = uint8_t(fill);
-        head[2] = uint8_t(fill >> 8);
-        head[3] = uint8_t(~fill);
-        head[4] = uint8_t((~fill) >> 8);
-        raw(head, 5);
+        int len = fill;
+        bool head_too = true;
+        if (pieces) {
+            uint32_t j = at / GZ_BLOCK;
+            head_too = !(at % GZ_BLOCK);
+            final = j == total / GZ_BLOCK;
+            len = final ? int(total % GZ_BLOCK) : GZ_BLOCK;
+            rf_seek(f, file_at(at) - (head_too ? GZ_HEAD : 0));
+            at += fill;
+            lim = GZ_BLOCK;
+        }
+        if (head_too) {
+            uint8_t head[GZ_HEAD];
+            head[0] = final ? 1 : 0;
+            head[1] = uint8_t(len);
+            head[2] = uint8_t(len >> 8);
+            head[3] = uint8_t(~len);
+            head[4] = uint8_t((~len) >> 8);
+            raw(head, GZ_HEAD);
+        }
         if (fill) {
             raw(buf, fill);
         }
@@ -133,17 +227,22 @@ public:
 
     void put(const char *s, int len)
     {
+        if (count) {
+            isize += len;
+            return;
+        }
         uint32_t c = crc;
-        int fl = fill;
+        int fl = fill, lm = lim;
         uint8_t *const b = buf;
         for (int i = 0; i < len; i++) {
             uint8_t ch = uint8_t(s[i]);
             c = crc8(c ^ ch);
             b[fl++] = ch;
-            if (fl == GZ_BLOCK) {
+            if (fl == lm) {
                 fill = fl;
                 flush(false);
                 fl = 0;
+                lm = lim;
             }
         }
         crc = c;
@@ -178,8 +277,12 @@ public:
     // a whole array as base64, '=' padded
     void b64(const uint8_t *data, int len)
     {
+        if (count) {
+            isize += 4 * uint32_t((len + 2) / 3);
+            return;
+        }
         uint32_t c = crc;
-        int fl = fill;
+        int fl = fill, lm = lim;
         uint8_t *const b = buf;
         int outn = 0;
         for (int i = 0; i < len; i += 3) {
@@ -195,10 +298,11 @@ public:
             for (int k = 0; k < 4; k++) {
                 c = crc8(c ^ uint8_t(o[k]));
                 b[fl++] = uint8_t(o[k]);
-                if (fl == GZ_BLOCK) {
+                if (fl == lm) {
                     fill = fl;
                     flush(false);
                     fl = 0;
+                    lm = lim;
                 }
             }
             outn += 4;
@@ -241,6 +345,11 @@ public:
     void file_ta(RFile *f, uint32_t len)
     {
         str("{\"$ta\":\"Uint8Array\",\"b64\":\"");
+        if (count) {                    // the pieces are whole base64 groups but the last: the same count as the whole length
+            b64(0, int(len));
+            str("\"}");
+            return;
+        }
         uint8_t piece[3072];
         uint32_t done = 0;
         while (done < len && !failed) {
@@ -262,6 +371,11 @@ public:
     void read_ta(void (*rd)(void *ctx, uint32_t off, uint8_t *dst, uint32_t n), void *ctx, uint32_t len)
     {
         str("{\"$ta\":\"Uint8Array\",\"b64\":\"");
+        if (count) {
+            b64(0, int(len));
+            str("\"}");
+            return;
+        }
         uint8_t piece[3072];
         for (uint32_t done = 0; done < len && !failed;) {
             uint32_t want = len - done > sizeof(piece) ? uint32_t(sizeof(piece)) : len - done;
@@ -314,6 +428,36 @@ public:
         return !failed;
     }
 };
+
+// CRC-32 of A then B from crc(A), crc(B) and B's length (zlib's crc32_combine): crc(A) times x^(8 * len_b) modulo the polynomial, plus crc(B).
+static uint32_t crc_mulmod(uint32_t a, uint32_t b)
+{
+    uint32_t m = 1u << 31, p = 0;
+    for (;;) {
+        if (a & m) {
+            p ^= b;
+            if (!(a & (m - 1))) {
+                break;
+            }
+        }
+        m >>= 1;
+        b = (b & 1) ? (b >> 1) ^ 0xEDB88320u : b >> 1;
+    }
+    return p;
+}
+
+static uint32_t crc32_combine(uint32_t crc_a, uint32_t crc_b, uint32_t len_b)
+{
+    uint32_t sq = 1u << 23;                 // x^8, bit 31 being x^0
+    uint32_t p = 1u << 31;
+    for (; len_b; len_b >>= 1) {
+        if (len_b & 1) {
+            p = crc_mulmod(sq, p);
+        }
+        sq = crc_mulmod(sq, sq);
+    }
+    return crc_mulmod(p, crc_a) ^ crc_b;
+}
 
 // ---- the checkpoint --------------------------------------------------------------
 static uint32_t bits(const uint32_t *w, int lo, int n)
@@ -1401,8 +1545,9 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
 
 // ---- the dumps, in steps (U18; MultiCore's decision of 2026-11-22: a ring dump is a stepped operation) ------------------------------------------------
 // One state per dump on the heap. trx_dump_begin builds the machine the file describes once; each trx_dump_step does one piece under the caller's core
-// lock (trx_c64re.h). The bytes are those of the one-call writers: the same writes in the same order, cut between calls. The frame (format 2) and the
-// ring (.c64rering) come from the timeline; the machine (format 1) is read through the DMA window, no ring needed.
+// lock (trx_c64re.h). The bytes are those of the one-call writers; the frame and the machine are the same writes in the same order, cut between calls,
+// the ring's entries go into the file newest first, each at its place. The frame (format 2) and the ring (.c64rering) come from the timeline; the
+// machine (format 1) is read through the DMA window, no ring needed.
 #define DUMP_PIECE      3072            // a medium is read in pieces of this size: a whole number of base64 groups (Gz::file_ta)
 #define DUMP_SLICE      (21 * DUMP_PIECE)   // the bytes of a medium one step hashes or writes
 #define MAX_RING_ENTRIES 64
@@ -1418,7 +1563,7 @@ struct SecOut {
 
 enum { DS_RUN, DS_DONE, DS_FAILED };
 enum { FP_PREP, FP_DATA };                      // a frame: its memories and the file's head; then the sections, RAW_CHUNK a step
-enum { RP_PICK, RP_MAT, RP_WRITE };             // a ring: the entries picked and paused for; one materialized a step; one written a step
+enum { RP_PICK, RP_ENTRY };                     // a ring: the entries picked, sized and the head written; one entry materialized and written a step
 enum { MP_READ, MP_PROBE, MP_DATA };            // the machine: read; the media hashed, a slice a step; written, a slice a step, then the rest
 
 struct TrxDump {
@@ -1445,12 +1590,14 @@ struct TrxDump {
     // .c64rering
     int seconds, stride, n, k;
     int ix[MAX_RING_ENTRIES];
-    uint8_t **rams, **cols;
+    uint32_t len[MAX_RING_ENTRIES];     // each entry's bytes in the gzip stream, counted before any is written
+    uint32_t crc[MAX_RING_ENTRIES];     // each entry's CRC-32, once written
+    uint32_t head_len, head_crc, tail_len, total;
     TrxFrame *fr;
     TrxMat *mat;
     Gz g;
     bool g_on;                  // g holds its block (Gz::init ran, Gz::done not yet)
-    uint32_t mat_ms, wr_ms;
+    uint32_t size_ms, mat_ms, wr_ms;
     // format 1, the machine
     uint8_t vic[0x30];
     const char *cand[2];        // the media in the machine: the cartridge's .crt, drive A's image (paths in mach)
@@ -1859,7 +2006,63 @@ static const char *machine_step(TrxDump *d)
 }
 
 // ---- .c64rering: the newest seconds of the ring ----------------------------------------------------------------------------------------------------------
-// The entries, oldest first, from the newest whole entry back every `stride` frames; the pause the walk starts from (trx_ring_mat_begin).
+// The file: the magic, then one gzip stream of stored blocks: the head, the entries oldest first, the tail. The walk gives the entries newest first
+// (it undoes the log back from the head), so each is written at its place in the file as it comes, and only the walk's own copy of the memories is
+// held. Its place needs the length of every older entry. That length follows from the entry's frame, the registers read while it is written (the
+// turbo node, the cartridge type) and, of its memories, only the colour RAM, which goes in as decimals (write_vic): a walk of the colour records alone
+// (trx_ring_mat_col_next) sizes every entry before the first is written, and an entry that comes out at another length fails the dump. The CRC-32 is
+// joined from the pieces' own (crc32_combine).
+
+// The head of the stream: the ring's figures and the cursor (the newest entry).
+static void ring_head(Gz &g, const TrxDump *d)
+{
+    const TrxFrame &last = d->fr[d->n - 1];
+    char id[32];
+    g.num("{\"checkpoint_ring\":{\"budget_bytes\":", int64_t(d->n) * 256 * 1024);
+    g.num(",\"max_entries\":", d->n);
+    g.num(",\"seq\":", last.seq);
+    r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)(last.cycles / trx_ring_frame_cycles()), (unsigned)last.seq);
+    g.str(",\"current_id\":\"");
+    g.str(id);
+    g.str("\",\"entries\":[");
+}
+
+// Entry k: ram is changed while it is written and put back (write_checkpoint).
+static void ring_entry(Gz &g, const TrxDump *d, int k, uint8_t *ram, const uint8_t *col)
+{
+    const TrxFrame *f = &d->fr[k];
+    char id[32];
+    // frame: the ring's cycle count in frames of the running mode (seq skips the frames a rewind cut)
+    uint32_t frame = uint32_t(f->cycles / trx_ring_frame_cycles());
+    r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)frame, (unsigned)f->seq);
+    g.str(k ? ",{\"id\":\"" : "{\"id\":\"");
+    g.str(id);
+    g.num("\",\"frame\":", frame);
+    g.num(",\"cycles\":", int64_t(f->cycles));
+    g.str(",\"pinned\":false,\"byte_size\":96000,\"created_at_ms\":0,\"payload\":");
+    // no cartridge RAM per entry: that would be a 64 KB read and 87 KB of base64 for every one of them (T66 part 5)
+    write_checkpoint(g, *f, ram, col, NULL, NULL);
+    g.str("}");
+}
+
+static void ring_tail(Gz &g)
+{
+    g.str("]},\"delta_ring\":{\"entry_cap\":1,\"writes_cap\":1,\"enabled\":false,\"entries\":\"\",\"writes\":\"\"}");
+    g.str(",\"cpu_history\":{\"capacity\":1,\"enabled\":false,\"entries\":\"\"}}");
+}
+
+// The stream offset entry k starts at.
+static uint32_t ring_at(const TrxDump *d, int k)
+{
+    uint32_t at = d->head_len;
+    for (int j = 0; j < k; j++) {
+        at += d->len[j];
+    }
+    return at;
+}
+
+// The entries, oldest first, from the newest whole entry back every `stride` frames; the pause the walk starts from (trx_ring_mat_begin); every
+// entry's length from its colour RAM; the file with the head.
 static const char *ring_pick(TrxDump *d)
 {
     int stride = d->stride < 1 ? 1 : d->stride;
@@ -1888,10 +2091,8 @@ static const char *ring_pick(TrxDump *d)
         idx[n - 1 - k] = t;
     }
     d->n = n;
-    d->rams = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
-    d->cols = (uint8_t **)r_calloc(n, sizeof(uint8_t *));
     d->fr = (TrxFrame *)r_malloc(n * sizeof(TrxFrame));
-    if (!d->rams || !d->cols || !d->fr) {
+    if (!d->fr) {
         return "Out of memory";
     }
     // the entries as they are now (the walk may move the indices; it finds its targets by their seq)
@@ -1900,103 +2101,123 @@ static const char *ring_pick(TrxDump *d)
             return "No such frame";
         }
     }
-    for (int k = 0; k < n; k++) {
-        d->rams[k] = (uint8_t *)r_malloc(65536);
-        d->cols[k] = (uint8_t *)r_malloc(1024);
-        if (!d->rams[k] || !d->cols[k]) {
-            return "Out of memory";
-        }
-    }
     uint16_t t0 = r_ms_timer();
     if (int e = trx_ring_mat_begin(idx, n, false, &d->mat)) {
         return trx_ring_error(e);
     }
     d->mat_ms += uint16_t(r_ms_timer() - t0);
-    d->steps = 1 + 2 * n;
-    d->k = n - 1;
-    d->phase = RP_MAT;
-    return NULL;
-}
-
-// One entry's memories, newest first (the walk goes back from the head).
-static const char *ring_mat(TrxDump *d)
-{
-    uint16_t t0 = r_ms_timer();
-    int which = -1;
-    int e = trx_ring_mat_next(d->mat, &which, d->rams[d->k], d->cols[d->k], NULL);
-    d->mat_ms += uint16_t(r_ms_timer() - t0);
-    if (e) {
-        return trx_ring_error(e);
+    // the lengths: each entry counted with its colour RAM, in the walk's RAM copy (write_checkpoint puts back what it changes there)
+    t0 = r_ms_timer();
+    uint8_t *ram, *col_now;
+    trx_ring_mat_mem(d->mat, &ram, &col_now);
+    Gz c;
+    for (int k = n - 1; k >= 0; k--) {
+        int which = -1;
+        const uint8_t *col;
+        if (int e = trx_ring_mat_col_next(d->mat, &which, &col)) {
+            return trx_ring_error(e);
+        }
+        if (which != k) {
+            return "The ring changed while it was being saved";
+        }
+        c.init_count();
+        ring_entry(c, d, k, ram, col);
+        d->len[k] = c.length();
     }
-    if (which != d->k) {
-        return "The ring changed while it was being saved";
+    c.init_count();
+    ring_head(c, d);
+    d->head_len = c.length();
+    c.init_count();
+    ring_tail(c);
+    d->tail_len = c.length();
+    uint64_t total = uint64_t(d->head_len) + d->tail_len;
+    for (int k = 0; k < n; k++) {
+        total += d->len[k];
     }
-    if (--d->k < 0) {
-        trx_ring_mat_end(d->mat);
-        d->mat = NULL;
-        d->k = 0;
-        d->phase = RP_WRITE;
+    if (total > 0xFFFFFFFFu) {              // ISIZE and the offsets are 32 bit
+        return "The ring is too large for one file";
     }
-    return NULL;
-}
-
-// One entry into the file, oldest first: the first opens the file and writes the ring's head, the last the tail.
-static const char *ring_write(TrxDump *d)
-{
-    uint16_t t0 = r_ms_timer();
+    d->total = uint32_t(total);
+    d->size_ms += uint16_t(r_ms_timer() - t0);
+    // the file: the magic, the gzip header, the head
+    t0 = r_ms_timer();
+    if (const char *e = open_out(d->path, &d->file)) {
+        return e;
+    }
+    d->file_on = true;
+    static const uint8_t header[9] = { 'C', '6', '4', 'R', 'E', 'R', 'N', 'G', 1 };
+    if (!rf_write(&d->file, header, sizeof(header))) {
+        return "The file could not be written";
+    }
     Gz &g = d->g;
-    const int n = d->n;
-    char id[32];
-    if (d->k == 0) {
-        if (const char *e = open_out(d->path, &d->file)) {
-            return e;
-        }
-        d->file_on = true;
-        static const uint8_t header[9] = { 'C', '6', '4', 'R', 'E', 'R', 'N', 'G', 1 };
-        rf_write(&d->file, header, sizeof(header));
-        g.init(&d->file, false);
-        d->g_on = true;
-        if (g.failed) {
-            return "Out of memory";
-        }
-        const TrxFrame &last = d->fr[n - 1];
-        g.num("{\"checkpoint_ring\":{\"budget_bytes\":", int64_t(n) * 256 * 1024);
-        g.num(",\"max_entries\":", n);
-        g.num(",\"seq\":", last.seq);
-        r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)(last.cycles / trx_ring_frame_cycles()), (unsigned)last.seq);
-        g.str(",\"current_id\":\"");
-        g.str(id);
-        g.str("\",\"entries\":[");
+    g.init_pieces(&d->file, sizeof(header), d->total);
+    d->g_on = true;
+    if (g.failed) {
+        return "Out of memory";
     }
-    const int k = d->k;
-    const TrxFrame *f = &d->fr[k];
-    // frame: the ring's cycle count in frames of the running mode (seq skips the frames a rewind cut)
-    uint32_t frame = uint32_t(f->cycles / trx_ring_frame_cycles());
-    r_snprintf(id, sizeof(id), "cp_%u_%u", (unsigned)frame, (unsigned)f->seq);
-    g.str(k ? ",{\"id\":\"" : "{\"id\":\"");
-    g.str(id);
-    g.num("\",\"frame\":", frame);
-    g.num(",\"cycles\":", int64_t(f->cycles));
-    g.str(",\"pinned\":false,\"byte_size\":96000,\"created_at_ms\":0,\"payload\":");
-    // no cartridge RAM per entry: that would be a 64 KB read and 87 KB of base64 for every one of them (T66 part 5)
-    write_checkpoint(g, *f, d->rams[k], d->cols[k], NULL, NULL);
-    g.str("}");
+    g.piece(0);
+    ring_head(g, d);
+    d->head_crc = g.piece_end();
     if (g.failed) {
         return "The file could not be written";
     }
     d->wr_ms += uint16_t(r_ms_timer() - t0);
-    if (++d->k < n) {
+    d->steps = 1 + n;
+    d->k = n - 1;
+    d->phase = RP_ENTRY;
+    return NULL;
+}
+
+// One entry, newest first: materialized, then written at its place in the file. The last (the oldest) writes the tail and the trailer.
+static const char *ring_one(TrxDump *d)
+{
+    uint16_t t0 = r_ms_timer();
+    const int k = d->k;
+    int which = -1;
+    int e = trx_ring_mat_next(d->mat, &which, NULL, NULL, NULL);
+    d->mat_ms += uint16_t(r_ms_timer() - t0);
+    if (e) {
+        return trx_ring_error(e);
+    }
+    if (which != k) {
+        return "The ring changed while it was being saved";
+    }
+    t0 = r_ms_timer();
+    uint8_t *ram, *col;
+    trx_ring_mat_mem(d->mat, &ram, &col);
+    Gz &g = d->g;
+    g.piece(ring_at(d, k));
+    ring_entry(g, d, k, ram, col);
+    d->crc[k] = g.piece_end();
+    if (g.failed) {
+        return "The file could not be written";
+    }
+    if (g.length() != d->len[k]) {             // the colour walk and this one disagree, or a register the entry reads changed since it was counted
+        return "The machine changed while it was being saved";
+    }
+    d->wr_ms += uint16_t(r_ms_timer() - t0);
+    if (--d->k >= 0) {
         return NULL;
     }
-    g.str("]},\"delta_ring\":{\"entry_cap\":1,\"writes_cap\":1,\"enabled\":false,\"entries\":\"\",\"writes\":\"\"}");
-    g.str(",\"cpu_history\":{\"capacity\":1,\"enabled\":false,\"entries\":\"\"}}");
-    bool ok = g.finish(NULL);
-    r_log("[RING] .c64rering: %d entries, materialized in %u ms, written in %u ms (%u in file writes)\n", n, (unsigned)d->mat_ms,
-          (unsigned)d->wr_ms, (unsigned)g.write_ms);
+    trx_ring_mat_end(d->mat);
+    d->mat = NULL;
+    t0 = r_ms_timer();
+    const int n = d->n;
+    g.piece(d->total - d->tail_len);
+    ring_tail(g);
+    uint32_t crc = crc32_combine(d->head_crc, d->crc[0], d->len[0]);
+    for (int j = 1; j < n; j++) {
+        crc = crc32_combine(crc, d->crc[j], d->len[j]);
+    }
+    crc = crc32_combine(crc, g.piece_end(), d->tail_len);
+    bool ok = g.length() == d->tail_len && g.finish_pieces(crc);
+    d->wr_ms += uint16_t(r_ms_timer() - t0);
+    r_log("[RING] .c64rering: %d entries, sized in %u ms, materialized in %u ms, written in %u ms (%u in file writes)\n", n, (unsigned)d->size_ms,
+          (unsigned)d->mat_ms, (unsigned)d->wr_ms, (unsigned)g.write_ms);
     if (!ok) {
         return "The file could not be written";
     }
-    d->bytes = 9 + g.written;
+    d->bytes = uint32_t(g.pieces_size());
     d->entries = n;
     g.done();
     d->g_on = false;
@@ -2008,14 +2229,7 @@ static const char *ring_write(TrxDump *d)
 
 static const char *ring_step(TrxDump *d)
 {
-    switch (d->phase) {
-    case RP_PICK:
-        return ring_pick(d);
-    case RP_MAT:
-        return ring_mat(d);
-    default:
-        return ring_write(d);
-    }
+    return d->phase == RP_PICK ? ring_pick(d) : ring_one(d);
 }
 
 // ---- the calls (trx_c64re.h) -----------------------------------------------------------------------------------------------------------------------------
@@ -2119,12 +2333,6 @@ void trx_dump_drop(TrxDump *d)
     r_free(d->chunk);
     r_free(d->hdr);
     r_free(d->drive);
-    for (int k = 0; k < d->n && d->rams && d->cols; k++) {
-        r_free(d->rams[k]);
-        r_free(d->cols[k]);
-    }
-    r_free(d->rams);
-    r_free(d->cols);
     r_free(d->fr);
     r_free(d);
 }

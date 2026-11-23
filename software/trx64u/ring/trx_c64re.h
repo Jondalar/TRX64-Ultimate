@@ -55,8 +55,9 @@ typedef void (*trx_progress_fn)(int done, int total, void *ctx);
 
 // ---- the dumps in steps (U18; MultiCore's decision of 2026-11-22: a ring dump is a stepped operation) ----------------------------------------------------
 // trx_dump_begin sets a dump up and builds the machine its file describes (ringmachine.cc); it writes no file. Each trx_dump_step does one piece of the
-// work: TRX_DUMP_FRAME the frame's memories and the file's head, then 16 KB of a section a step; TRX_DUMP_RING the entries picked and the pause the walk
-// starts from, then one entry materialized a step (newest first), then one entry written a step (oldest first); TRX_DUMP_MACHINE the machine read and the
+// work: TRX_DUMP_FRAME the frame's memories and the file's head, then 16 KB of a section a step; TRX_DUMP_RING the entries picked, the pause the walk
+// starts from, every entry's length (from its colour RAM) and the file's head, then one entry a step, newest first, materialized and written at its
+// place in the file (the last step the tail too), so one entry's memories are held at a time; TRX_DUMP_MACHINE the machine read and the
 // file's head, then 63 KB of a medium hashed or written a step, then the manifest and the checkpoint. It answers 1 while there is more, 0 when the file is
 // complete, -1 when it failed (*err says why, and the partial file is gone). trx_dump_drop ends a dump at any point and removes a file that is not complete.
 // begin and every step read registers: call them on a task that holds the core lock. Between two steps the machine must stay as it is (the menu keeps it

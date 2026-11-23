@@ -1835,7 +1835,9 @@ bool trx_ring_reachable(int index)
 // idx[] oldest first. From the head's copy back: the newest target first, each
 // older one from the one after it, so the records are walked once. The walk is
 // kept in a TrxMat between targets, so a caller can take them one per call
-// (trx_ring_mat_next, a stepped .c64rering dump) or all in one.
+// (trx_ring_mat_next, a stepped .c64rering dump) or all in one. A second walk of
+// stream 1 alone gives the targets' colour RAM ahead of the first
+// (trx_ring_mat_col_next).
 struct TrxMat {
     int n;                  // targets
     int i;                  // the next target to give, n - 1 down to 0
@@ -1843,6 +1845,9 @@ struct TrxMat {
     int *at;                // the targets' timeline indices after begin's parse
     uint32_t *seqs;
     uint8_t *ram, *col, *cart;      // the working copies, walked back target by target
+    // the colour walk: the next target, the entry it goes down from, its working copy
+    int ci, chi;
+    uint8_t ccol[1024];
     // the timeline as begin left it: a target asked for after it changed answers E_MOVED
     int tl_n;
     uint32_t head_seq, cnt0, cnt1;
@@ -1943,6 +1948,9 @@ static int mat_begin_locked(const int *idx, int n, bool carts, TrxMat **out)
     m->n = n;
     m->i = n - 1;
     m->hi = tl_n;
+    m->ci = n - 1;
+    m->chi = tl_n;
+    memcpy(m->ccol, col, 1024);
     m->tl_n = tl_n;
     m->head_seq = tl_n ? ent(tl_n - 1).seq : 0;
     m->cnt0 = cnt_now[0];
@@ -1951,15 +1959,21 @@ static int mat_begin_locked(const int *idx, int n, bool carts, TrxMat **out)
     return E_NONE;
 }
 
-// The next target, newest first: its position in idx[] goes to *which, its memories to ram / col and, when begin read the cartridge RAM, cart.
+// Target i still where begin found it, in a timeline begin left as it was.
+static bool mat_same(const TrxMat *m, int i)
+{
+    return tl_n == m->tl_n && ent(tl_n - 1).seq == m->head_seq && cnt_now[0] == m->cnt0 && cnt_now[1] == m->cnt1 && ent(m->at[i]).seq == m->seqs[i];
+}
+
+// The next target, newest first: its position in idx[] goes to *which, its memories to ram / col and, when begin read the cartridge RAM, cart. A null
+// buffer is not copied to: the target stays in the working copies until the next call (trx_ring_mat_mem).
 static int mat_next_locked(TrxMat *m, int *which, uint8_t *ram_out, uint8_t *col_out, uint8_t *cart_out)
 {
     const int i = m->i;
     if (i < 0) {
         return E_INDEX;
     }
-    if (tl_n != m->tl_n || ent(tl_n - 1).seq != m->head_seq || cnt_now[0] != m->cnt0 || cnt_now[1] != m->cnt1 ||
-        ent(m->at[i]).seq != m->seqs[i]) {
+    if (!mat_same(m, i)) {
         return E_MOVED;
     }
     uint8_t *const ram = m->ram, *const col = m->col, *const cart = m->cart;
@@ -1967,8 +1981,12 @@ static int mat_next_locked(TrxMat *m, int *which, uint8_t *ram_out, uint8_t *col
     collect(m->at[i], m->hi, true, true, &cl);
     each(ram_tch, 65536, ram_val, [ram](int a, uint8_t v) { ram[a] = v; });
     each(col_tch, 1024, col_val, [col](int a, uint8_t v) { col[a] = v; });
-    memcpy(ram_out, ram, 65536);
-    memcpy(col_out, col, 1024);
+    if (ram_out) {
+        memcpy(ram_out, ram, 65536);
+    }
+    if (col_out) {
+        memcpy(col_out, col, 1024);
+    }
     if (cart) {
         each(cart_tch, 65536, cart_val, [cart](int a, uint8_t v) { cart[a] = v; });
         if (cart_out) {
@@ -1977,6 +1995,51 @@ static int mat_next_locked(TrxMat *m, int *which, uint8_t *ram_out, uint8_t *col
     }
     m->hi = m->at[i];
     m->i = i - 1;
+    *which = i;
+    return E_NONE;
+}
+
+// The colour records of stream 1 in [from, to), newest first, put straight into col: the oldest record of an address leaves its old value, which is
+// what collect() and each() leave in the main walk's copy.
+static void col_back(uint32_t from, uint32_t to, uint8_t *col)
+{
+    const uint32_t chunk = (BOUNCE - 32) / rec_size[1];
+    while (((to - from) & M28) != 0) {
+        uint32_t n = (to - from) & M28;
+        if (n > chunk) {
+            n = chunk;
+        }
+        uint32_t start = (to - n) & M28;
+        const uint32_t *wp = (const uint32_t *)fetch(1, start, n);
+        for (int k = int(n) - 1; k >= 0; k--) {
+            uint32_t lo = wp[2 * k];
+            if ((lo >> 28) == 1) {
+                col[lo & 0x3FF] = uint8_t(wp[2 * k + 1]) & 0x0F;
+            }
+        }
+        to = start;
+    }
+}
+
+// The next target's colour RAM, newest first, from stream 1 alone (no C64 RAM is walked): its position in idx[] to *which, the walk's own copy of its
+// 1024 nibbles to *col (valid until the next call). Independent of mat_next: the same records from the same head copy, so the same colour RAM mat_next
+// gives that target.
+static int mat_col_next_locked(TrxMat *m, int *which, const uint8_t **col)
+{
+    const int i = m->ci;
+    if (i < 0) {
+        return E_INDEX;
+    }
+    if (!mat_same(m, i)) {
+        return E_MOVED;
+    }
+    for (int j = m->chi - 1; j >= m->at[i]; j--) {
+        const TrxFrame &f = ent(j);
+        col_back(f.s1, f.e1 == OPEN ? cnt_now[1] : f.e1, m->ccol);
+    }
+    *col = m->ccol;
+    m->chi = m->at[i];
+    m->ci = i - 1;
     *which = i;
     return E_NONE;
 }
@@ -2291,6 +2354,25 @@ int trx_ring_mat_next(TrxMat *m, int *which, uint8_t *ram, uint8_t *color, uint8
     int err = mat_next_locked(m, which, ram, color, cart);
     unlock();
     return err;
+}
+
+int trx_ring_mat_col_next(TrxMat *m, int *which, const uint8_t **color)
+{
+    if (!m) {
+        return E_INDEX;
+    }
+    if (!lock()) {
+        return E_ABSENT;
+    }
+    int err = mat_col_next_locked(m, which, color);
+    unlock();
+    return err;
+}
+
+void trx_ring_mat_mem(TrxMat *m, uint8_t **ram, uint8_t **color)
+{
+    *ram = m ? m->ram : NULL;
+    *color = m ? m->col : NULL;
 }
 
 void trx_ring_mat_end(TrxMat *m)
