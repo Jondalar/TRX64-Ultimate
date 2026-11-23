@@ -712,3 +712,9 @@ Nothing decided yet.
     Next: lint, apptests and emu from the rig of the pinned `t239.3` commit (MultiCore: `tests/coreapp`, `gen_menu_rec.py`,
     `check_menu_concept.py` with `menu_c64.txt`, `tools/menusim`, `ci/emu/build.sh`); sorting out which of the 18 apptest
     sources are trx64u's is ours.
+  - **Stage `cor` green on its first run (u18 `4341ce8e`, 2026-11-23):** every stage of the pipeline green;
+    `trx64u_4341ce8e.cor` in package `u18-4341ce8e` (sha256 `374f781e...`, in its `SHA256SUMS`). Its bitstream (`eb8aeaa2`)
+    and libraries (`e4e19c2e`) are those of `trx64u_u19.cor`, which Alex accepted on the board; only version and commit
+    fields differ. Open for the move: the stages lint, apptests and emu (rig from the pinned `t239.3` commit, sorting of the
+    18 apptest sources ours), trx64u's peak heap (D15: measure, keep in our core TOML `heap`, `pack_cor.sh` passes it),
+    MultiCore's base image without core code (announced).
