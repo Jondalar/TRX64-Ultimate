@@ -598,3 +598,11 @@ Nothing decided yet.
     has no precision either: two refusals sprintf'd a pointer made from the length into fixed buffers) through bounded
     copies. The firmware builds without new warnings; its host tests pass (they do not cover these functions). Not
     done here: the `.c64rering` dump's 4 MB peak (a rework). Open: a board test, and which release takes it (Alex's).
+  - **Tests and delivery, MultiCore's answers (T239.3 D21):** MultiCore's trx64u units leave their pipeline only after our
+    stages run green (Alex: "Yes, like that"). Their pipeline checks nothing of our `.cor`: S8's first half (the `.cor`
+    carries our libraries, the menu record and its tests) is ours; the second half (the shared image has no trx64u
+    symbol) stays theirs, built with the cut. `gen_menu_rec.py` has no role for a library core (record 6 comes from
+    `descrec.py`; `menu_rec.inc` leaves with the cut). MultiCore sorts the 18 test sources naming trx64u (move / stay and
+    rebase / stay / split); what ships with the SDK for them (R9) goes to Alex after that sort. `menu_video`: base side
+    in code (t239.3 `01595fea`, not pushed; api.md 9.7.13): called once per change of the layer's key colour, never twice
+    with the same value, the first call an on; on for the timeline and for the PAUSED tag with the menu closed.
