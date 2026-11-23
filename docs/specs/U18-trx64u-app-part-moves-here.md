@@ -453,3 +453,10 @@ Nothing decided yet.
     `ctx.media_source` depends on them); no `[core]` key names the library that provides "corehooks"; cbm1541 has no
     drive reset; `menuvlist.cc` names our T64 operations in generic code (D24); the init hook needs io and settings at the
     first boot reset or the power-on keys are lost.
+  - **c64.cc's open points (MultiCore, by Alex's delegation; contract `df3f2d69`):** CoreHooks appends `slot_spec`,
+    `slot_mount`, `slot_eject` (slot = position in `[mount]`, MountSlots' meaning; lock task); svc_ctx gets the bit
+    `CTX_MEDIA_RESTORING` and `ctx.mount_notify(slot)` for a slot our engine changes itself. `[core] hooks = "<library>"`
+    names the corehooks library (cor_pack refuses a bundle without it; descrec accepts `[mount]` then). cbm1541 appends
+    `reset(msg, n)` (drive A if there is one, never creates one). MultiCore exports its program loader as "cbmprg"
+    (`cbmprg_api.h`; five cores use it): our copy goes once it is built. `menuvlist.cc`'s T64 names stay until the cut
+    (P4: a container row in the UI TOML). The first boot reset comes after the libraries and groups are loaded.
