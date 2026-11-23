@@ -694,3 +694,10 @@ Nothing decided yet.
   - **Board run of `trx64u_u19.cor` (Alex, 2026-11-23): the menu is acceptable, the U19 bitstream stays.** Alex: the
     transition is good for now once `trx64u.cor` is built this way and the Gideon-based app exists as `.cfw`/`.ue2` and
     `trx64g.cor`; polishing comes step by step after that.
+  - **trx64u goes into our CI (Alex, 2026-11-23: *"unser CI anpassen ... und dann bitte auch mitschreiben, wie man einen
+    .cor baut"*).** Step 1: `software/trx64u/pack_cor.sh` builds the libraries and the SID player's files (from the
+    submodule's 6502 sources), packs `trx64u.cor` and checks it; the icon is in `base/icon.rgb565`; the README's "Packing
+    trx64u.cor" is the guide. From the inputs of `trx64u_u19.cor` it makes that file byte for byte. Next: a `cor` stage
+    after `package` (as `update`), then lint, apptests and emu. Asked of MultiCore (advisor) the same day: where CI fetches
+    the SDK (R10, new: their builds are only in their repository's `.ci/sdk/`), the golden ops list (R6), the heap
+    (their pin packs 0x950000, ours the image default 0x7A0000), the test rig (R9) and the icon.

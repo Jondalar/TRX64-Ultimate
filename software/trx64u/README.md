@@ -42,3 +42,32 @@ trxmon itself builds as a library as it is (2026-11-22): every file compiles aga
 `sdk.pin` names the SDK version and the sha256 of its tarball. `./fetch_sdk.sh <tarball>` checks the tarball and unpacks
 it into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
 `riscv64-elf-` has no newlib headers.
+
+## Packing trx64u.cor
+
+1. The SDK: `./fetch_sdk.sh <tarball>`. Today the tarball is MultiCore's build in their repository
+   (`.ci/sdk/e4f99648/trx64-sdk-0.3.0.tar.gz`, read only); where CI fetches it from is open with MultiCore (U18 R10).
+2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
+   `curl -o c64_basic.bit http://gitea.example/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit`.
+   It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
+3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version>` builds the three libraries and the SID
+   player's files, packs `build/cor/trx64u.cor` (`--out` for another name) and runs `cor_pack.py check` on it; it prints
+   the size and sha256. By hand the version is `<firmware version>-dev+<commit8 of this tree>`, e.g. `0.3.1-dev+4f3ba9f5`.
+4. On the board: FTP to `/SD/cores/<name>.cor` (`curl -T <file> ftp://<board>/SD/cores/<name>.cor`, then read it back and
+   compare). Board steps are Alex's.
+
+What goes in:
+
+| Part | From |
+|---|---|
+| app core image (`coreapp.bin`), `cor_pack.py` | the SDK (`sdk.pin`) |
+| libraries `trx64u`, `ring`, `monitor` | `build.sh` |
+| record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
+| icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
+| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass |
+| bitstream | `--bit`, with `--bit-commit` |
+
+Not passed yet, open with MultiCore (U18 R6 and the heap question): `--heap` (MultiCore's `trx64u.pin` packs 0x950000;
+without it the image's default 0x7A0000 applies) and `--ops` (the check of record 6 against the golden list of exported
+operations). The `.cor` on the board on 2026-11-23 (`trx64u_u19.cor`) was packed without both; `pack_cor.sh` makes it
+byte for byte from the same inputs.
