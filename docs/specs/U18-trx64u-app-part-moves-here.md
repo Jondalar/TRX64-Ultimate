@@ -574,3 +574,13 @@ Nothing decided yet.
     and its JSON: the streaming step decided above); our format 1 machine dump loads back as "No cpu node" (to be
     investigated); writing a ring entry costs about 0.4 s of CPU (to be profiled); after an RPC session opens, the
     monitor reports runState "paused" while the C64 runs; trxmon's version reads "unknown" (no `TRXMON_BUILD`).
+  - **The Timewarp picture (MultiCore, by Alex's delegation): a core hook.** CoreHooks gets `void (*menu_video)(int
+    behind)` appended after `slot_eject` (major 1, append only; a new dev SDK). The base calls it on every change of the
+    live key: 1 when a layout shows the machine's picture through the key colour (the timeline), 0 when the menu covers it
+    again; on the main loop without the core lock, like `menu_closed` (shared state through `api->sync`); without the
+    member the base does nothing. Our library chooses what shows behind: the live picture, or the ring's still at the scrub
+    position, which the ring updates itself after each scrub step (the hardware path the firmware uses, no frame drawn in
+    software: the still and the video path are our bitstream's, D20). Not chosen: the base drawing the still (a frame drawn
+    in software per step, slow on this board), the gateware not blanking while frozen (the live frozen picture, not the
+    scrubbed frame). Waits for the header and the dev SDK. Also from MultiCore's review: an op a start hook calls while it
+    holds the lock now runs inline.
