@@ -507,3 +507,12 @@ Nothing decided yet.
     check refused `speaker_mixer` (it covered the base's master volume and tone at 0x550/0x551); our bitstream decodes
     only +0x40/41/44/45 there (`ultimate_sys.vhd` `spk_gain`), so the window is 6 bytes and only those four bytes are
     written. A whole `trx64u.cor` needs the bitstream and a trx64u application image the SDK does not carry.
+  - **Joystick Input, basereg.def, the shared image (MultiCore, by Alex's delegation):** trx64u does not name the
+    capability `kbd_joystick`: it means keyboard joystick lines and a port choice for play in the gateware, and c64_basic
+    has neither (its KEYB_JOY port select only feeds the menu's own scan); Alex's T228 R20 already took the row and the
+    J hotkey out of trx64u's menu. So `swap_key = "Joystick Input"` and our paddle swap go; the swap stays 0. A paddle
+    swap as a feature of its own would be a new row: MultiCore put that question to Alex. The SDK now ships
+    `basereg.def` (dev SDK `d6f50a0d`). The shared 3.3 image runs trx64u by the D17 path (no compiled-in descriptor, so
+    it builds one from our record 6 and binds our hooks); it has never run. In ue2emu the host's bitstream load is not
+    emulated and the core app reads only records 6, 7 and 8 of the `.cor`; the `.cor` is still packed with the real
+    bitstream, so the same file later goes to the board.
