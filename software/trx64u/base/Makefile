@@ -12,9 +12,9 @@ LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_trx64u.cc): the core hooks.
 LIB_EXPORTS = corehooks=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as linked against SDK
-# 0.3.0 (base 3.3, d6f50a0d) on 2026-11-23, 92,080 + 120,708 bytes; 65,564 bytes of the bss are c64core.cc's program buffer, which a queued program job holds until
+# 0.3.0 (base 3.3, e4f99648) on 2026-11-23, 92,152 + 120,708 bytes; 65,564 bytes of the bss are c64core.cc's program buffer, which a queued program job holds until
 # the service starts it. heap: no block held while idle, at most 66,044 bytes at once (U18 S13); the counts: lib_register's record (ops 66, states 54).
-LIB_BUDGET = image=212788 heap_keep=0 heap_peak=66044 ops=66 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
+LIB_BUDGET = image=212860 heap_keep=0 heap_peak=66044 ops=66 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
 include $(SDK)/mk/lib.mk
 
 # setting.cc's lists of the values of every choice setting, from the core's menu.toml (setlists.py)

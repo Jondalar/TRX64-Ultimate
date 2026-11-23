@@ -619,3 +619,14 @@ Nothing decided yet.
     10 as multiplies; per ring entry 380 -> 110 ms CPU in ue2emu, a 64-entry dump 32.2 -> 11.3 s, the files
     byte-identical. In ue2emu a 6.2 MB ring loads back (pass 1 11.2 s, pass 2 0.3 s), the machine dump and a frame
     load back. Open: pass 1's time; the CRC table's cost on the board's DDR2 is not measured.
+  - **menu_video on dev SDK `e4f99648` (2026-11-23):** pinned (headers hash `ae2f02b41643…` as the tarball's VERSION
+    says), the hook appended. In ue2emu the base calls it as promised: Timewarp open one 1, scrub steps none, close one 0,
+    the PAUSED tag 1 and 0; no pair. **The picture is still black, and the decision's premise was wrong:** the firmware
+    does not switch a hardware still in; it copies the captured still (`STILL_STATUS`, the still slot) and draws it as
+    RGB565 into the pixel layer in software after every scrub step (`trx_video.cc` `grab_still`, `draw_still`,
+    `trx_video_tw_bar`). c64_basic has no surface under the base's layer: `pix_layer.v` is the base's menu layer,
+    `vic_scaler` shows black while the whole machine is halted (`top.v` `.blank(c64_halted)`). So the hook only logs
+    until it is decided again where the still is drawn. Found on the way and fixed: a scrub drops the oldest entries
+    once the ring is full, which shifted every index while Timewarp kept the shown frame by index (LEFT stayed, RIGHT
+    jumped 2, "Resume here" resumed one frame late); `go_to` now finds the frame again by its seq. Image + bss: base
+    212,860 B, ring 148,360 B.

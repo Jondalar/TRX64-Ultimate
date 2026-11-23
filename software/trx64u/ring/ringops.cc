@@ -63,13 +63,30 @@ static int go_to(int idx, char *msg, int msglen)
             return OPE_FAILED;
         }
     }
+    // The scrub's run writes a frame into the log areas, and ring.cc's trim() then drops the oldest entries it made unreachable, also when the run
+    // fails: every index moves down by that many. The frames are found again by their seq (the firmware's Timewarp counts from the newest for the
+    // same reason).
+    bool same = k == shown();
+    TrxFrame f, held;
+    bool known = trx_ring_frame(k, &f);
+    bool was = g_sel >= 0 && trx_ring_frame(g_sel, &held);
     TrxRestoreStats st;
     int err = trx_ring_scrub_show(k, &st);
     if (err) {
+        int i = was ? trx_ring_find(held.seq) : -1;
+        if (i >= 0) {
+            g_sel = i;
+            trx_ring_set_pending(i);
+        }
         r_snprintf(msg, msglen, "%s", trx_ring_error(err));
         return OPE_FAILED;
     }
-    g_glyph = k == shown() ? g_glyph : (dir < 0 ? 1 : 2);
+    int moved = known ? trx_ring_find(f.seq) : -1;
+    if (moved >= 0) {
+        k = moved;
+    }
+    n = trx_ring_count();
+    g_glyph = same ? g_glyph : (dir < 0 ? 1 : 2);
     if (k >= n - 1) {
         g_glyph = 4;
     } else if (k == 0) {

@@ -103,8 +103,8 @@ int c64_mem_write(CoreCtx *, const OpArgs &a, OpOut &o)
 }
 
 // ---- settings ----------------------------------------------------------------------------------------------------------------------------------
-// GATE_CTRL b0 (trx_sys.v): with it the application's C64_STOP pauses the whole machine - the picture stands still under the menu, the state bus is
-// writable - without it only the CPU.
+// GATE_CTRL b0 (trx_sys.v): with it the application's C64_STOP pauses the whole machine - CPU, VIC, CIAs and SID; the C64 picture is black while it
+// stands (top.v vic_scaler .blank(c64_halted)), the state bus is writable - without it only the CPU, and the VIC keeps drawing.
 int c64_freeze_mode(CoreCtx *, const OpArgs &a, OpOut &)
 {
     const SvcIo *io = g_api->io;

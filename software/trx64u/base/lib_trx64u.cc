@@ -173,11 +173,22 @@ static void hook_menu_closed(void)
     }
 }
 
+// menu_video: the base shows the machine's picture through its layer's key colour (1: the Timewarp timeline, the PAUSED tag) or covers it again (0);
+// the menu task, no core lock. The hook only logs the call. c64_basic has no surface under the base's layer to put a picture on: the only layer that
+// shows a picture from memory is pix_layer.v, and that is the base's menu layer (it writes PX_FRONT, PX_KEY, PX_CTRL). Under it are overlay.v (a
+// character box) and vic_scaler.v, which shows black while the whole machine is halted (top.v: .blank(c64_halted); "Freeze mode" Whole machine sets
+// GATE_CTRL b0, so C64_STOP halts CPU, VIC, CIAs and SID). With "CPU only" the VIC keeps drawing and the picture shows through the key without a hook.
+// The firmware shows Timewarp's still by drawing the captured frame into the pixel layer in software (trx_video.cc grab_still, draw_still).
+static void hook_menu_video(int behind)
+{
+    lib_logf("[trx64u] menu_video(%d)", behind);
+}
+
 // init, release, media_flush, media_pending and the mount slots: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no
 // warm_reset and no cold_start). base_setting_changed is null: the core follows none of the base's settings. It names no "kbd_joystick" cap, so the base
 // has no "Joystick Input" for it, and the bitstream has no paddle swap register (designs/c64_basic/ultimate_sys.vhd decodes no 0x1A in the C64 I/O page).
 static const CoreHooks core_hooks = { sizeof(CoreHooks), c64_hook_init, c64_hook_release, 0, 0, c64_hook_media_flush, c64_hook_media_pending, hook_start,
-                                      hook_menu_closed, 0, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject };
+                                      hook_menu_closed, 0, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject, hook_menu_video };
 
 // The library's named exports (LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.
