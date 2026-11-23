@@ -117,7 +117,7 @@ sub-apps load on demand), D2, D5.
   firmware, as trxmon (D4)": that refactors code with an end date (D2, U3) and needs a firmware build plus a board
   check of Timewarp.
 
-### Under discussion: the trx64u tests leave MultiCore's pipeline (Alex, 2026-11-20)
+### Decided: the trx64u tests leave MultiCore's pipeline (Alex, 2026-11-20 and 2026-11-23)
 
 Alex (translated): "Lint, apptests and emu tests must then also run separately in the pipeline, *out* of MultiCore's big
 monolithic pipeline and over to you. MultiCore then does not have to do all of that again."
@@ -131,7 +131,12 @@ What MultiCore's push pipeline runs for trx64u today (`ci/children.txt`, read in
 | Emu | child `emu` (`emu.yml`, needs `images`), suite `coreapp_emu` | `tests/coreapp/emu/run.sh` and `library_n.sh` on `coreapp_trx64u.app` (T228 R25) in ue2emu with `--trx-io on`, job image `u64-build-env:emu-v0.7.0` |
 
 The wish: three stages of our own here (lint, apptests, emu), each keyed on our files; MultiCore's pipeline drops the
-trx64u units and does not run them again. Open:
+trx64u units and does not run them again.
+
+Decided by Alex on 2026-11-23 (translated): "all of it; in principle you should build and manage .ue2, .cfw and .cor on
+your own. Only the SDK comes from MultiCore." So every trx64u test moves here, and this repository builds, tests and
+delivers the firmware (`.ue2`, `.cfw`) and the core (`.cor`); MultiCore delivers the SDK and nothing of trx64u.
+Open, to settle with MultiCore (advisor):
 
 - Which of the 18 sources test trx64u itself (they move here) and which test the app core through trx64u (they stay with
   MultiCore, against another core or a stub library).
