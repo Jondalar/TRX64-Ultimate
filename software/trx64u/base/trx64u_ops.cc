@@ -1,9 +1,9 @@
 // The operations and states of the TRX64U menu (menu.toml) that are not the C64U's hardware registers (u64cfg.cc is those): the C64's cartridge port, REU and
 // ROM settings, the machine's own actions. The register sequences of the cartridge port are Gideon's (vendor/gideon/software/io/c64/c64.cc
 // ConfigureU64SystemBus and set_emulation_flags, GPL-3.0), the fast reset patch is his (c64.cc fastresetPatch).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.2 and the groups of base 3.3). The settings are read through the settings group
+// U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read through the settings group
 // (setting.cc), the files through api->fs, the TRX block through api->trx, the C64's memory window through api->c64, the running core's state, the REU's
-// memory, the C64U's register blocks (offsets in c64u_regs.h) and the board through the 3.3 groups ctx, io and board (base33.h), the cartridge port,
+// memory, the C64U's register blocks (offsets in c64u_regs.h) and the board through the 3.3 groups ctx, io and board (g_api->ctx, io, board), the cartridge port,
 // drive A, the command interface, the SID file and the temp disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the
 // operations and states of this file with their names and arguments.
 #include "trx64u_ops.h"
@@ -420,7 +420,7 @@ static bool esp_get(const SvcBoard *b, uint8_t cmd, int field, uint8_t *v)
 
 int fx_power(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    const SvcBoard *b = b33_board();
+    const SvcBoard *b = g_api->board;
     uint8_t want, have;
     want = (uint8_t)setting_ix("Power On After Power Loss", 0);
     if (!b || !esp_get(b, ESP_CMD_GET_POWER_MODE, 0, &have)) {
@@ -736,7 +736,7 @@ int op_unlink(CoreCtx *, const OpArgs &, OpOut &o)
 // Pause keeps C64_STOP asserted after the menu closes (run.cc close_menu, Freeze::leave(keep_stopped)); Resume takes the flag away and the close releases it.
 int op_pause_toggle(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     uint32_t st = ctx_state();
     if (!c || !(st & CTX_STARTED)) {
         snprintf(o.msg, o.msglen, "The machine is not running yet");
@@ -779,7 +779,7 @@ int op_clear_reboot(CoreCtx *, const OpArgs &, OpOut &o)
 // where a file of the menu goes (ctx.target_path): the folder the menu was on, else the first medium of the root but /flash; `ext` is added when the name has none
 static bool target_path(const char *name, const char *ext, char *out, int n)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     return c && c->target_path(name, ext, out, n);
 }
 
@@ -1198,7 +1198,7 @@ static const SidApi *sid_lib(void)
 // the folder the core's .cor installed its data into (ctx.core_folder); false: this start has no .cor
 static bool core_folder(char *out, int n)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     return c && c->core_folder(0, out, n);
 }
 
@@ -1605,7 +1605,7 @@ void trx64u_sid_service(CoreCtx *c)
     ram_read(2, &b, 1);
     char msg[160];
     msg[0] = 0;
-    const SvcCtx *x = b33_ctx();
+    const SvcCtx *x = g_api->ctx;
     if (b == 0x01) {
         g_sj.active = false;
         if (sid_fire(c, msg, sizeof(msg)) && x) {

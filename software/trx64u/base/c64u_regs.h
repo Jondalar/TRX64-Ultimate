@@ -104,8 +104,13 @@
 #define C64U_U64_INT_CONNECTORS 0x01
 // u64_pwm_duty (FW U64_PWM_DUTY, U64_IO_BASE + 0x0D)
 #define C64U_U64_PWM_DUTY       0x00
-// audio_mixer (FW U64_AUDIO_MIXER) and speaker_mixer (FW U64_SPEAKER_MIXER): one byte per channel and side, right then left
+// audio_mixer (FW U64_AUDIO_MIXER): one byte per channel and side, right then left
 #define C64U_MIXER_CHANNELS     10
+// speaker_mixer (FW U64_SPEAKER_MIXER): the bitstream decodes four bytes, +0x00, +0x01, +0x04, +0x05 (designs/c64_basic/ultimate_sys.vhd spk_gain 0..3),
+// and the speaker plays the highest of them. The window ends at +0x05: +0x10 and +0x11 are registers the base drives (master volume and tone in
+// MultiCore's coreapp/src/basereg.def; this bitstream does not decode them), and a window may not cover one.
+#define C64U_SPEAKER_GAINS      4
+static const uint8_t c64u_speaker_gain[C64U_SPEAKER_GAINS] = { 0x00, 0x01, 0x04, 0x05 };
 // resampler (FW U64_RESAMPLER)
 #define C64U_RESAMPLE_DATA      0x00  // 32 bit, bytes +0 .. +3
 #define C64U_RESAMPLE_RESET     0x04
@@ -124,7 +129,7 @@
     X(U64_HDMI_CONNECTORS, "u64_hdmi_connectors", C64U_U64_INT_CONNECTORS + 1)                  \
     X(U64_PWM_DUTY, "u64_pwm_duty", C64U_U64_PWM_DUTY + 1)                                      \
     X(AUDIO_MIXER, "audio_mixer", 2 * C64U_MIXER_CHANNELS)                                      \
-    X(SPEAKER_MIXER, "speaker_mixer", 2 * C64U_MIXER_CHANNELS)                                  \
+    X(SPEAKER_MIXER, "speaker_mixer", 0x05 + 1)                                                 \
     X(RESAMPLER, "resampler", C64U_RESAMPLE_FLUSH + 1)                                          \
     X(C64_PALETTE, "c64_palette", C64U_PALETTE_YUV + 16 * 4)                                    \
     X(HDMI_PALETTE, "hdmi_palette", 16 * 4)

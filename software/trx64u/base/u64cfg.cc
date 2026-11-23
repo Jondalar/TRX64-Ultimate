@@ -3,9 +3,9 @@
 // setCpuSpeed, setLedSelector, auto_mirror, SetResampleFilter, the palette programming; the register addresses are vendor/gideon/software/system/u64.h.
 // What is different: the values come from this application's settings (menu.toml groups video, audio, sid, input, expert) instead of a ConfigStore, and
 // the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
-// U18: built as the trx64u library against the TRX64 SDK (base 3.2 and the groups of base 3.3). The settings are read and written through the settings
+// U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read and written through the settings
 // group (setting.cc), the SID chips through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx), the keys, the SID
-// sockets' supply, the video PLL, the picture layer, the case LEDs and the ESP32 through the 3.3 groups io and board (base33.h); the C64U's registers
+// sockets' supply, the video PLL, the picture layer, the case LEDs and the ESP32 through the 3.3 groups io and board (g_api->io, board); the C64U's registers
 // through the io group's blocks and register windows (trx64u_lib.h), their offsets and window names in c64u_regs.h, the windows in desc.toml.
 // lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "u64cfg.h"
@@ -274,7 +274,7 @@ static void set_resample_filter(uint8_t audio_div)
     const int32_t *pf = (mode == 0) ? c_filter2_coef_pal_alt : c_filter2_coef_ntsc;
     int size = (mode == 0) ? (int)(sizeof(c_filter2_coef_pal_alt) / sizeof(c_filter2_coef_pal_alt[0]))
                            : (int)(sizeof(c_filter2_coef_ntsc) / sizeof(c_filter2_coef_ntsc[0]));
-    const SvcSync *sy = b33_sync();
+    const SvcSync *sy = g_api->sync;
     r[C64U_RESAMPLE_RESET] = 1;
     r[C64U_RESAMPLE_FLUSH] = 1;
     for (int i = 0; i < size; i++) {
@@ -324,7 +324,7 @@ int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
     c64_bus_wr(C64U_BUS_PHASE_INCR, color_timing[sys].phase_inc);
     int ppm = VN(K_PPM, 0);                           // the colour clock's offset, -100 .. 100 ppm
     c64_video_format((uint8_t)(color_timing[sys].mode_bits | format));
-    const SvcBoard *b = b33_board();
+    const SvcBoard *b = g_api->board;
     if (sys != g_sys) {
         const char *name = setting_label(key_names[K_SYSMODE], sys);
         if (name) {
@@ -441,8 +441,9 @@ static void write_mixer(void)
     }
 }
 
-// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0) and setSpeakerMixer :1749-1765. The bitstream decodes ONE gain for the whole mono mix
-// (speaker mixer +0x00, +0x01, +0x04, +0x05), so the one speaker volume goes to all ten pairs; the per-source volumes of the FW are not decoded and stay out.
+// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0) and setSpeakerMixer :1749-1765. The bitstream decodes four bytes of the speaker mixer
+// (c64u_speaker_gain) and plays the mono mix at the highest of them, so the one speaker volume goes to all four; the per-source volumes of the FW are
+// not decoded and stay out.
 static void write_speaker(void)
 {
     bool on = V(K_SPK_EN, 1) != 0;
@@ -452,8 +453,8 @@ static void write_speaker(void)
         return;
     }
     uint8_t vol = on ? volume_ctrl[V(K_SPK0, 0)] : 0;
-    for (int i = 0; i < 2 * C64U_MIXER_CHANNELS; i++) {
-        mixer[i] = vol;
+    for (int i = 0; i < C64U_SPEAKER_GAINS; i++) {
+        mixer[c64u_speaker_gain[i]] = vol;
     }
 }
 
@@ -475,7 +476,7 @@ void u64cfg_power_on_keys(void)
         return;
     }
     const int ctrl = 58, key_p = 41, key_n = 39;                   // the matrix index col * 8 + row (hotkeys.h): CTRL, P, N
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     uint8_t m[8];
     bool rs;
     if (!io || !io->keys_read(m, &rs) || !((m[ctrl >> 3] >> (ctrl & 7)) & 1)) {
@@ -490,11 +491,11 @@ void u64cfg_power_on_keys(void)
 
 void u64cfg_mute_sids(void)
 {
-    static const int win[2] = { C64U_W_AUDIO_MIXER, C64U_W_SPEAKER_MIXER };
-    for (int w = 0; w < 2; w++) {
-        for (int i = 0; i < 8; i++) {                               // the four SIDs' channels, both sides
-            c64u_win_wr(win[w], (uint32_t)i, 0);
-        }
+    for (int i = 0; i < 8; i++) {                                   // the four SIDs' channels, both sides
+        c64u_win_wr(C64U_W_AUDIO_MIXER, (uint32_t)i, 0);
+    }
+    for (int i = 0; i < C64U_SPEAKER_GAINS; i++) {                  // the speaker's four bytes, all of them inside those channels
+        c64u_win_wr(C64U_W_SPEAKER_MIXER, c64u_speaker_gain[i], 0);
     }
 }
 
@@ -665,11 +666,11 @@ static int detect_fpgasid(int s)
     return is ? 3 : 0;
 }
 
-// sys.delay_us: the busy wait of the chips' register handshakes
+// sys.delay_us: the busy wait of the chips' register handshakes; nothing without the member
 static void delay_us(uint32_t us)
 {
-    const SvcSysAdd *x = b33_sys();
-    if (x) {
+    const SvcSys *x = g_api->sys;
+    if (SVC_HAS(SvcSys, x, delay_us)) {
         x->delay_us(us);
     }
 }
@@ -1222,7 +1223,7 @@ static bool g_detected;
 // C64's memory window (api->c64) no chip can be looked at: the detection waits for a later call.
 static void sid_types_detect(void)
 {
-    const SvcSettings *set = b33_settings();
+    const SvcSettings *set = g_api->settings;
     if (g_detected || (ctx_state() & (CTX_STARTED | CTX_FROZEN)) || !set || !settings_ready() || !c64_window()) {
         return;
     }
@@ -1268,7 +1269,7 @@ static void sid_types_detect(void)
         }
         snprintf(note, sizeof(note), "SID changed. Please review settings");
     }
-    const SvcCtx *x = b33_ctx();
+    const SvcCtx *x = g_api->ctx;
     if (note[0] && x) {
         x->notice(note, true);                                         // only when no notice waits (this file's rule)
     }
@@ -1279,7 +1280,7 @@ static void sid_types_detect(void)
 static void write_sid_sockets(void)
 {
     sid_types_detect();
-    const SvcBoard *b = b33_board();
+    const SvcBoard *b = g_api->board;
     for (int s = 0; s < 2; s++) {
         int reg = SID_SOCKET_OFF;
         if (V(s ? K_S2_EN : K_S1_EN)) {
@@ -1731,8 +1732,8 @@ int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
     // serial bus, burst mode, the parallel cable
     c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_INT_CONNECTORS, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
     // the case LEDs' sources: the low nibble LED 1 ("LED Select Top"), the high nibble LED 2 ("LED Select Bot"); a base without the member writes nothing
-    const SvcBoard *b = b33_board();
-    if (b && b->size >= offsetof(SvcBoard, case_led_select) + sizeof(b->case_led_select) && b->case_led_select) {
+    const SvcBoard *b = g_api->board;
+    if (SVC_HAS(SvcBoard, b, case_led_select)) {
         b->case_led_select((uint8_t)((V(K_LED1, 4) << 4) | V(K_LED0, 0)));
     }
     return OPE_OK;
@@ -1750,7 +1751,7 @@ static int power_cmd(uint8_t cmd, OpOut &o)
     if (op_call("media.flush_for_core", 0, 0, o.msg, o.msglen) != OPE_OK) {
         return 1;
     }
-    const SvcBoard *b = b33_board();
+    const SvcBoard *b = g_api->board;
     return b ? b->esp32_rpc(cmd, 0, 0, 0, 0, 0) : -3;
 }
 

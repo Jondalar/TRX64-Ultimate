@@ -37,7 +37,7 @@ static bool available(const SvcIo *io)
 
 bool c64_go_available(void)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     return io && available(io);
 }
 
@@ -92,7 +92,7 @@ static void give_back(const SvcIo *io)
 
 int c64_go(uint16_t pc, c64_go_place_t place, void *user, char *msg, int msglen)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     if (!io || !available(io)) {
         snprintf(msg, msglen, "this bitstream cannot set the CPU's address (no CPU write path)");
         return 1;

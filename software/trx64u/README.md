@@ -13,10 +13,11 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 
 ## State
 
-The three libraries build to MultiCore's base 3.3 contract (`contract/`, their `t239.3-boundary` headers) on SDK 0.2.0
-(base 3.2: named exports, budgets, the constructor check);
-every file compiles, and each link is open only on the accessors of `include/base33.h`, which an SDK with base 3.3
-will fill. Nothing has run yet.
+The three libraries build on MultiCore's dev SDK 0.3.0 (base 3.3, not released yet): every link closes, the constructor
+check passes, and each packs into a `.u2a` within its declared budget. The core's description (`base/menu.toml`, the UI
+TOML, and `base/desc.toml`, the API TOML) compiles into record 6. A whole `trx64u.cor` cannot be packed from the SDK
+alone yet (the bitstream, the trx64u application image and the base register list are not in it). Nothing has run
+yet; the first run is in ue2emu, then the board (U18 §5).
 
 The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
 (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from; `coreapp/src` and `coreapp/cores/trx64u/menu.toml`), and
@@ -28,8 +29,9 @@ firmware's copy is frozen, bug fixes only, each also here).
 ## Build
 
 `./build.sh [trx64u] [ring] [monitor]` builds the libraries in `build/<name>/` (copies of the sources; the monitor
-also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. Today every
-library compiles; its link stops on the `b33_*` accessors (`include/base33.h`).
+also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. `build.sh --check`
+only checks that the unpacked SDK matches `sdk.pin`. The monitor compiles only with the trxmon change that waits in
+`pending/`.
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
 (`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which

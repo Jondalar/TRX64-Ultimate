@@ -211,26 +211,26 @@ static int op_clear_marks(CoreCtx *, const OpArgs &, OpOut &o)
 // ---- the menu's write protocol and target path (base 3.3 ctx group; without it every write runs on the caller and nothing is placed) ----------------
 static bool job_step(void)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     return c && c->job_step();
 }
 
 static bool job_cancelled(void)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     return c && c->job_cancelled();
 }
 
 static void job_progress(int pct, const char *path)
 {
-    if (const SvcCtx *c = b33_ctx()) {
+    if (const SvcCtx *c = g_api->ctx) {
         c->job_progress(pct, path);
     }
 }
 
 static bool target_path(const char *name, const char *ext, char *out, int n)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     return c && c->target_path(name, ext, out, n);
 }
 

@@ -32,14 +32,14 @@ static int cold_reset(char *msg, int msglen)
 // stopped by C64_STOP, where a byte is a bus cycle through the PLA (S15). Without the io group nothing is written and a read gives zeros.
 static void ram_put(uint16_t addr, const void *p, uint32_t n)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     if (io) {
         io->ram_write(addr, p, n);
     }
 }
 static void ram_get(uint16_t addr, void *p, uint32_t n)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     if (io) {
         io->ram_read(addr, p, n);
     } else {
@@ -107,7 +107,7 @@ int c64_mem_write(CoreCtx *, const OpArgs &a, OpOut &o)
 // writable - without it only the CPU.
 int c64_freeze_mode(CoreCtx *, const OpArgs &a, OpOut &)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     if (io) {
         uint32_t v = a.i(0) == 0 ? C64U_GATE_FRZ : 0;
         for (int i = 0; i < 4; i++) {
@@ -415,7 +415,7 @@ static int fire(char *msg, int msglen)
 static void tell(const char *what)
 {
     lib_logf("[c64] %s", what);
-    const SvcCtx *x = b33_ctx();
+    const SvcCtx *x = g_api->ctx;
     if (x) {
         x->notice(what, false);
     }

@@ -1,11 +1,11 @@
 // The entry of the monitor library (U18 D5) and its platform. lib_register hands the base the monitor's operations, its state value, its poll and its
 // export "textgrid" (the F4 screen); the platform calls trxmon's engine makes (mach.h, rpc.h: what trxmon's main.c gives the firmware's trxmon) go to the
-// base's tables (api->sys, api->mem, api->fs, api->ops) and to the base 3.3 groups (base33.h: sync, ctx, the members appended to SvcSys).
+// base's tables (api->sys, api->mem, api->fs, api->ops) and to the base 3.3 groups (api->sync, api->ctx) and members appended to SvcSys (yield,
+// app_version, app_git).
 // PROVENANCE: monitor.cc of MultiCore's core application (TRX64U-MultiCore 3b8e2955, coreapp/src): its operations, monitor_register() and the plat_*
 // calls moved here.
 #include "libapi.h"
 #include "libfmt.h"
-#include "base33.h"
 #include "textgrid.h"
 #include "monitor.h"
 #include "monlib.h"
@@ -16,6 +16,11 @@ extern "C" {
 }
 
 const LibApi *g_api;
+
+// The groups base 3.3 added to LibApi (sync, ctx) are there on every base this library loads on (LIB_NEEDS base>=3.3; api.md 3.2.12) and are still tested
+// for null before a call. A member 3.3 appended to SvcSys is called only when SVC_HAS says the table has it: its size covers the member and the member is
+// set (api.md 3.2.2).
+#define SVC_HAS(T, t, m) ((t) && (t)->size >= offsetof(T, m) + sizeof(((T *)0)->m) && (t)->m)
 
 static_assert(sizeof(u2p_video_t) == 20, "u2p_video_t: the layout monitor.cc reads through app_api.h");
 
@@ -60,12 +65,12 @@ void monlib_log(const char *text)
 extern "C" {
 uint32_t plat_ms(void) { return g_api->sys->ms(); }
 
-// sys.yield (base 3.3). A base without it gets nothing here: sleep_ms(0) sleeps a whole 5 ms tick, and the waits that yield (mach.c wait_status) sleep
-// one PLAT_SLEEP_MIN_MS every 20 ms of waiting on their own (breathe).
+// sys.yield (base 3.3). Without the member nothing happens here: sleep_ms(0) sleeps a whole 5 ms tick, and the waits that yield (mach.c wait_status)
+// sleep one PLAT_SLEEP_MIN_MS every 20 ms of waiting on their own (breathe).
 void plat_yield(void)
 {
-    const SvcSysAdd *s = b33_sys();
-    if (s && s->yield) {
+    const SvcSys *s = g_api->sys;
+    if (SVC_HAS(SvcSys, s, yield)) {
         s->yield();
     }
 }
@@ -213,7 +218,7 @@ static const char *const s_media_slot[] = { "Cartridge", "Drive A" };
 
 int plat_media(int role, char *buf, int len)
 {
-    const SvcCtx *c = b33_ctx();
+    const SvcCtx *c = g_api->ctx;
     if (role < 0 || role >= (int)(sizeof(s_media_slot) / sizeof(s_media_slot[0])) || !c || !c->media_source || len <= 0) {
         return 0;
     }
@@ -234,17 +239,17 @@ int plat_media(int role, char *buf, int len)
     return n;
 }
 
-// The application image's version and the short hash of its commit (sys.app_version, sys.app_git; base 3.3). "" on a base without them (rpc.h).
+// The application image's version and the short hash of its commit (sys.app_version, sys.app_git; base 3.3). "" without the members (rpc.h).
 const char *plat_firmware_git(void)
 {
-    const SvcSysAdd *s = b33_sys();
-    return s && s->app_git ? s->app_git() : "";
+    const SvcSys *s = g_api->sys;
+    return SVC_HAS(SvcSys, s, app_git) ? s->app_git() : "";
 }
 
 const char *plat_firmware_version(void)
 {
-    const SvcSysAdd *s = b33_sys();
-    return s && s->app_version ? s->app_version() : "";
+    const SvcSys *s = g_api->sys;
+    return SVC_HAS(SvcSys, s, app_version) ? s->app_version() : "";
 }
 }
 
@@ -253,8 +258,8 @@ const char *plat_firmware_version(void)
 // under the core lock, with the menu open too (when_frozen), and the menu task, which calls the monitor's operations (monitor.key runs there without the
 // core lock, KF_DIRECT; monitor.release from the base library's menu_closed hook, also without it) and every call of the export "textgrid" (textgrid.h:
 // enter, tick and the drawing calls, one after the other). The poll and the textgrid's calls skip their pass while the other task has the engine, so the
-// menu never waits in them; the operations sleep until it is free. sync.enter / sync.leave guard only the flag; a base without the group (before 3.3)
-// has no critical section to offer, and the flag is then tested and set unguarded. Of the menu task's calls only monitor.release reaches the machine (the
+// menu never waits in them; the operations sleep until it is free. sync.enter / sync.leave guard only the flag; the sync group is there on every base
+// this library loads on, and should it be null the flag is tested and set unguarded. Of the menu task's calls only monitor.release reaches the machine (the
 // debugger's hold, core_hooks.h menu_closed): the session starts in the poll, every line typed on the screen waits for the poll and runs there (a ring
 // file one step per pass), and the screen's machine rows are what the poll read last (monitor.cc).
 static volatile bool s_engine;
@@ -264,7 +269,7 @@ static bool s_open_due;
 
 static bool engine_try(void)
 {
-    const SvcSync *s = b33_sync();
+    const SvcSync *s = g_api->sync;
     if (s) {
         s->enter();
     }
@@ -371,9 +376,8 @@ static int op_release(CoreCtx *, const OpArgs &, OpOut &o)
 
 // The library's poll (LibPollDecl): the RPC on TCP 4312, meant to answer whatever the menu does (MultiCore's main loop called mon_serve() on every pass),
 // and everything of the screen that reaches the machine: the session's start, the lines typed, a ring file's steps, the machine's rows. It is declared
-// when_frozen, so a base that honours the flag (3.3) runs it with the menu open too; a base before 3.3 (SDK 0.2.0's 3.2 too) does not read the flag and
-// runs it only while the machine is not frozen: the screen's session then does not start while the menu is open (F4 stays empty, a key waits
-// KEY_WAIT_MS and is dropped).
+// when_frozen, so the base (3.3: LibPollDecl::when_frozen, api.md 6.10.9) runs it with the menu open too; without that the screen's session would not
+// start while the menu is open (F4 empty, a key waiting KEY_WAIT_MS and dropped).
 static int op_serve(CoreCtx *, const OpArgs &, OpOut &o)
 {
     o.msg[0] = 0;
@@ -447,7 +451,7 @@ static const TextGrid s_grid = {
     sizeof(TextGrid), tg_render, mon_cols, mon_rows, mon_line, mon_attr, mon_blank_rows, mon_cursor, mon_sig, tg_enter, tg_tick,
 };
 
-// The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
+// The library's named exports (LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.
 static const LibExportDecl s_exports[] = {
     { "textgrid", 1, &s_grid, sizeof(s_grid) },

@@ -1,6 +1,6 @@
 # The API TOML of the trx64u core (D7: menu.toml is its UI TOML). tools/descrec.py compiles both into the core's description record (record 6 of
-# trx64u.cor, cor_pack.py pack --desc twice from base 3.3 on, refusing a table or key that is in both); MultiCore's pipeline packs it. This build does not
-# read the file.
+# trx64u.cor: cor_pack.py pack --desc menu.toml --desc desc.toml, refusing a table or key that is in both); MultiCore's pipeline packs it. This build does
+# not read the file.
 #
 # ---- the descriptor's data (T239.3 D17, record version 6) -------------------------------------------------------------------------------------------
 # What MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09) held as the TRX2 descriptor `c64_desc`, as the sections of their tools/descrec.py. Its code is
@@ -130,7 +130,7 @@ put_op = "drive.put_rom"
 
 # ---- the register windows -----------------------------------------------------------------------------------------------------------------------------
 # The blocks of the C64U's bitstream outside the core window that this core's libraries write (MultiCore's handover, "The windows of a core's API TOML",
-# base 3.3), each one `io.window(name, &size)` hands out; descrec takes [[window]] from base 3.3 on.
+# base 3.3), each one `io.window(name, &size)` hands out. descrec refuses a window that covers a register of MultiCore's coreapp/src/basereg.def.
 #
 # The base refuses a window over a register it drives itself (power, RESTORE, the HDMI PLL reset, the keyboard scan, I2C, MDIO, the USB hub reset, the case
 # LED select), so the U64 block (FW U64_IO_BASE, 0xA0000400) is declared as the three runs this core writes; the case LEDs go through board.case_led_select.
@@ -163,9 +163,9 @@ address = 0xA0000500
 size = 0x14
 
 [[window]]
-name = "speaker_mixer"          # FW U64_SPEAKER_MIXER: 10 channels, a byte per side
-address = 0xA0000540
-size = 0x14
+name = "speaker_mixer"          # FW U64_SPEAKER_MIXER: the bitstream decodes +0x00, +0x01, +0x04, +0x05 (designs/c64_basic/ultimate_sys.vhd spk_gain); 0xA0000550
+address = 0xA0000540            # and 0xA0000551 are the base's master volume and tone (MultiCore's basereg.def), outside the window
+size = 0x6
 
 [[window]]
 name = "resampler"              # FW U64_RESAMPLER: data +0 .. +3, reset +4, labor +8, flush +9

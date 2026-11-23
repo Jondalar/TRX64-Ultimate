@@ -13,7 +13,7 @@ const LibApi *g_api;
 const void *ring_table(uint32_t *size);
 const void *ring_steps_table(uint32_t *size);
 
-// The named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the library
+// The named exports (LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the library
 // when lib_register does not return each of them. Filled in lib_register: the tables and their sizes are ring_api.cc's.
 static LibExportDecl s_exports[2];
 

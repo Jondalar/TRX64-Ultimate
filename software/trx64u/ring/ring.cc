@@ -178,13 +178,13 @@ static bool lock(void)
     if (!present) {
         return false;
     }
-    b33_sync()->mutex_lock(mutex, SYNC_FOREVER);       // present: the sync group made the mutex
+    g_api->sync->mutex_lock(mutex, SYNC_FOREVER);       // present: the sync group made the mutex
     return true;
 }
 
 static void unlock(void)
 {
-    b33_sync()->mutex_unlock(mutex);
+    g_api->sync->mutex_unlock(mutex);
 }
 
 // ---- the mover -------------------------------------------------------------------
@@ -2065,7 +2065,7 @@ const char *trx_ring_reu_refusal(void)
 // in progress holds the mutex, and the next poll looks again.
 void trx_ring_reu_sync(void)
 {
-    if (!present || !b33_sync()->mutex_lock(mutex, 0)) {
+    if (!present || !g_api->sync->mutex_lock(mutex, 0)) {
         return;
     }
     switch (trx_reu_gate_step(&reu_gate, reu_on(), scrubbing, log_on)) {
@@ -2088,7 +2088,7 @@ void trx_ring_reu_sync(void)
     default:
         break;
     }
-    b33_sync()->mutex_unlock(mutex);
+    g_api->sync->mutex_unlock(mutex);
 }
 
 void trx_ring_stop(void)
@@ -3009,7 +3009,7 @@ const char *trx_ring_engine_init(void)
         return NULL;
     }
     tried = true;
-    const SvcSync *sync = b33_sync();
+    const SvcSync *sync = g_api->sync;
     if (!(trx_io_caps() & CAPS_ENGINE) || !g_api->c64 || !sync) {
         return NULL;
     }

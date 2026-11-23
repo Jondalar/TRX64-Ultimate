@@ -1,12 +1,16 @@
 # The TRX64 SDK that software/trx64u builds against (U18). fetch_sdk.sh checks the tarball against this file and
-# unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore (T239.3); its releases are kept
+# unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore (T239.3); its builds are kept
 # read-only in that repository's .ci/sdk/.
-sdk_version=0.2.0
-sdk_tarball=trx64-sdk-0.2.0.tar.gz
-sdk_tarball_sha256=1bb8532d24a7bfe5de7ae4c4569f6aff4d1845b7fcae7d68ac1873aef4f3a036
-source_branch=t239.3
-source_commit=3be66169
-base_api=3.2
+# DEV BUILD: 0.3.0 (base 3.3) from MultiCore's branch t239.3-33, not a release. The tarball's name carries the commit
+# (trx64-sdk-0.3.0-dev+79dbc77d.tar.gz); it unpacks to trx64-sdk-0.3.0/, the name a 0.3.0 release unpacks to as well.
+# build.sh checks the unpacked VERSION against source_commit and the hashes below, so a release unpacked over it is
+# not taken for this build.
+sdk_version=0.3.0
+sdk_tarball=trx64-sdk-0.3.0-dev+79dbc77d.tar.gz
+sdk_tarball_sha256=81d4bc46bb687ef851ef289dc431f9d373066ee673e4d2c98cd29feba6f8ed7e
+source_branch=t239.3-33
+source_commit=79dbc77d
+base_api=3.3
 abi_major=3
-api_headers_sha256=da3811e51230c29e52fd338f2e8bbbee8db70746b5d37311a4da7f95de7fa25d
-coreapp_sha256=bb2f2a8c7547f1583f0ee6461516510821c5c3d917b4f083eb2e5741d1d9a081
+api_headers_sha256=55ce6327e253e5fc88593233eb7b9d783fca901abbedb598cec9a0b768bfbb5e
+coreapp_sha256=57de7c9910e627aaea92a0028a6cf10aa7903e993bf9577201c7bc2e60958ab3

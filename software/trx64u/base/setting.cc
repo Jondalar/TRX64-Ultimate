@@ -62,7 +62,7 @@ static int key_ix(const SvcSettings *s, const char *key)
 
 int setting_ix(const char *key, int def)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     if (!s) {
         return def;
     }
@@ -111,27 +111,27 @@ const char *setting_label(const char *key, int ix)
 
 const char *setting_text(const char *key)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     const char *t = s ? s->cfg_text(key) : 0;
     return t ? t : "";
 }
 
 bool settings_ready(void)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     return s && base_ix(s, &set_defs[0]) >= 0;
 }
 
 bool setting_set(const char *key, int ix)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     int k = s ? key_ix(s, key) : -1;
     return k >= 0 && s->set(k, ix);
 }
 
 void setting_override(const char *key, int ix)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     int k = s ? key_ix(s, key) : -1;
     if (k >= 0) {
         s->override_value(k, ix);

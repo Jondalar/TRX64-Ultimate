@@ -19,6 +19,11 @@
 # the machine line of F1 (T212 D13/D15): the values of these settings
 machine_info = "System Mode,REU Size"
 
+# The rows of the generic application this core does not show (T228 R7, Alex 2026-11-17: the Ultimate's colour scheme is not a setting of this machine; the menu
+# keeps the default scheme). The keys are the base's (svc_settings.h); the base adds no row named here. The joystick and mouse rows come and go by the
+# capabilities the core's descriptor names (desc.toml [core] caps), not by this list. As MultiCore's coreapp/cores/trx64u/menu.toml (t239.3-33).
+hide = ["Color Scheme"]
+
 [[area]]
 key = "F1"
 name = "Home"

@@ -12,7 +12,7 @@ static void slot_path(const char *slot, char *path, int n, int *mode)
     if (mode) {
         *mode = 0;
     }
-    const SvcCtx *ctx = b33_ctx();
+    const SvcCtx *ctx = g_api->ctx;
     char spec[256];
     if (!ctx || !ctx->media_source(slot, spec, sizeof(spec))) {
         return;
@@ -31,7 +31,7 @@ static void slot_path(const char *slot, char *path, int n, int *mode)
 // timings (4, 5) have the mode bits of PAL-60 and NTSC-50 and read as those; the trx64u menu offers the first four only. -1 without the io group.
 static int machine_now(void)
 {
-    if (!b33_io()) {
+    if (!g_api->io) {
         return -1;
     }
     uint8_t v = io_bus_rd(C64U_BUS_VIDEOFORMAT);
@@ -81,7 +81,7 @@ static void cart_eeprom_put(void *, const uint8_t *data)
 // has that value already or now has it; 1 when there is no such setting or the menu does not offer that mode.
 static int machine_set(void *, int machine)
 {
-    const SvcSettings *s = b33_settings();
+    const SvcSettings *s = g_api->settings;
     int ix = s ? s->find("System Mode") : -1;
     if (ix < 0) {
         return 1;
@@ -168,7 +168,7 @@ void ring_machine_build(RingMachine *m, bool load)
         if (R_TABLE(C64CartApi, RX_C64CART, eeprom_put)) {
             s->eeprom_put = cart_eeprom_put;
         }
-        if (b33_settings()) {
+        if (g_api->settings) {
             s->machine_set = machine_set;
         }
         if (R_TABLE(Cbm1541Api, RX_CBM1541, slot_mount)) {

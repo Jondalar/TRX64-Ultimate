@@ -1,6 +1,6 @@
-// What the ring library's files share of the base (U18): the LibApi pointer, the base 3.3 groups (base33.h), the exports of MultiCore's shared
-// libraries, memory on the library's own account, text without a C library, the TRX IO block's registers, the C64 machine's registers and memory
-// window, and files. ringsys.cc.
+// What the ring library's files share of the base (U18): the LibApi pointer, the base 3.3 groups (g_api->sync, settings, ctx, io, board), the exports
+// of MultiCore's shared libraries, memory on the library's own account, text without a C library, the TRX IO block's registers, the C64 machine's
+// registers and memory window, and files. ringsys.cc.
 #ifndef RING_RINGSYS_H
 #define RING_RINGSYS_H
 
@@ -9,7 +9,6 @@
 #include <stdarg.h>
 #include <string.h>
 #include "libapi.h"
-#include "base33.h"
 #include "c64cart_api.h"
 #include "cbm1541_api.h"
 #include "uci_api.h"
@@ -17,6 +16,12 @@
 
 // Set by lib_register (lib_ring.cc) before anything else runs.
 extern const LibApi *g_api;
+
+// The five groups base 3.3 added to LibApi are there on every base this library loads on (LIB_NEEDS base>=3.3; api.md 3.2.12): sync, settings, ctx and
+// board always, io on a core with a register window and once the core is handed over. Each is still tested for null before a call (ring.cc's mutex
+// calls test `present`, which is set only after sync made the mutex). A member 3.3 appended
+// to an older table (SvcSys, SvcFs) is called only when SVC_HAS says the table has it: its size covers the member and the member is set (api.md 3.2.2).
+#define SVC_HAS(T, t, m) ((t) && (t)->size >= offsetof(T, m) + sizeof(((T *)0)->m) && (t)->m)
 
 // ---- the exports of MultiCore's shared libraries (SvcLib::find(name, U2A3_VERSION(1, 0), &size), major 1) --------------------------------------------
 // Looked up at their first use and kept once found; while one is not loaded every use asks again.
@@ -79,7 +84,7 @@ void trx_io_write32(uint32_t reg, uint32_t v);
 // The slim core: TX_CTRL (page 6, +0C0) b31:24 reads 2 or more; false without page 6.
 bool trx_io_slim(void);
 
-// ---- the C64 machine's registers (c64u_regs.h) through the io group (base33.h); without the group a read gives 0 and a write is dropped --------------
+// ---- the C64 machine's registers (c64u_regs.h) through the io group (g_api->io); without the group a read gives 0 and a write is dropped -------------
 uint8_t io_cart_rd(uint32_t reg);                // the cartridge-port control block
 void io_cart_wr(uint32_t reg, uint8_t v);
 uint8_t io_bus_rd(uint32_t off);                 // the bus bridge's block

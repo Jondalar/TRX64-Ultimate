@@ -498,3 +498,12 @@ Nothing decided yet.
     key against the built-in trx64u. Our code first runs in ue2emu (the emulator of the C64U_emu session) on the shared
     3.3 `coreapp.app` with our `trx64u.cor` in a stick folder of our own (`--usb-dir`); whether the shared image starts
     the trx64u machine at all is the first thing it shows. Then the board.
+  - **On base 3.3 (dev SDK 0.3.0, `79dbc77d`):** `contract/` and `include/base33.h` are gone; the code reads the groups
+    from its LibApi (65 accessors replaced; members appended to SvcSys checked by size); every library needs
+    `base>=3.3`; all three links close (nothing undefined), pass the constructor check and pack (`.u2a`: base 95,624 B,
+    ring 121,176 B, monitor 211,192 B; image + bss 212,924 / 136,264 / 682,204 B). `build.sh` checks the unpacked SDK
+    against the pin. Record 6 compiles from `menu.toml` + `desc.toml` (66,704 B; `hide = ["Color Scheme"]` added as in
+    MultiCore's built-in menu), but descrec needs MultiCore's `basereg.def`, which the SDK does not ship. The window
+    check refused `speaker_mixer` (it covered the base's master volume and tone at 0x550/0x551); our bitstream decodes
+    only +0x40/41/44/45 there (`ultimate_sys.vhd` `spk_gain`), so the window is 6 bytes and only those four bytes are
+    written. A whole `trx64u.cor` needs the bitstream and a trx64u application image the SDK does not carry.

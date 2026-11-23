@@ -262,17 +262,17 @@ void trx_wr8(uint32_t reg, uint8_t v)
     }
 }
 
-// Without the sync group (a base before 3.3) the four accesses are made all the same, without the critical section.
+// The sync group is there on every base this library loads on (ringsys.h); should it be null, the four accesses are made without the critical section.
 static void crit_enter(void)
 {
-    if (const SvcSync *s = b33_sync()) {
+    if (const SvcSync *s = g_api->sync) {
         s->enter();
     }
 }
 
 static void crit_leave(void)
 {
-    if (const SvcSync *s = b33_sync()) {
+    if (const SvcSync *s = g_api->sync) {
         s->leave();
     }
 }
@@ -318,33 +318,33 @@ bool trx_io_slim(void)
 // ---- the C64 machine's registers -------------------------------------------------------------------------------------------------------------------------
 uint8_t io_cart_rd(uint32_t reg)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     return io ? io->cart_rd(reg) : 0;
 }
 
 void io_cart_wr(uint32_t reg, uint8_t v)
 {
-    if (const SvcIo *io = b33_io()) {
+    if (const SvcIo *io = g_api->io) {
         io->cart_wr(reg, v);
     }
 }
 
 uint8_t io_bus_rd(uint32_t off)
 {
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     return io ? io->bus_rd(off) : 0;
 }
 
 void io_stop(bool on)
 {
-    if (const SvcIo *io = b33_io()) {
+    if (const SvcIo *io = g_api->io) {
         io->stop(on);
     }
 }
 
 void io_memonly(bool on)
 {
-    if (const SvcIo *io = b33_io()) {
+    if (const SvcIo *io = g_api->io) {
         io->ram_memonly(on);
     }
 }
@@ -352,8 +352,8 @@ void io_memonly(bool on)
 // ---- time ------------------------------------------------------------------------------------------------------------------------------------------------
 uint16_t r_ms_timer(void)
 {
-    const SvcSysAdd *s = b33_sys();
-    return s ? s->ms_timer() : uint16_t(g_api->sys->ms());
+    const SvcSys *s = g_api->sys;
+    return SVC_HAS(SvcSys, s, ms_timer) ? s->ms_timer() : uint16_t(s->ms());
 }
 
 // ---- the exports of the shared libraries -----------------------------------------------------------------------------------------------------------------

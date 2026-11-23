@@ -1347,21 +1347,21 @@ static int json_str(char *dst, int cap, const char *src)
 // The bitstream's capability bits (board.fpga_caps), 0 without the board group.
 static uint32_t fpga_caps(void)
 {
-    const SvcBoard *b = b33_board();
+    const SvcBoard *b = g_api->board;
     return b ? b->fpga_caps() : 0;
 }
 
 static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
 {
     const bool cart = (f.w[W_GLUE] & GLUE_CART) && g_src_on && g_src.cart_src && g_src.cart_src[0];
-    const SvcSysAdd *sys = b33_sys();
+    const SvcSys *sys = g_api->sys;
     int n = r_snprintf(dst, cap,
                      "{\"kind\":\"c64re\",\"version\":%d,\"writer\":\"trx64u\",\"appVersion\":\"%s\""
                      ",\"machine\":\"%s\",\"bitstreamId\":%u,\"caps\":%u,\"caps2\":%u,\"blockWords\":%d",
-                     C64RE_FORMAT, sys ? sys->app_version() : "", machine_name(), (unsigned)trx_io_read32(TRX_ID), (unsigned)trx_rd8(TRX_CAPS),
-                     (unsigned)trx_rd8(TRX_CAPS2), TRX_BLOCK_WORDS);
+                     C64RE_FORMAT, SVC_HAS(SvcSys, sys, app_version) ? sys->app_version() : "", machine_name(), (unsigned)trx_io_read32(TRX_ID),
+                     (unsigned)trx_rd8(TRX_CAPS), (unsigned)trx_rd8(TRX_CAPS2), TRX_BLOCK_WORDS);
     uint8_t t[6];                                 // sys.wall_time: year - 2000, month, day, hour, minute, second
-    if (sys && sys->wall_time(t)) {
+    if (SVC_HAS(SvcSys, sys, wall_time) && sys->wall_time(t)) {
         int y = 2000 + t[0];
         if (y >= 2024) {
             n += r_snprintf(dst + n, cap - n, ",\"createdAt\":\"%04d-%02d-%02dT%02d:%02d:%02dZ\"", y, int(t[1]), int(t[2]), int(t[3]), int(t[4]),

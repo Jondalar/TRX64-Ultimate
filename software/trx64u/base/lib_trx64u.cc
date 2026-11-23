@@ -117,10 +117,10 @@ volatile uint8_t *c64u_win(int w)
     if (g_win[w]) {
         return g_win[w];
     }
-    const SvcIo *io = b33_io();
+    const SvcIo *io = g_api->io;
     uint32_t size = 0;
     volatile uint8_t *p = 0;
-    if (io && io->size >= offsetof(SvcIo, window) + sizeof(io->window) && io->window) {
+    if (SVC_HAS(SvcIo, io, window)) {
         p = io->window(g_win_def[w].name, &size);
     }
     if (p && size >= g_win_def[w].need) {
@@ -188,7 +188,7 @@ static void hook_base_setting_changed(const char *key)
 static const CoreHooks core_hooks = { sizeof(CoreHooks), c64_hook_init, c64_hook_release, 0, 0, c64_hook_media_flush, c64_hook_media_pending, hook_start,
                                       hook_menu_closed, hook_base_setting_changed, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject };
 
-// The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
+// The library's named exports (LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.
 static const LibExportDecl exports[] = {
     { "corehooks", 1, &core_hooks, sizeof(core_hooks) },
