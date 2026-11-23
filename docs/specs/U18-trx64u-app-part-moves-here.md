@@ -597,7 +597,8 @@ Nothing decided yet.
     the file; a `.c64re` load refused while the REU is on (A08); the require / prohibit comments; and `%.*s` (small_printf
     has no precision either: two refusals sprintf'd a pointer made from the length into fixed buffers) through bounded
     copies. The firmware builds without new warnings; its host tests pass (they do not cover these functions). Not
-    done here: the `.c64rering` dump's 4 MB peak (a rework). Open: a board test, and which release takes it (Alex's).
+    done here: the `.c64rering` dump's 4 MB peak (a rework). Board-tested by Alex 2026-11-23 (superproject branch
+    `fw-ring-fixes`, pipeline run 470, softload): all five pass. Open: which release takes it (Alex's).
   - **Tests and delivery, MultiCore's answers (T239.3 D21):** MultiCore's trx64u units leave their pipeline only after our
     stages run green (Alex: "Yes, like that"). Their pipeline checks nothing of our `.cor`: S8's first half (the `.cor`
     carries our libraries, the menu record and its tests) is ours; the second half (the shared image has no trx64u
