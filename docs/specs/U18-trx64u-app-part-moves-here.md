@@ -675,7 +675,9 @@ Nothing decided yet.
     tested on `t239.3` as it is (base 3.3, dev SDK `e4f99648`). Until T256: Timewarp is the base's timeline page with the
     bar over black, no still; Pause shows the base's PAUSED tag; our pause hint waits. The `ovl` group, `begin`/`end`
     and `still_map` are a draft that will change, and MultiCore's acceptance of `still_map` is on hold: nothing is built
-    against them. D25's changes on `t239.3` (other cores' TOML copies, the Amiga's mouse rows) do not touch trx64u.
+    against them. D25 on `t239.3` (`4c4d244f`): other cores' TOML copies and the Amiga's own mouse rows; for trx64u only its exported
+    operations change: the base registers `mouse.sens` and `mouse.accel` for every core again (MultiCore's golden
+    `ops_trx64u.txt` lists them after `led.load`). Nothing in our libraries or our menu changes.
   - **Two small monitor faults of the second run fixed (2026-11-23).**
     - Before the run control was taken (`mach_own`), trxmon reported runState from `M.running`, which `mach_init` zeroes,
       so "paused" while the C64 ran (the firmware's service the same). `rpc.c` `run_state()` now asks the hardware
