@@ -532,3 +532,11 @@ Nothing decided yet.
     base's own monitor binds TCP 4312 before ours; M5 the shared image's heap cannot take trx64u's 0x950000 (largest that
     fits 0x7cad3c; 3,985,552 B free after our libraries load, while a 64-entry `.c64rering` dump needs 4,349,536 B more
     than the ring's 1,486,893 B). Also: our hotkeys table drops the joystick swap key; nothing writes a paddle swap.
+  - **M1-M5 (MultiCore, by Alex's delegation):** all five confirmed in their code; fixes built on t239.3, in test, the
+    image changes, the headers and the dev SDK stay. M1 the record path waits for the hand-over medium (USB, at most
+    10 s); M2 a record core gets the base's own groups (diag, online always; the 1541 group when the record's caps name
+    `drive_a`, which ours must keep); M3 the AppHost and the machine groups are installed before the first reset, so
+    init and start get io, ops, c64, trx and net; M4 the base's monitor serves only a core without a hooks library, port
+    4312 is ours. M5: our `.c64rering` dump streams entry by entry (materialize, write, free), sized against the largest
+    free block; the shared image's heap does not grow; within that, the order fix with the shorter time (a seek-back on
+    FAT is cheap, a second pass costs a materialize per entry). The firmware's dump gets the same fix (Alex's, D6).
