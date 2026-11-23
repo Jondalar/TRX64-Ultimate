@@ -83,7 +83,8 @@ static const uint8_t fast_org[47] = { 0xe6, 0xc2, 0xb1, 0xc1, 0xaa, 0xa9, 0x55, 
 static uint8_t kernal_copy[C64_KERNAL_BYTES];
 static bool kernal_known, kernal_patched;
 
-// c64.cc calls this with every KERNAL image it puts into the aperture: the copy is what the patch is made against (the aperture is write only)
+// c64.put_kernal (c64core.cc) calls this with every KERNAL image it puts into the aperture: the copy is what the patch is made against (the aperture is write
+// only)
 void trx64u_kernal_put(CoreCtx *, const uint8_t *data, uint32_t n)
 {
     if (n != C64_KERNAL_BYTES) {

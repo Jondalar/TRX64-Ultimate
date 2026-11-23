@@ -1,12 +1,14 @@
 // The trx64u base library (U18 D5): its entry, its record, its core hooks and what its files share (trx64u_lib.h). The record is one list of operations and
-// one of state values (LibRecord takes one of each): those of trx64u_ops.cc and of u64cfg.cc, which registered themselves as two contributors ("trx64u",
-// "u64cfg") in the core application. A library has no contributor name of its own to give: the loader registers everything under the library's name, "trx64u".
+// one of state values (LibRecord takes one of each): those of trx64u_ops.cc, of u64cfg.cc and of c64core.cc (the C64 descriptor's code), which registered
+// themselves as three contributors ("trx64u", "u64cfg", "c64") in the core application. A library has no contributor name of its own to give: the loader
+// registers everything under the library's name, "trx64u".
 #include "trx64u_lib.h"
 #include "libfmt.h"
 #include "core_hooks.h"
 #include "c64u_regs.h"
 #include "trx64u_ops.h"
 #include "u64cfg.h"
+#include "c64core.h"
 #include <string.h>
 
 const LibApi *g_api;
@@ -181,8 +183,9 @@ static void hook_base_setting_changed(const char *key)
     }
 }
 
-// init, release, warm_reset, cold_start, media_flush, media_pending come with c64.cc (the C64 descriptor's hooks), which moves into this library later.
-static const CoreHooks core_hooks = { sizeof(CoreHooks), 0, 0, 0, 0, 0, 0, hook_start, hook_menu_closed, hook_base_setting_changed };
+// init, release, media_flush, media_pending: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no warm_reset and no cold_start).
+static const CoreHooks core_hooks = { sizeof(CoreHooks), c64_hook_init, c64_hook_release, 0, 0, c64_hook_media_flush, c64_hook_media_pending, hook_start,
+                                      hook_menu_closed, hook_base_setting_changed };
 
 // The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.
@@ -203,6 +206,15 @@ static const ArgSpec dma_prg_args[] = { ARG_PATH("path"), ARG_INT("mode", 0, 2) 
 static const ArgSpec dma_mount_args[] = { ARG_PATH("path"), ARG_INT("run", 0, 1) };
 static const ArgSpec dma_sidcrt_args[] = { ARG_BLOB("data") };
 static const ArgSpec dma_reu_args[] = { ARG_INT("offset", 0, 0xFFFFFF), ARG_BLOB("data") };
+static const ArgSpec rom_arg[] = { ARG_BLOB("data") };
+static const ArgSpec freeze_arg[] = { ARG_INT("value", 0, 1) };
+static const ArgSpec load_args[] = { ARG_PATH("path"), ARG_INT("start", 0, 0xFFFF) };
+static const ArgSpec t64_args[] = { ARG_PATH("path"), ARG_INT("index", 0, 255) };
+static const ArgSpec rom_set_args[] = { ARG_PATH("path"), ARG_INT("which", 0, 2) };
+static const ArgSpec text_arg[] = { ARG_STRING("text", 63) };
+static const ArgSpec dma_write_args[] = { ARG_INT("address", 0, 0xFFFF), ARG_BLOB("data") };
+static const ArgSpec mem_read_args[] = { ARG_INT("address", 0, 0xFFFF), ARG_INT("length", 1, OP_DATA_MAX) };
+static const ArgSpec mem_write_args[] = { ARG_INT("address", 0, 0xFFFF), ARG_STRING("data", 254) };
 
 static const LibOpDecl ops[] = {
     // trx64u_ops.cc
@@ -254,6 +266,27 @@ static const LibOpDecl ops[] = {
     { "u64.set_palette", file_name_arg, 1, op_palette_default },
     { "u64.power_off", 0, 0, op_power_off },
     { "u64.power_cycle", 0, 0, op_power_cycle },
+    // c64core.cc: what desc.toml names (put_op, service_op, type_op, run_op), the program and cartridge runs of the menu, the base's "Run with App" (MultiCore
+    // PRG_APP_OP), the Library's T64 list (menuvlist.cc), the DMA service (dmasvc.cc) and the machine's memory (MultiCore memops.h)
+    { "machine.read_mem", mem_read_args, 2, c64_mem_read },
+    { "machine.write_mem", mem_write_args, 2, c64_mem_write },
+    { "c64.put_basic", rom_arg, 1, c64_put_basic },
+    { "c64.put_kernal", rom_arg, 1, c64_put_kernal },
+    { "c64.put_char", rom_arg, 1, c64_put_char },
+    { "c64.set_freeze_mode", freeze_arg, 1, c64_freeze_mode },
+    { "c64.run_prg", path_arg, 1, c64_run },
+    { "files.run_with_app", path_arg, 1, c64_run_with_app },
+    { "c64.load_prg", load_args, 2, c64_load },
+    { "c64.run_crt", path_arg, 1, c64_run_crt },
+    { "c64.dma_prg", path_arg, 1, c64_dma },
+    { "dma.write", dma_write_args, 2, c64_dma_write },
+    { "dma.kernal", rom_arg, 1, c64_put_kernal },
+    { "c64.run_t64", t64_args, 2, c64_run_t64 },
+    { "c64.dma_t64", t64_args, 2, c64_dma_t64 },
+    { "c64.set_rom", rom_set_args, 2, c64_set_rom },
+    { "c64.remove_cart", 0, 0, c64_remove_cart },
+    { "c64.service", 0, 0, c64_service },
+    { "c64.type_script", text_arg, 1, c64_type },
 };
 
 static const LibStateDecl states[] = {
@@ -310,6 +343,10 @@ static const LibStateDecl states[] = {
     { "u64.sid_map1", state_sid_map1 },
     { "u64.sid_map2", state_sid_map2 },
     { "u64.sid_map3", state_sid_map3 },
+    // c64core.cc
+    { "c64.program", c64_prg_name },
+    { "c64.pending", c64_prg_pending },
+    { "c64.program_path", c64_prg_path },
 };
 
 // lib.ld puts this section first, so the entry is at offset 0 of the image

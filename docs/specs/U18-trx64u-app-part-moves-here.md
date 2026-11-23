@@ -438,3 +438,18 @@ Nothing decided yet.
     library's account, also when another library calls it through an export (under 3.2 a ring block kept from a monitor
     call would be freed under the ring when the monitor unloads); our declared figures already fit. 3.3 also matches an
     export on its exact major and logs a find at major 0.
+  - **c64.cc comes to us:** the trx64u descriptor's data is in `base/desc.toml` in MultiCore's record-6 data format
+    (`[core]` TRX2, `[video]`, `[freeze]`, `[hotkeys]`, `[mount] names = ["Drive A", "Cartridge"]`, `[[report_reg]]`,
+    `[mouse]`, four `[[rom]]`; taken from their c64.cc, which served only trx64u), next to the windows. Its hooks are in
+    our corehooks (`base/c64core.cc`): init (power-on keys, mode reset, the drive reset through `drive.reset` when "Resets
+    when C64 resets" is on, SID cancel, player end, the job and program cleared), release, media_flush / media_pending
+    (cbm1541's). All 19 of c64.cc's operations and 3 states are ours (ops 66, states 54), so the ROM puts, the
+    associated config load and the SID service are internal calls; c64_go.cc is ported whole (`base/c64_go.*`, on the io
+    group), with t64_load and the parts of MultiCore's shared program loader cbm_prg that c64.cc used (a copy: open with
+    MultiCore whether they export it). "Run with App" borrows its buffer instead of a static 64 KB. Image + bss 212,500 B
+    (a 65,564-byte static program buffer, as in c64.cc). descrec: SDK 0.2.0 does not know the data sections (t239.3's
+    does); the file without `[[window]]` compiles there, merged with `menu.toml` without `[[key]]` 65,638 B. Open with
+    MultiCore: CoreHooks has no mount-slot functions (their descrec refuses `[mount]` without them, and
+    `ctx.media_source` depends on them); no `[core]` key names the library that provides "corehooks"; cbm1541 has no
+    drive reset; `menuvlist.cc` names our T64 operations in generic code (D24); the init hook needs io and settings at the
+    first boot reset or the power-on keys are lost.

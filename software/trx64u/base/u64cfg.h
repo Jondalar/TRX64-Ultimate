@@ -61,8 +61,9 @@ const char *state_sid_map3(CoreCtx *c);
 // The mixer's registers are write only: the SIDs are silenced through them and given back from the settings (Gideon u64_mute_sids / unmute). Nothing calls
 // the two (nor did anything in the core application at TRX64U-MultiCore 3b8e2955): a freeze hook of this library would.
 void u64cfg_mute_sids(void);
-// T228 R21 (FW u64_config.cc:1277-1283): CTRL+P / CTRL+N held at power-on = PAL / NTSC for this start only (the setting is overridden, never stored). Once per start.
-void u64cfg_power_on_keys(CoreCtx *c);
+// T228 R21 (FW u64_config.cc:1277-1283): CTRL+P / CTRL+N held at power-on = PAL / NTSC for this start only (the setting is overridden, never stored). Once per
+// start; the init hook calls it (c64core.cc).
+void u64cfg_power_on_keys(void);
 void u64cfg_restore_mixer(CoreCtx *c);
 
 // The C64's paddle swap from bit 0 of the position of "Joystick Input" (the base's setting, svc_settings.h), read through the settings group. The core

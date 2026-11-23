@@ -1,5 +1,6 @@
-// The C64U's registers this library reads and writes, as offsets: into the blocks the base's io group reaches by member (svc_io.h, base 3.3: cart_rd /
-// cart_wr, bus_wr, stop, mode_reset, ram_memonly, video_format, rom_write) and into the register windows of the bitstream that io.window hands out by name.
+// The C64U's registers this library reads and writes, as offsets: into the blocks the base's io group reaches by member (svc_io.h, base 3.3: rd / wr of
+// the core window, cart_rd / cart_wr, bus_wr, stop, mode_reset, ram_memonly, video_format, rom_read / rom_write) and into the register windows of the
+// bitstream that io.window hands out by name.
 // They are ours (U18; MultiCore, round 2's open points: the blocks outside the core window are windows of our API TOML, name / address / size: desc.toml)
 // and no other source file of the library names a register or an address; the windows' addresses are in desc.toml. The numbers are the bitstream's as
 // the firmware names them (software/ultimate-app/software/system/u64.h, u2p.h, io/c64/c64.h). The ring library names the C64U_CART_* and C64U_BUS_*
@@ -57,7 +58,33 @@
 
 #define VIDEO_FMT_RGB_OUTPUT    0x04  // C64_VIDEOFORMAT
 
-// ---- the ROM aperture: io.rom_write (FW U64_ROMS_BASE): BASIC at +0, KERNAL at +0x2000, each 8 KB; CHAR 4 KB -----------------------------------------
+// ---- the core window: io.rd / io.wr, one byte each; a 32-bit register is four bytes little endian, byte 3 commits a write, byte 0 latches a read --------
+// (trx_sys.v, trx_io.v; the same offsets as MultiCore's coreapp/cores/c64_regs.h, which c64.cc and c64_go.cc used before they moved here)
+#define C64U_CAPS             0x004   // b1 the state bus, b3 the debug page
+#define C64U_CAPS_STATEBUS    0x02
+#define C64U_CAPS_DEBUG       0x08
+#define C64U_CAPS2            0x005   // b2 the CPU write path
+#define C64U_CAPS2_CPUWRITE   0x04
+#define C64U_GATE_CTRL        0x100   // 32 bit; b0 FRZ: C64_STOP pauses the whole machine, not only the CPU
+#define C64U_GATE_FRZ         0x01
+#define C64U_GATE_STATUS      0x101   // the byte that holds b8 (halted) of GATE_CTRL at bit 0
+#define C64U_GATE_HALTED      0x01
+#define C64U_DBG_OWNER        0x118   // 32 bit; b0: the debugger owns run control, C64_STOP stops nothing
+#define C64U_SB_ADDR          0x1000  // 32 bit; {chip 11:7, word 6:0}
+#define C64U_SB_DATA          0x1004  // 32 bit; a read or a write moves SB_ADDR on by one word
+#define C64U_SB_STATUS        0x1008  // 32 bit; b0 the gate is shut, b1 a write was refused (a write clears b1)
+#define C64U_SB_LOAD          0x100C  // 32 bit; b1: the staged CPU words load at the next opening edge; read: still armed
+#define C64U_DBG_CMD          0x3000  // 32 bit
+#define C64U_DBG_STATUS       0x3008  // 32 bit
+#define C64U_DBG_IPC_SET      0x3018  // 32 bit; {valid 24, opcode 23:16, PC 15:0}: what the debug block reports as the PC
+#define C64U_CMD_PAUSE_IB     0x02
+#define C64U_CMD_RUN          0x03
+#define C64U_ST_SHUT          0x01
+#define C64U_ST_AT_IB         0x04
+
+// ---- the ROM aperture: io.rom_write (FW U64_ROMS_BASE): BASIC at +0, KERNAL at +0x2000, each 8 KB; CHAR 4 KB at +0x4000 ------------------------------
+#define C64_ROM_BASIC    0x0000u
+#define C64_ROM_CHAR     0x4000u
 #define C64_ROM_KERNAL   0x2000u
 #define C64_BASIC_BYTES  8192u
 #define C64_KERNAL_BYTES 8192u

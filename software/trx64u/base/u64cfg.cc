@@ -464,7 +464,7 @@ int fx_audio(CoreCtx *, const OpArgs &, OpOut &)
     return OPE_OK;
 }
 
-void u64cfg_power_on_keys(CoreCtx *)
+void u64cfg_power_on_keys(void)
 {
     static bool done;
     if (done) {
@@ -483,7 +483,7 @@ void u64cfg_power_on_keys(CoreCtx *)
     }
     int mode = ((m[key_p >> 3] >> (key_p & 7)) & 1) ? 0 : ((m[key_n >> 3] >> (key_n & 7)) & 1) ? 1 : -1;   // PAL = 0, NTSC = 1: the first two values of System Mode
     if (mode >= 0) {
-        setting_override("System Mode", mode);                     // not applied here: c64.cc calls this in its init hook, before the settings are applied
+        setting_override("System Mode", mode);                     // not applied here: the init hook (c64core.cc) calls this before the settings are applied
         lib_logf("[u64cfg] power-on key: %s for this start", mode ? "NTSC" : "PAL");
     }
 }
@@ -1730,7 +1730,7 @@ int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
     c64_bus_wr(C64U_BUS_SPEED_UPDATE, 1);
     // serial bus, burst mode, the parallel cable
     c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_INT_CONNECTORS, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
-    // the case LEDs' sources: the high nibble LED 1 ("LED Select Bot"), the low nibble LED 0 ("LED Select Top"); a base without the member writes nothing
+    // the case LEDs' sources: the low nibble LED 1 ("LED Select Top"), the high nibble LED 2 ("LED Select Bot"); a base without the member writes nothing
     const SvcBoard *b = b33_board();
     if (b && b->size >= offsetof(SvcBoard, case_led_select) + sizeof(b->case_led_select) && b->case_led_select) {
         b->case_led_select((uint8_t)((V(K_LED1, 4) << 4) | V(K_LED0, 0)));
