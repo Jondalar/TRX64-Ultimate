@@ -630,3 +630,13 @@ Nothing decided yet.
     once the ring is full, which shifted every index while Timewarp kept the shown frame by index (LEFT stayed, RIGHT
     jumped 2, "Resume here" resumed one frame late); `go_to` now finds the frame again by its seq. Image + bss: base
     212,860 B, ring 148,360 B.
+  - **Where the Timewarp still is drawn (MultiCore, by Alex's delegation): our library, through a pull hook.**
+    CoreHooks gets `int (*menu_still)(const CoreStillGeom *g, CoreStill *out)` after `menu_video` (major 1, append only).
+    The base calls it while `menu_video` is on, when the timeline opens and after every scrub step, on the main loop
+    without the core lock; it hands the canvas (960 x 540) and where it lands on the HDMI frame, we answer with an RGB565
+    rectangle in our memory, which the base places under the bar as an LVGL image. We draw it as the firmware's
+    `draw_still` does: canvas pixel -> frame pixel -> the scaler window (our HDMI table, from our own row and scale
+    settings) -> VIC pixel. The buffer (at most 1,036,800 B, about 780 KB at 1080p Fit, plus the ~52 KB still copy) lives
+    on our heap from `menu_video(1)` to `menu_video(0)` and fits the ring's declared peak; no block, no picture (answer
+    0). The ring copies the still from DDR2 during the scrub op under the lock; `menu_still` only converts that copy.
+    Not chosen: the base drawing (our format), a gateware switch (a feature, Alex's), black. Waits for MultiCore's header.
