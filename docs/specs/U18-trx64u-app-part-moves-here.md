@@ -559,3 +559,18 @@ Nothing decided yet.
     commit `e67efa83` on branch `u18` of the application submodule (Gitea, not main); the superproject's `u18` points
     the submodule at it, and `software/trx64u/pending/` is gone. The board test (F4 dump / ringdump with progress,
     RUN/STOP removes the file, the same frame over RPC byte-identical) is still open.
+  - **Second ue2emu run (2026-11-23, MultiCore's image `7ca3c1b6` with M1-M4 fixed, the real `desc.toml`, the `.cor` on
+    the stick):** the base waits for the stick (1.8 s), identifies TRX2 TRX64U, loads our three libraries (no menu entry
+    refused), puts the 1541 ROM, runs init and start (SID detect, our monitor serves TCP 4312, the ring logs), BASIC READY.
+    Freeze pauses cleanly (menu open 0.7 s after the request, close 51-100 ms); `menu_closed` runs `ring.unfreeze`.
+    F1/F3/F5/F7/F8 render; the Monitor screen answers through the poll queue; Timewarp holds frames and scrubs (66 ms a
+    step); RPC on 4312 from the host answers (`ping`, `session/read_memory`; `monitor/exec` behind the token gate as
+    designed). Save the ring (64 entries) steps with progress: sized 2.9 s, materialized 2.1 s, written 27.2 s (2.9 s of it
+    file writes), 6,242,746 B; it parses (gzip CRC, JSON, 64 entries). Save frame (format 2) saves and loads back. Times are
+    ue2emu's emulated milliseconds, not the board's: per key F5 cursor update 7-8 ms, render+flush 27-42 ms; F1 5-7 /
+    20-24 ms; entering F5 560 / 436 ms. Open: Timewarp shows no picture behind its bar (the base fills the screen with
+    the key colour, and c64_basic blanks the C64 picture while the whole machine is paused; the firmware draws the
+    captured still instead: MultiCore's base); the `.c64rering` load runs out of memory (the format 1 load holds the file
+    and its JSON: the streaming step decided above); our format 1 machine dump loads back as "No cpu node" (to be
+    investigated); writing a ring entry costs about 0.4 s of CPU (to be profiled); after an RPC session opens, the
+    monitor reports runState "paused" while the C64 runs; trxmon's version reads "unknown" (no `TRXMON_BUILD`).
