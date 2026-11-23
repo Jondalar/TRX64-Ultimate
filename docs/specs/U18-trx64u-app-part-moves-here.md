@@ -551,3 +551,7 @@ Nothing decided yet.
     the host over a synthetic log; not run in ue2emu or on the board. Image + bss 138,528 B. Open: a format 1 load
     holds the whole file and its unpacked JSON at once (the next candidate for the same treatment); `heap_peak` keeps
     the earlier ceiling until that is decided. The firmware's dump needs the same change (Alex's, D6).
+  - **The format 1 load (MultiCore, by Alex's delegation):** it streams too (gzip and JSON parsed node by node), after
+    the ue2emu re-run; the wide `heap_peak` stays until then and drops to keep + 1,444,975 in the same change. api.md
+    4.4.12.4 now promises that a write past the end grows the file (the gap undefined until written: FAT leaves old
+    cluster data, the network medium zero-fills).
