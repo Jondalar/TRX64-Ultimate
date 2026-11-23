@@ -483,3 +483,9 @@ Nothing decided yet.
     `run_image` included). `ctx.mount_notify` takes the slot's name (a shared library cannot know a core's `[mount]`
     order), from any task (it only marks the slot; the base reads `slot_spec` on its next pass). Both trx64u slots are
     backed by shared libraries, so our code calls it nowhere.
+  - **c64cart `require` / `prohibit`:** MultiCore's base keeps no cartridge definition, so both answer 0 ("not known by
+    the base", 3.3 contract). Checked: neither the library's ring nor the firmware's reads them on a load (they are
+    parsed into the load's want record and never used), so 0 stays and no table by CRT type is built. A `.c64re` the
+    library writes then carries 0 where the firmware writes the definition's flags. The comments that claimed a load
+    rebuilds the cartridge definition from them are corrected in the library; the firmware's frozen copy keeps the same
+    wrong comment (`trx_c64re.cc:1066`, `:1456`).

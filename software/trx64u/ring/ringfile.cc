@@ -1379,8 +1379,8 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     }
     n += r_snprintf(dst + n, cap - n, ",\"machineState\":{");
     if (cart) {
-        // require/prohibit come along because a load without the .crt has to build the same cartridge definition, which the firmware derives from the
-        // CRT header (the EasyFlash subtype among others). Carried, not guessed.
+        // require/prohibit: the cartridge definition's flags as c64cart reports them (0 when the base does not know them). Written for the file's
+        // reader; no load here reads them back (TrxMachineWant parses them and nothing uses the fields).
         n += r_snprintf(dst + n, cap - n, "\"cartridge\":{\"type\":%u,\"bytes\":%u,\"require\":%u,\"prohibit\":%u,\"source\":\"",
                         (unsigned)io_cart_rd(C64U_CART_TYPE), (unsigned)rom_len, (unsigned)g_src.cart_require, (unsigned)g_src.cart_prohibit);
         n += json_str(dst + n, cap - n, g_src.cart_src);
@@ -2202,8 +2202,8 @@ static char *gunzip(const uint8_t *p, uint32_t len, uint32_t *out_len, const cha
 struct TrxMachineWant {
     bool     present;               // the file carries a machineState at all
     int      cart_type;             // C64_CARTRIDGE_TYPE at the freeze, -1 for none
-    uint16_t cart_require;          // the cartridge definition's flags, so a rebuild without
-    uint16_t cart_prohibit;         // the .crt does not have to guess them
+    uint16_t cart_require;          // the header's require / prohibit, parsed and carried;
+    uint16_t cart_prohibit;         // no load step reads them
     char     cart_src[144];         // the .crt it came from, "" when unknown
     char     drive_img[144];        // what was in drive A, "" for nothing
     uint8_t  drive_mode;            // 0 read/write, 1 read-only, 2 unlinked

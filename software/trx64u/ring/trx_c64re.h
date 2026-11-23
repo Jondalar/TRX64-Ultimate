@@ -22,7 +22,7 @@ struct TrxC64reSrc {
     void (*rom_read)(void *ctx, uint32_t off, uint8_t *dst, uint32_t n);
     void *rom_ctx;
     const char *cart_src;
-    uint16_t cart_require;      // the cartridge definition's require / prohibit flags (the header's machineState.cartridge carries them)
+    uint16_t cart_require;      // c64cart's require / prohibit (0: not known by the base), written into machineState.cartridge; no load reads them
     uint16_t cart_prohibit;
     bool cart_writable;         // the C64 can change the cartridge's flash or EEPROM: a .c64rering entry carries the image (cartFlash)
     const uint8_t *eeprom;
