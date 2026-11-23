@@ -1,6 +1,6 @@
 # The API TOML of the trx64u core (D7: menu.toml is its UI TOML). tools/descrec.py compiles both into the core's description record (record 6 of
-# trx64u.cor: cor_pack.py pack --desc menu.toml --desc desc.toml, refusing a table or key that is in both); MultiCore's pipeline packs it. This build does
-# not read the file.
+# trx64u.cor: cor_pack.py pack --desc menu.toml --desc desc.toml, refusing a table or key that is in both; U18 D1: our package delivers the .cor). The
+# library build does not read the file.
 #
 # ---- the descriptor's data (T239.3 D17, record version 6) -------------------------------------------------------------------------------------------
 # What MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09) held as the TRX2 descriptor `c64_desc`, as the sections of their tools/descrec.py. Its code is
@@ -48,13 +48,14 @@ mask = 0x01
 timeout_ms = 200
 word = true
 
-# CTRL + RESTORE menu, + R reset, + "+" / "-" volume, + J swap joystick ports, + P picture mode, + D swap the disk of drive A without the menu (TRX-Ultimate
-# userinterface.cc:444-445). Keys as hotkeys.h: 0-63 = col * 8 + row, 64 = RESTORE, 255 = none (MultiCore hk_defaults.h hk_c64).
+# CTRL + RESTORE menu, + "+" / "-" volume, + R reset, + P picture mode, + D swap the disk of drive A without the menu (TRX-Ultimate userinterface.cc:444-445).
+# Keys as hotkeys.h: 0-63 = col * 8 + row, 64 = RESTORE, 255 = none; actions in the order of HKA_* (menu, volume up, volume down, reset, swap joystick,
+# picture, core). No swap joystick: the core names no "kbd_joystick" cap, so the base has no "Joystick Input" for it, and the menu has no "Joystick ports"
+# (the base's fallback when swap_key is not given, hotkeys.cc hk_swap_joystick).
 [hotkeys]
 mod = [58, 255]
-actions = [64, 40, 43, 17, 34, 41, 18]
+actions = [64, 40, 43, 17, 255, 41, 18]
 vol_key = "Vol Master"
-swap_key = "Joystick Input"
 own_keys = [56, 59, 8, 11, 16, 19, 24, 27, 32, 35]          # the digit keys: CTRL + 1..8 are the colours and CTRL + 9 / 0 reverse on / off
 core_op = "drive.swap"
 core_key = "Hotkey swap disk"

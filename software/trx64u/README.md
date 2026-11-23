@@ -15,9 +15,10 @@ The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/
 
 The three libraries build on MultiCore's dev SDK 0.3.0 (base 3.3, not released yet): every link closes, the constructor
 check passes, and each packs into a `.u2a` within its declared budget. The core's description (`base/menu.toml`, the UI
-TOML, and `base/desc.toml`, the API TOML) compiles into record 6. A whole `trx64u.cor` cannot be packed from the SDK
-alone yet (the bitstream, the trx64u application image and the base register list are not in it). Nothing has run
-yet; the first run is in ue2emu, then the board (U18 §5).
+TOML, and `base/desc.toml`, the API TOML) compiles into record 6, and `cor_pack.py pack-large` packs a whole
+`trx64u.cor` from the SDK, our three libraries, the two TOMLs and the release bitstream (U18 §5 has the command). First
+run in ue2emu on MultiCore's shared 3.3 image (2026-11-23): the core is identified from our record 6 and all three
+libraries load; the start stops on gaps in the base (U18 §5). Not on the board yet.
 
 The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
 (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from; `coreapp/src` and `coreapp/cores/trx64u/menu.toml`), and

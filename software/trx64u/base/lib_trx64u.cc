@@ -173,20 +173,11 @@ static void hook_menu_closed(void)
     }
 }
 
-// base_setting_changed: the base applied one of its own settings, `key` its key (core_hooks.h: after each change, and after the start hook once for each
-// base-owned setting; lock task). Of those, this core's hardware follows "Joystick Input": its paddle swap (u64cfg.cc); the keyboard joystick is the
-// base's. Keys compare without case, as the base's settings do.
-static void hook_base_setting_changed(const char *key)
-{
-    if (key && !strcasecmp(key, "Joystick Input")) {
-        u64cfg_paddle_swap();
-    }
-}
-
 // init, release, media_flush, media_pending and the mount slots: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no
-// warm_reset and no cold_start).
+// warm_reset and no cold_start). base_setting_changed is null: the core follows none of the base's settings. It names no "kbd_joystick" cap, so the base
+// has no "Joystick Input" for it, and the bitstream has no paddle swap register (designs/c64_basic/ultimate_sys.vhd decodes no 0x1A in the C64 I/O page).
 static const CoreHooks core_hooks = { sizeof(CoreHooks), c64_hook_init, c64_hook_release, 0, 0, c64_hook_media_flush, c64_hook_media_pending, hook_start,
-                                      hook_menu_closed, hook_base_setting_changed, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject };
+                                      hook_menu_closed, 0, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject };
 
 // The library's named exports (LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.

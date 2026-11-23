@@ -1696,18 +1696,7 @@ bool u64cfg_sid_autoconfig(CoreCtx *, int count, const uint8_t *base, const uint
     return true;
 }
 
-// ---- the rest: joystick, user port, turbo, serial bus, LEDs ---------------------------------------------------------------------------------
-// "Joystick Input" is a setting the base owns and applies (svc_settings.h: the keyboard joystick, its port and WASD); the paddle swap of this core
-// follows bit 0 of its position. The base calls the core hook base_setting_changed with the key "Joystick Input" after it applied the setting, and
-// once after the start (lib_trx64u.cc), which writes the swap here; no group of this menu writes it.
-void u64cfg_paddle_swap(void)
-{
-    int joy = setting_ix("Joystick Input", -1);                     // not in this menu: settings.cfg_value (setting.cc)
-    if (joy >= 0) {
-        c64_bus_wr(C64U_BUS_PADDLE_SWAP, (uint8_t)(joy & 1));
-    }
-}
-
+// ---- the rest: user port, turbo, serial bus, LEDs -------------------------------------------------------------------------------------------
 static const uint8_t speedregs_regvalues[] = { 0x00, 0x00, 0x01, 0x05 };
 static const uint8_t c_iec_connectors[] = { 0x70, 0x60, 0x30, 0x50 };      // 4: ext, 5: ult, 6: cia
 

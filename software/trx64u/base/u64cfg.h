@@ -66,10 +66,6 @@ void u64cfg_mute_sids(void);
 void u64cfg_power_on_keys(void);
 void u64cfg_restore_mixer(CoreCtx *c);
 
-// The C64's paddle swap from bit 0 of the position of "Joystick Input" (the base's setting, svc_settings.h), read through the settings group. The core
-// hook base_setting_changed calls it (lib_trx64u.cc). Without the settings group nothing is written.
-void u64cfg_paddle_swap(void);
-
 // The command interface's palette and SID map commands (the export "uci" through UciHooks): what 0 reads the 16 colours, 1 sets all, 2 sets colour idx from
 // rgb[0], 3 resets; the SID map bytes.
 void u64cfg_palette(int what, uint8_t idx, uint8_t (*rgb)[3]);

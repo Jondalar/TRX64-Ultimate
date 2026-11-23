@@ -2,7 +2,7 @@
 // position of the value in force, an override included. The index of each key of this library's menu is looked up once with settings.find and kept while
 // settings.generation is unchanged (a new Settings object or a rebind to another config counts it up, and every kept index is looked up again). setlists.h
 // has the choice settings of the same menu.toml: which keys the menu has, their number of values, a range's low end and base, and the labels.
-// A key the menu does not have (a setting of the generic application, "Joystick Input") is read with settings.cfg_value.
+// A key the menu does not have (a setting of the generic application) is read with settings.cfg_value.
 #include "trx64u_lib.h"
 #include <string.h>
 

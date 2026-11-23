@@ -517,3 +517,18 @@ Nothing decided yet.
     it builds one from our record 6 and binds our hooks); it has never run. In ue2emu the host's bitstream load is not
     emulated and the core app reads only records 6, 7 and 8 of the `.cor`; the `.cor` is still packed with the real
     bitstream, so the same file later goes to the board.
+  - **First run in ue2emu (2026-11-23, dev SDK `d6f50a0d`, shared 3.3 `coreapp.app`, ue2emu 0.7.4 headless):**
+    `trx64u.cor` packed with `cor_pack.py pack-large` (the release bitstream of main-d94aa68e, sha256 `c950aa55…` as
+    MultiCore's pin; `--app` the SDK's `coreapp.bin`; record 8 the three SID-player programs; 4,173,504 B; `check`
+    passes). With the `.cor` on the SD card the base identifies TRX2 TRX64U from our record 6 and loads all three
+    libraries ("3 loaded, 0 refused": budgets, needs, exports pass); with a diagnostic record without the 1541 ROM entry
+    the C64 reaches READY and the menu opens (F5 our settings, the Monitor screen answers, Timewarp opens). Our code
+    showed no fault. Found in MultiCore's base (`d6f50a0d`): M1 the record-described path opens the `.cor` before the USB
+    stick has enumerated (no medium wait), so a `.cor` on the stick is never read; M2 a record-described core gets none
+    of the base's own operation groups (cbm1541, online, diag), so `drive.put_rom` is missing, the ROM step loops and 27
+    menu entries are refused; M3 the init and start hooks run before the libraries get their context and groups
+    (`api->io` null, `ops->call` answers "No operations here."), so `ring.init` fails, our windows are not written and
+    the SID detection that sets the freeze's stop mode does not run (every menu open: "no PAUSED after 200 ms"); M4 the
+    base's own monitor binds TCP 4312 before ours; M5 the shared image's heap cannot take trx64u's 0x950000 (largest that
+    fits 0x7cad3c; 3,985,552 B free after our libraries load, while a 64-entry `.c64rering` dump needs 4,349,536 B more
+    than the ring's 1,486,893 B). Also: our hotkeys table drops the joystick swap key; nothing writes a paddle swap.

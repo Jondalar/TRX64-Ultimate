@@ -12,8 +12,8 @@
 # (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
 # Drive A and the cartridge port are media slots whose rows open the drive list (T212 D5); the generic items (Persist mounts, Enter home, Menu opens at, Home
 # directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the application's own and not declared here, and so are the menu's look, name squeeze and
-# navigation style, the keyboard joystick and the USB mouse (U18: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation Style, Joystick Input
-# and the five Mouse settings are the base's, svc_settings.h; their stored values carry over under the same keys). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
+# navigation style and the USB mouse (U18: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation Style and the five Mouse settings are the
+# base's, svc_settings.h; their stored values carry over under the same keys; "Joystick Input" is not offered: the core names no "kbd_joystick" cap). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
 # group's id ('_' is a space; not drawn when it repeats the tab's title). Nothing is saved to flash: every setting is written to the core's .cfg at once (D9-D11).
 
 # the machine line of F1 (T212 D13/D15): the values of these settings
