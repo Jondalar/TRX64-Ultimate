@@ -474,7 +474,12 @@ Nothing decided yet.
     never starts while the menu is open. `software/trx64u/pending/trxmon-ring-steps.patch` holds both trxmon changes.
   - **Mount-slot hooks, cbmprg, drive reset:** our corehooks implement `slot_spec` / `slot_mount` / `slot_eject`
     (slot 0 "Drive A" through cbm1541, slot 1 "Cartridge" through c64cart run / remove plus forgetting the program,
-    as c64.cc's MountSlots did); our ops that change a slot themselves call `ctx.mount_notify`; `desc.toml` names
+    as c64.cc's MountSlots did); `desc.toml` names
     `[core] hooks = "trx64u"`; the init hook resets drive A with `cbm1541.reset`. The copy of MultiCore's program loader
     is gone: placing, typing and relinking go through their export "cbmprg"; until a bundle carries it, Run PRG, Load
-    PRG, DMA, T64, Run with App and Mount & Run refuse with a reason. Image + bss 213,372 B.
+    PRG, DMA, T64, Run with App and Mount & Run refuse with a reason. Image + bss 213,004 B.
+  - **Who tells the base of a slot change (MultiCore, by Alex's delegation; contract `f5fc7128`):** the shared
+    libraries, for every change they make to their own slot (cbm1541 "Drive A", c64cart "Cartridge", `for_state` and
+    `run_image` included). `ctx.mount_notify` takes the slot's name (a shared library cannot know a core's `[mount]`
+    order), from any task (it only marks the slot; the base reads `slot_spec` on its next pass). Both trx64u slots are
+    backed by shared libraries, so our code calls it nowhere.

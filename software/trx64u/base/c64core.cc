@@ -755,16 +755,12 @@ int c64_run_crt(CoreCtx *c, const OpArgs &a, OpOut &o)
 {
     trx64u_load_assoc_cfg(c, a.s(0), false);
     int rc = cart_run(a.s(0), o.msg, o.msglen);
-    slot_changed(SLOT_CART);
     return rc ? OPE_FAILED : OPE_OK;
 }
 
 int c64_remove_cart(CoreCtx *, const OpArgs &, OpOut &o)
 {
     int rc = cart_remove(o.msg, o.msglen);
-    if (rc >= 0) {
-        slot_changed(SLOT_CART);
-    }
     return rc ? OPE_FAILED : OPE_OK;
 }
 
@@ -772,7 +768,8 @@ int c64_remove_cart(CoreCtx *, const OpArgs &, OpOut &o)
 // SLOT_DRIVE_A is the drive library's slot. SLOT_CART's spec is the path of the .crt in the port, and its mount is the Library's run without the .cfg:
 // the program that was running is gone with it. No mount here releases the machine: the drive's has no reset, and the cartridge's reset is the base's
 // machine.cold_reset, which while ctx.state has CTX_MEDIA_RESTORING leaves the machine held for the base to release. A mount or an eject asked for here
-// is the base's doing, so these do not call slot_changed.
+// is the base's doing. The shared libraries behind both slots tell the base of every change they make to their slot (ctx.mount_notify, by the slot's
+// name), so this library calls mount_notify nowhere.
 
 // `s` into buf: its length; 0 for none (buf ""); -1 when it does not fit in n - 1 bytes
 static int put_spec(const char *s, char *buf, int n)
@@ -857,12 +854,7 @@ int c64_hook_init(char *, int)
     trx64u_sid_cancel();
     const C64CartApi *k = X_GET(X_CART, C64CartApi, player_end);
     if (k) {
-        const C64CartApi *pa = X_GET(X_CART, C64CartApi, player_active);
-        bool was = pa && pa->player_active();
         k->player_end();
-        if (was && !pa->player_active()) {
-            slot_changed(SLOT_CART);
-        }
     }
     forget_program();
     return 0;

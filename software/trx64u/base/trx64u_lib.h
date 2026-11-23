@@ -45,16 +45,9 @@ static inline uint32_t ctx_state(void)
     return c ? c->state() : 0;
 }
 
-// The mount slots of this core, positions in desc.toml's [mount] list (core_hooks.h slot_*). slot_changed: a slot changed by this library's doing
-// (ctx.mount_notify; the base stores it for "Persist medium mounts" and the media sets). Nothing without the group or the member.
+// The mount slots of this core, positions in desc.toml's [mount] list (core_hooks.h slot_*). Changes to them are told to the base by the shared
+// libraries behind them (cbm1541, c64cart: ctx.mount_notify by the slot's name), not by this library.
 enum { SLOT_DRIVE_A = 0, SLOT_CART = 1 };
-static inline void slot_changed(int slot)
-{
-    const SvcCtx *c = b33_ctx();
-    if (c && c->size >= offsetof(SvcCtx, mount_notify) + sizeof(c->mount_notify) && c->mount_notify) {
-        c->mount_notify(slot);
-    }
-}
 
 // The DDR2 window of the core from offset 0 (io.ddr_read, io.ddr_write): the REU's memory. A write is complete on return. Without the group a read gives zeros.
 static inline void ddr_read(uint32_t off, void *p, uint32_t n)

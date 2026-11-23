@@ -47,9 +47,7 @@ static int drive_mount(const char *path, int mode, char *msg, int msglen)
     }
     char spec[FS_PATH_MAX + 12];
     snprintf(spec, sizeof(spec), "%s%s", mode == CBM1541_MODE_RO ? "ro " : mode == CBM1541_MODE_UNLINKED ? "unlinked " : "", path);
-    int rc = d->slot_mount(spec, msg, msglen);
-    slot_changed(SLOT_DRIVE_A);
-    return rc;
+    return d->slot_mount(spec, msg, msglen);
 }
 // The command interface's slot (uci.set_slot_enable, then set_slot_base at $DF1C when `at_df1c`); the export ignores both unless the core has the
 // capability "uci" and the board's probe found the interface.
@@ -302,7 +300,6 @@ int op_run_disk(CoreCtx *c, const OpArgs &a, OpOut &o)
     OpIn in[2] = { in_str("slot", a.s(0)), in_str("path", a.s(1)) };
     OpResult r;
     int rc = g_api->ops->call("drive.mount_run", in, 2, &r);
-    slot_changed(SLOT_DRIVE_A);
     snprintf(o.msg, o.msglen, "%s", r.msg);
     return rc ? OPE_FAILED : OPE_OK;
 }
@@ -660,7 +657,6 @@ static int swap_next(const char *cur, const char *dir, int mode, int delay_ms, S
                 return OPE_FAILED;
             }
             int rc = d->slot_eject(o.msg, o.msglen);                // c1541.cc:712: what the head wrote goes back to the file first
-            slot_changed(SLOT_DRIVE_A);
             if (rc) {
                 return OPE_FAILED;
             }
@@ -1577,7 +1573,6 @@ int op_sid_play(CoreCtx *, const OpArgs &a, OpOut &o)
         return OPE_FAILED;
     }
     int rc = k->run_image(sf->t.mus ? "MUS Player Cartridge" : "SID Player Cartridge", g_img, o.msg, o.msglen);
-    slot_changed(SLOT_CART);                                        // the player's cartridge is not the Library's: the slot reads empty until the reset ends it
     if (rc) {
         return OPE_FAILED;
     }
@@ -1670,7 +1665,6 @@ int op_dma_mount(CoreCtx *, const OpArgs &a, OpOut &o)
         OpIn in[3] = { in_str("slot", "iec:drive_a"), in_str("path", a.s(0)), in_str("mode", "rw") };
         rc = dma_call("drive.mount", in, 3, o);
     }
-    slot_changed(SLOT_DRIVE_A);
     return rc;
 }
 // SOCKET_CMD_RUN_CRT (FW :197-210, FileTypeCRT::execute_st): the cartridge is placed and the machine reset into it, as the Library's Run does.
