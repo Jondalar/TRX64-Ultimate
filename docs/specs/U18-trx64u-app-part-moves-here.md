@@ -489,3 +489,12 @@ Nothing decided yet.
     library writes then carries 0 where the firmware writes the definition's flags. The comments that claimed a load
     rebuilds the cartridge definition from them are corrected in the library; the firmware's frozen copy keeps the same
     wrong comment (`trx_c64re.cc:1066`, `:1456`).
+  - **Base 3.3 (dev SDK 0.3.0, MultiCore `t239.3-33` `79dbc77d`, not released):** serves the groups, net and job for
+    libraries, export calls on the provider's account, when_frozen polls, the complete CoreHooks, the shared exports,
+    `[[key]]` / `[[window]]` / `[[task]] job`, `--desc` twice. Our switch is running.
+  - **How the first run goes (MultiCore, by Alex's delegation):** MultiCore's coreapp tests and the menu simulator are
+    native Mac builds and cannot run a RISC-V `.u2a`. The menu simulator takes our UI TOML (`tools/menusim/run.sh c64
+    --toml <menu.toml> --ops <op names> --keys ... --stats`) with our states and ops as stubs: menu pixels and figures per
+    key against the built-in trx64u. Our code first runs in ue2emu (the emulator of the C64U_emu session) on the shared
+    3.3 `coreapp.app` with our `trx64u.cor` in a stick folder of our own (`--usb-dir`); whether the shared image starts
+    the trx64u machine at all is the first thing it shows. Then the board.
