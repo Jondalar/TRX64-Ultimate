@@ -683,3 +683,9 @@ Nothing decided yet.
     - The version said "unknown": `monitor/Makefile` now passes `TRXMON_BUILD` "in-trx64u", as the firmware's makefile
       passes "in-firmware".
     - Monitor image + bss 209,004 + 473,264 B.
+  - **First board run of `trx64u.cor` on base 3.3 (Alex, 2026-11-23): the menu is far too slow.** Open from the C64
+    5-8 s, category change 3-5 s, tab change 3-5 s; the cursor in a table as fast as in the other cores. Cause: the
+    `c64_basic` RISC-V had no data cache (MultiCore's host has one since its T133); the menu's work is the base's LVGL,
+    the same as the Amiga's (ue2emu PC sampling: our libraries had no measurable share). Fixed in the bitstream:
+    [U19](U19-app-riscv-caches.md), branch `rv-dcache` `54dc9f9e`. `trx64u_u19.cor` (same libraries as `4f3ba9f5`,
+    that bitstream) is packed for the board test.
