@@ -691,3 +691,6 @@ Nothing decided yet.
     the same as the Amiga's (ue2emu PC sampling: our libraries had no measurable share). Fixed in the bitstream:
     [U19](U19-app-riscv-caches.md), branch `rv-dcache` `54dc9f9e`. `trx64u_u19.cor` (same libraries as `4f3ba9f5`,
     that bitstream) is packed for the board test.
+  - **Board run of `trx64u_u19.cor` (Alex, 2026-11-23): the menu is acceptable, the U19 bitstream stays.** Alex: the
+    transition is good for now once `trx64u.cor` is built this way and the Gideon-based app exists as `.cfw`/`.ue2` and
+    `trx64g.cor`; polishing comes step by step after that.
