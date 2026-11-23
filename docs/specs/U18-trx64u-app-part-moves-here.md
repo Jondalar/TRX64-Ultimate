@@ -640,3 +640,10 @@ Nothing decided yet.
     on our heap from `menu_video(1)` to `menu_video(0)` and fits the ring's declared peak; no block, no picture (answer
     0). The ring copies the still from DDR2 during the scrub op under the lock; `menu_still` only converts that copy.
     Not chosen: the base drawing (our format), a gateware switch (a feature, Alex's), black. Waits for MultiCore's header.
+  - **Alex, 2026-11-23 (translated): an overlay over the running picture belongs in the base.** "That's ok. MultiCore
+    must allow an app to put an overlay over the running picture. It doesn't do that itself - I understand that, because
+    I never wanted it, to keep things simpler. But basically this has to go into the base and so into the SDK, or into a
+    library that is then used wherever it is needed." So `menu_still` is not to stay a Timewarp-only hook: it becomes one
+    user of a general overlay facility (a library or app puts pixels over the machine's picture, also while it runs), in
+    the base and the SDK or in a shared library. Its shape (service or library, push or pull, who owns the layer with the
+    menu closed, the still and the PAUSED tag as users) is MultiCore's to design, as advisor.
