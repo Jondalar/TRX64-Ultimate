@@ -48,6 +48,8 @@ struct TrxNodeState {
     uint8_t *ram;                   // in: 65536 bytes to fill
     uint8_t *col;                   // in: 1024 bytes to fill (low nibbles)
     uint8_t *cart;                  // in: TRX_CART_RAM_BYTES or NULL; out: NULL unless it was filled
+    int      ram_bytes;             // in: -1 to decode the ram node into ram here; else the bytes the caller decoded into it already
+    int      cart_bytes;            // in: -1 to read cartState.cartRam into cart here; else the bytes the caller decoded into it already
     uint16_t x;                     // in/out: the snap position (the base's, kept)
     int      line, cycle;           // out: the VIC position the file named (not restored)
     unsigned have;                  // out: TRX_NODE_*

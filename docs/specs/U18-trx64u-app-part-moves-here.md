@@ -606,3 +606,15 @@ Nothing decided yet.
     rebase / stay / split); what ships with the SDK for them (R9) goes to Alex after that sort. `menu_video`: base side
     in code (t239.3 `01595fea`, not pushed; api.md 9.7.13): called once per change of the layer's key colour, never twice
     with the same value, the first call an on; on for the timeline and for the PAUSED tag with the menu closed.
+  - **The format 1 load streams; the cpu node; the write time (2026-11-23, ring library):** `trx_inflate` is a streaming
+    inflater (16 KB input, a 32 KB window only for Huffman blocks); pass 1 reads the file once (SHA-256, gzip CRC and
+    ISIZE, a JSON scanner that picks the entry by `ring_pick`'s rules), pass 2 re-reads only the chosen checkpoint and
+    decodes `ram`, `cartFlash` and `cartRam` straight into the staged buffers. Peak for a 64-entry ring 12,483,561 ->
+    107,356 B (largest block 65,536); 168 cases old against new identical in a host harness. `heap_peak` drops to keep +
+    1,444,975 (the `.trxring` save) = 2,931,868, as decided; image + bss 148,224 B. A format 1 machine dump has no cpu
+    node by design (the 6510's registers cannot be read while paused): the library now loads it coarsely (CPU and CIAs
+    stay as the running machine has them), as TRX64's own restore does; frames and rings stay exact. The firmware refuses
+    such a file ("No cpu node", `trx_c64re_nodes.cc:281-284`). Write time: a CRC-32 table, inline base64, divisions by
+    10 as multiplies; per ring entry 380 -> 110 ms CPU in ue2emu, a 64-entry dump 32.2 -> 11.3 s, the files
+    byte-identical. In ue2emu a 6.2 MB ring loads back (pass 1 11.2 s, pass 2 0.3 s), the machine dump and a frame
+    load back. Open: pass 1's time; the CRC table's cost on the board's DDR2 is not measured.

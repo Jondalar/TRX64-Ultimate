@@ -279,47 +279,48 @@ const char *trx_c64re_from_nodes(const char *js, const jsmntok_t *t, int n, int 
     if (cp < 0) {
         return "No checkpoint in the file";
     }
-    int cpu = json_key(js, t, n, cp, "cpu");
-    if (cpu < 0) {
-        return "No cpu node";
-    }
-    int ram = json_key(js, t, n, cp, "ram");
-    if (!tok_ta(js, t, n, ram, st->ram, 65536)) {
+    if (st->ram_bytes < 0 ? !tok_ta(js, t, n, json_key(js, t, n, cp, "ram"), st->ram, 65536) : st->ram_bytes != 65536) {
         return "No ram node of 65536 bytes";
     }
     st->have |= TRX_NODE_RAM;
 
-    int pc = int(tok_int_or(js, t, json_key(js, t, n, cpu, "pc"), -1));
-    if (pc < 0 || pc > 0xFFFF) {
+    // Every node but ram is optional, as in TRX64's own restore (c64re_snapshot.rs: a node that is not there leaves that part of the machine as
+    // it is). A checkpoint without a cpu node - the machine dump of FW apps/c64re and of this library (ringfile.cc machine_rest), which cannot read
+    // the 6510's registers while the machine is paused - keeps the CPU of the base block: the machine's own newest frame.
+    int cpu = json_key(js, t, n, cp, "cpu");
+    int pc = cpu < 0 ? -1 : int(tok_int_or(js, t, json_key(js, t, n, cpu, "pc"), -1));
+    if (cpu >= 0 && (pc < 0 || pc > 0xFFFF)) {
         return "The cpu node has no pc";
     }
-    uint8_t a = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "a"), 0));
-    uint8_t xr = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "x"), 0));
-    uint8_t yr = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "y"), 0));
-    uint8_t sp = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "sp"), 0xFF));
-    uint8_t p = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "flags"), 0x20));
     uint32_t *h = st->w + W_CPUH;
-    set_bits(h, CH_A, 8, a);
-    set_bits(h, CH_X, 8, xr);
-    set_bits(h, CH_Y, 8, yr);
-    set_bits(h, CH_S, 8, sp);
-    set_bits(h, CH_P, 8, p);
-    set_bits(h, CH_PCL, 8, uint32_t(pc) & 0xFF);
-    set_bits(h, CH_PCH, 8, uint32_t(pc) >> 8);
-    // The sequencer state is the base's: every snap is in the opcode fetch
-    // cycle, so the opcode at the file's pc is fetched from the bus after the
-    // load and i_reg / dreg / din_r are written before they are read. What must
-    // not come from the base is an interrupt it was about to take: the file's
-    // own IRQ sources are in the CIAs loaded with it, and the CPU sees them
-    // again by itself.
-    set_bits(h, CH_VECTORING, 1, 0);
-    set_bits(h, CH_INTG, 1, 0);
-    set_bits(h, CH_NMI_D2, 1, 0);
-    set_bits(h, CH_NMI_ACT, 1, 0);
-    set_bits(h, CH_RESETTING, 1, 0);
-    st->w[W_CPU] = uint32_t(a) | (uint32_t(xr) << 8) | (uint32_t(yr) << 16) | (uint32_t(sp) << 24);
-    st->w[W_CPU + 1] = (st->w[W_CPU + 1] & 0xFF000000u) | uint32_t(pc) | (uint32_t(p) << 16);
-    st->have |= TRX_NODE_CPU;
+    if (cpu >= 0) {
+        uint8_t a = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "a"), 0));
+        uint8_t xr = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "x"), 0));
+        uint8_t yr = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "y"), 0));
+        uint8_t sp = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "sp"), 0xFF));
+        uint8_t p = uint8_t(tok_int_or(js, t, json_key(js, t, n, cpu, "flags"), 0x20));
+        set_bits(h, CH_A, 8, a);
+        set_bits(h, CH_X, 8, xr);
+        set_bits(h, CH_Y, 8, yr);
+        set_bits(h, CH_S, 8, sp);
+        set_bits(h, CH_P, 8, p);
+        set_bits(h, CH_PCL, 8, uint32_t(pc) & 0xFF);
+        set_bits(h, CH_PCH, 8, uint32_t(pc) >> 8);
+        // The sequencer state is the base's: every snap is in the opcode fetch
+        // cycle, so the opcode at the file's pc is fetched from the bus after the
+        // load and i_reg / dreg / din_r are written before they are read. What must
+        // not come from the base is an interrupt it was about to take: the file's
+        // own IRQ sources are in the CIAs loaded with it, and the CPU sees them
+        // again by itself.
+        set_bits(h, CH_VECTORING, 1, 0);
+        set_bits(h, CH_INTG, 1, 0);
+        set_bits(h, CH_NMI_D2, 1, 0);
+        set_bits(h, CH_NMI_ACT, 1, 0);
+        set_bits(h, CH_RESETTING, 1, 0);
+        st->w[W_CPU] = uint32_t(a) | (uint32_t(xr) << 8) | (uint32_t(yr) << 16) | (uint32_t(sp) << 24);
+        st->w[W_CPU + 1] = (st->w[W_CPU + 1] & 0xFF000000u) | uint32_t(pc) | (uint32_t(p) << 16);
+        st->have |= TRX_NODE_CPU;
+    }
 
     int dirn = json_key(js, t, n, cp, "cpuPortDirection");
     int valn = json_key(js, t, n, cp, "cpuPortValue");
@@ -363,7 +364,7 @@ const char *trx_c64re_from_nodes(const char *js, const jsmntok_t *t, int n, int 
     if (cart_from_node(js, t, n, cp, st->w)) {
         st->have |= TRX_NODE_CART;
     }
-    if (st->cart && trx_c64re_cart_ram(js, t, n, cp, st->cart, TRX_CART_RAM_BYTES) == TRX_CART_RAM_BYTES) {
+    if (st->cart && (st->cart_bytes < 0 ? trx_c64re_cart_ram(js, t, n, cp, st->cart, TRX_CART_RAM_BYTES) : st->cart_bytes) == TRX_CART_RAM_BYTES) {
         st->have |= TRX_NODE_CARTRAM;
     } else {
         st->cart = NULL;            // nothing to put back

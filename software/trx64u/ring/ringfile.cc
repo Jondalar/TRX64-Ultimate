@@ -50,22 +50,19 @@
 #define GZ_BLOCK 16384
 #define GZ_HEAD  5          // a stored block's header: final flag, LEN, NLEN
 
-// The rvlite core reads DDR2 without a cache (about a microsecond per load),
-// so the hot paths keep their state in locals: one load per input byte, the
-// CRC bitwise in registers, stores (posted) into the block.
-static inline uint32_t crc8(uint32_t c)
-{
-    for (int k = 0; k < 8; k++) {
-        c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1)));
-    }
-    return c;
-}
-
-static inline char b64c(uint32_t v)
+// rvlite has a 2 KB instruction cache and no data cache (fpga/cpu_unit/rvlite: icache.vhd, the data port straight to the memory bus), so every
+// load is a DDR2 access. The hot paths keep their state in registers: per output byte one load (the CRC table), per input byte one load, the
+// stores into the block. The base64 digit is computed, not looked up (a table would be one more load per byte); the decimals are made with
+// multiplies (the build is -mno-div: a division is a library call).
+static inline __attribute__((always_inline)) uint32_t b64c(uint32_t v)
 {
     v &= 63;
-    return v < 26 ? char('A' + v) : v < 52 ? char('a' + v - 26) : v < 62 ? char('0' + v - 52) : v == 62 ? '+' : '/';
+    return v < 26 ? 'A' + v : v < 52 ? 'a' - 26 + v : v < 62 ? '0' - 52 + v : v == 62 ? '+' : '/';
 }
+
+// v / 10 for v < 1029 (v * 205 / 2048), and for any 32-bit v (the reciprocal 0xCCCCCCCD / 2^35)
+static inline uint32_t div10_small(uint32_t v) { return (v * 205u) >> 11; }
+static inline uint32_t div10(uint32_t v) { return uint32_t((uint64_t(v) * 0xCCCCCCCDu) >> 35); }
 
 // Three ways to use it. init(): the stream in order, from the file's position on. init_count(): nothing kept or written, isize counts the bytes the
 // same calls would give. init_pieces(): a stream whose length is known, written as pieces in any order, each at its place in the file (block
@@ -231,13 +228,14 @@ public:
             isize += len;
             return;
         }
+        const uint32_t *const tab = trx_crc32_table();
         uint32_t c = crc;
         int fl = fill, lm = lim;
         uint8_t *const b = buf;
         for (int i = 0; i < len; i++) {
-            uint8_t ch = uint8_t(s[i]);
-            c = crc8(c ^ ch);
-            b[fl++] = ch;
+            uint32_t ch = uint8_t(s[i]);
+            c = (c >> 8) ^ tab[(c ^ ch) & 0xFF];
+            b[fl++] = uint8_t(ch);
             if (fl == lm) {
                 fill = fl;
                 flush(false);
@@ -252,26 +250,30 @@ public:
 
     void str(const char *s) { put(s, strlen(s)); }
 
+    // Decimal, written here (the SDK's printf has no 64-bit conversions): the digits above 2^32 by 64-bit division (a library call, the cycle
+    // counts only), the rest by the reciprocal.
     void num(const char *prefix, int64_t v)
     {
-        char tmp[24];
-        int n = 0;
+        char out[24];
+        int n = sizeof(out);
         if (prefix) {
             str(prefix);
         }
         uint64_t u = v < 0 ? uint64_t(-v) : uint64_t(v);
-        do {                            // written for the firmware's printf, which has no 64-bit conversions
-            tmp[n++] = char('0' + u % 10);
+        while (u >> 32) {
+            out[--n] = char('0' + u % 10);
             u /= 10;
-        } while (u);
+        }
+        uint32_t w = uint32_t(u);
+        do {
+            uint32_t q = div10(w);
+            out[--n] = char('0' + (w - q * 10));
+            w = q;
+        } while (w);
         if (v < 0) {
-            tmp[n++] = '-';
+            out[--n] = '-';
         }
-        char out[24];
-        for (int i = 0; i < n; i++) {
-            out[i] = tmp[n - 1 - i];
-        }
-        put(out, n);
+        put(out + n, int(sizeof(out)) - n);
     }
 
     // a whole array as base64, '=' padded
@@ -281,23 +283,29 @@ public:
             isize += 4 * uint32_t((len + 2) / 3);
             return;
         }
+        const uint32_t *const tab = trx_crc32_table();
         uint32_t c = crc;
         int fl = fill, lm = lim;
         uint8_t *const b = buf;
+        const int whole = len - len % 3;
         int outn = 0;
         for (int i = 0; i < len; i += 3) {
-            int rem = len - i;
-            uint32_t v = uint32_t(data[i]) << 16;
-            if (rem > 1) {
-                v |= uint32_t(data[i + 1]) << 8;
+            uint32_t v, pad;            // pad: how many of the four digits are '=' (the last group only)
+            if (i < whole) {
+                v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8) | data[i + 2];
+                pad = 0;
+            } else {
+                v = uint32_t(data[i]) << 16;
+                pad = 2;
+                if (len - i > 1) {
+                    v |= uint32_t(data[i + 1]) << 8;
+                    pad = 1;
+                }
             }
-            if (rem > 2) {
-                v |= data[i + 2];
-            }
-            char o[4] = { b64c(v >> 18), b64c(v >> 12), rem > 1 ? b64c(v >> 6) : '=', rem > 2 ? b64c(v) : '=' };
-            for (int k = 0; k < 4; k++) {
-                c = crc8(c ^ uint8_t(o[k]));
-                b[fl++] = uint8_t(o[k]);
+            for (int k = 18; k >= 0; k -= 6) {
+                uint32_t ch = (k < int(6 * pad)) ? uint32_t('=') : b64c(v >> k);
+                c = (c >> 8) ^ tab[(c ^ ch) & 0xFF];
+                b[fl++] = uint8_t(ch);
                 if (fl == lm) {
                     fill = fl;
                     flush(false);
@@ -392,17 +400,21 @@ public:
         int on = 0;
         put("[", 1);
         for (int i = 0; i < count; i++) {
-            int v = data[i] & mask;
+            uint32_t v = data[i] & mask;            // 0-255
+            uint32_t t = div10_small(v);
+            uint32_t u = v - t * 10;
             if (i) {
                 out[on++] = ',';
             }
             if (v >= 100) {
-                out[on++] = char('0' + v / 100);
+                uint32_t h = div10_small(t);
+                out[on++] = char('0' + h);
+                t -= h * 10;
             }
             if (v >= 10) {
-                out[on++] = char('0' + (v / 10) % 10);
+                out[on++] = char('0' + t);
             }
-            out[on++] = char('0' + v % 10);
+            out[on++] = char('0' + u);
             if (on > 4 * 64) {
                 put(out, on);
                 on = 0;
@@ -2375,35 +2387,6 @@ const char *trx_c64rering_dump(const char *path, int seconds, int stride, uint32
 }
 
 // ---- load ------------------------------------------------------------------------
-// The body of a gzip member: stored blocks, as this board writes them, or a
-// real deflate stream, as TRX64 writes them (T66 part 4, trx_inflate.c).
-// Returns the JSON, zero-terminated, for the caller to free.
-static char *gunzip(const uint8_t *p, uint32_t len, uint32_t *out_len, const char **err)
-{
-    uint32_t isize = trx_gzip_isize(p, len);
-    if (len < 18 || p[0] != 0x1F || p[1] != 0x8B || p[2] != 8 || !isize) {
-        *err = "Not a gzip body";
-        return NULL;
-    }
-    char *out = (char *)r_malloc(isize + 1);
-    if (!out) {
-        static char msg[64];
-        r_snprintf(msg, sizeof(msg), "The file unpacks to %u KB, which did not fit", (unsigned)(isize >> 10));
-        *err = msg;
-        return NULL;
-    }
-    uint32_t got = 0;
-    int e = trx_gunzip(p, len, (uint8_t *)out, isize, &got);
-    if (e) {
-        r_free(out);
-        *err = trx_inflate_error(e);
-        return NULL;
-    }
-    out[got] = 0;
-    *out_len = got;
-    return out;
-}
-
 // U9 D1: the machine the file says its state needs. Filled while the header is
 // still parsed and carried into the staged state, because the token array is
 // gone by the time trx_c64re_apply() runs.
@@ -2471,53 +2454,978 @@ static bool all_digits(const char *s)
     return true;
 }
 
-// Which entry of a `.c64rering` to load (T66 part 3): the cursor when want is
-// NULL or empty - that is what the file calls `current_id` - or the entry whose
-// `id` ("cp_<frame>_<seq>") or `label` is want, or whose `frame` is want read as
-// a number, or, written as "#N", the Nth entry in the file (0 = oldest, the
-// order §10.1 writes them in). Returns the payload token, or -1 with *err set.
-static int ring_pick(const char *js, const jsmntok_t *t, int n, const char *want, const char **err)
+static trx_progress_fn g_stage_progress;    // the load's bar (U9): set for one trx_c64re_stage_ask()
+static void *g_stage_ctx;
+
+// ---- format 1, streamed (MultiCore's decision, U18 §5) ------------------------------------------------------------------------------------------------------
+// A .c64re of format 1 or a .c64rering is one gzip member holding one JSON document; a ring of 64 entries unpacks to 6 MB. Neither the file nor the
+// document is held: the member is inflated through a 16 KB input buffer (a 32 KB window only for a stream with Huffman blocks, TRX64's), and a scanner
+// walks the document as it streams past. Pass 1 reads the whole file: the SHA-256 of a .c64re's body, the member's CRC-32 and length, the entry of a
+// ring that is wanted (the first that matches, as ring_pick did over the whole document), and the size of everything pass 2 keeps. Pass 2 reads only
+// that checkpoint again (from the stored block it starts in, or from the stream's start when the stream has Huffman blocks before its end) and keeps,
+// of its members, the ones a load reads: their text, except three typed arrays (ram, cartFlash, cartState.cartRam), which are decoded straight into
+// the buffers the staged state keeps and left as "" in the text. The text kept is a document of its own, {"manifest":{"machine":{"model":..}},
+// "checkpoint":{..}}, which jsmn parses as the whole file was parsed before, so everything after it reads the nodes as it did.
+#define F1_IN        16384          // the input buffer
+#define F1_DEPTH     48             // nesting the scanner follows (deeper is refused as bad JSON)
+#define F1_SMALL     96             // a short value kept whole: the model, current_id, an entry's id, label, frame
+
+// The checkpoint members a load reads (stage_entry, trx_c64re_nodes.cc), in a fixed order: their bit in F1Lvl::seen is 1 << (index + 1).
+static const char *const f1_keep[] = { "cpu", "ram", "cpuPortDirection", "cpuPortValue", "cia1", "cia2", "vic", "keyboard", "cartState",
+                                       "cartFlash", "media", "trx64Drive", "turbo", "trx64Hw" };
+enum { F1K_RAM = 1, F1K_CARTSTATE = 8, F1K_CARTFLASH = 9, F1K_N = 14 };
+
+enum F1Role { R_OTHER, R_ROOT, R_MANIFEST, R_MACHINE, R_RING, R_ENTRIES, R_ENTRY, R_CP, R_KEEP, R_TA_RAM, R_TA_FLASH, R_CARTSTATE, R_TA_CRAM };
+enum F1Str { FS_NONE, FS_MODEL, FS_CUR, FS_ID, FS_LABEL, FS_FRAME, FS_RAM, FS_FLASH, FS_CRAM };
+enum F1State { F_VALUE, F_KEY_OR_END, F_KEY, F_COLON, F_STR, F_PRIM, F_AFTER, F_DONE };
+
+// A typed array's base64 as it streams past: counted (pass 1, cartFlash: tok_ta_len), or decoded into dst (pass 2).
+struct F1Side {
+    uint8_t *dst;
+    uint32_t cap;
+    uint32_t got;                   // the bytes it decodes to, all of them (as tok_ta counts), written while below cap
+    uint32_t chars, pads;           // its base64 characters and its '=' (tok_ta_len)
+    uint32_t acc;
+    int nb;
+    bool seen;
+};
+
+// A short value kept as its raw text (a string's without the quotes); longer ones are marked and never equal anything.
+struct F1Small {
+    char s[F1_SMALL];
+    int len;
+    bool str, over, seen;
+};
+
+// What pass 1 found of one checkpoint (the .c64re's, or a ring entry's payload) and pass 2 needs.
+struct F1Cand {
+    bool there, obj;                // a value was there; it is an object (else the document gets null)
+    uint32_t start, end;            // stream offsets: its '{', one past its '}'
+    uint64_t blk_in;                // the stored block it starts in: its header's offset in the member's deflate data, its first stream byte
+    uint32_t blk_out;
+    uint32_t text;                  // the bytes pass 2 keeps of it
+    uint32_t flash_chars, flash_pads;
+    bool flash_seen, cram_there;    // cartFlash's base64 was there; cartState.cartRam is there
+};
+
+struct F1Lvl {
+    uint8_t role;
+    bool obj;
+    uint8_t key;                    // the member being read: its code for this role (0: none of the names this role looks at)
+    uint32_t seen;                  // the codes seen in this object (json_key takes the first of a name)
+    uint32_t count;                 // the members or elements so far
+};
+
+struct F1Scan {
+    // set by the caller
+    bool ring;                      // the document is a .c64rering
+    bool pass2;
+    bool cursor, by_index;          // which entry is wanted (ring_pick's rules)
+    int64_t idx_want;
+    const char *want;
+    char *text;                     // pass 2: where the kept text goes (text_cap bytes); pass 1: NULL, only counted
+    uint32_t text_cap;
+    F1Side ram, flash, cram;        // pass 2: the buffers the typed arrays are decoded into
+    // the result
+    bool bad;                       // not JSON as the scanner follows it
+    F1Small model, cur;
+    bool ring_obj, entries_arr;     // checkpoint_ring is an object, its entries an array
+    bool hit, hit_payload;          // the entry wanted came (and had a payload)
+    uint32_t hit_k;                 // its index
+    bool undecided;                 // the cursor: an entry ended before current_id came (pass 1 runs again)
+    F1Cand cp;                      // the checkpoint (a .c64re) or the entry that matched
+    // the scan
+    uint32_t pos;                   // the stream offset of the byte being read
+    int depth;
+    F1Lvl lv[F1_DEPTH];
+    int state;
+    int str;                        // FS_*: what the string being read is
+    bool esc, key_over, copy;
+    bool cram_flag;                 // the checkpoint being read has cartState.cartRam
+    char key[24];
+    int key_len;
+    int cp_depth;                   // the depth of the checkpoint object (-1: not in one)
+    uint32_t text_len;
+    F1Small id, label, frame;       // the entry being read
+    bool pay_there;
+    F1Cand ent;                     // its payload
+    uint32_t entry_k;
+    // the inflater's position (pass 1): where the current stored block starts, for F1Cand
+    const TrxInflate *z;
+    uint32_t base;                  // the stream offset of the chunk being read
+};
+
+static void f1_emit(F1Scan *s, const char *p, uint32_t n)
 {
-    int cr = json_key(js, t, n, 0, "checkpoint_ring");
-    int cur = json_key(js, t, n, cr, "current_id");
-    int ents = json_key(js, t, n, cr, "entries");
-    bool cursor = !want || !*want;
-    if (ents < 0 || t[ents].type != JSMN_ARRAY || (cursor && cur < 0)) {
-        *err = "No checkpoint_ring entries";
-        return -1;
+    if (s->text) {
+        if (s->text_len + n > s->text_cap) {
+            s->bad = true;          // pass 2 found more than pass 1 counted: the file changed
+            return;
+        }
+        memcpy(s->text + s->text_len, p, n);
     }
-    bool by_index = !cursor && want[0] == '#';
-    int64_t idx_want = by_index ? r_strtoll(want + 1) : -1;
-    int at = 0;
-    for (int i = ents + 1; i < n && t[i].start < t[ents].end; i++) {
-        if (t[i].parent != ents) {
+    s->text_len += n;
+}
+
+static void small_start(F1Small *v, bool str)
+{
+    v->len = 0;
+    v->s[0] = 0;
+    v->str = str;
+    v->over = false;
+    v->seen = true;
+}
+
+static void small_add(F1Small *v, const uint8_t *p, uint32_t n)
+{
+    if (v->len + int(n) >= F1_SMALL) {
+        v->over = true;
+        return;
+    }
+    memcpy(v->s + v->len, p, n);
+    v->len += int(n);
+    v->s[v->len] = 0;
+}
+
+static bool small_is(const F1Small *v, const char *w)
+{
+    return v->seen && !v->over && v->len == int(strlen(w)) && !memcmp(v->s, w, size_t(v->len));
+}
+
+static void side_add(F1Side *d, const uint8_t *p, uint32_t n, bool decode)
+{
+    uint32_t acc = d->acc, got = d->got, chars = d->chars;
+    int nb = d->nb;
+    for (uint32_t i = 0; i < n; i++) {
+        int v = b64val(char(p[i]));
+        if (v < 0) {
+            if (p[i] == '=') {
+                d->pads++;
+            }
             continue;
         }
-        int this_one = at++;
-        int id = json_key(js, t, n, i, "id");
-        bool hit;
-        if (by_index) {
-            hit = this_one == idx_want;
-        } else if (cursor) {
-            hit = id >= 0 && t[id].end - t[id].start == t[cur].end - t[cur].start &&
-                  !strncmp(js + t[id].start, js + t[cur].start, t[cur].end - t[cur].start);
-        } else {
-            int lb = json_key(js, t, n, i, "label");
-            int fr = json_key(js, t, n, i, "frame");
-            hit = (id >= 0 && tok_eq(js, t[id], want)) ||
-                  (lb >= 0 && tok_eq(js, t[lb], want)) ||
-                  (fr >= 0 && all_digits(want) && tok_int(js, t, fr) == r_strtoll(want));
+        chars++;
+        if (!decode) {
+            continue;
         }
-        if (hit) {
-            int pl = json_key(js, t, n, i, "payload");
-            if (pl < 0) {
-                *err = "That entry carries no payload";
+        acc = (acc << 6) | uint32_t(v);
+        nb += 6;
+        if (nb >= 8) {
+            nb -= 8;
+            if (got < d->cap) {
+                d->dst[got] = uint8_t(acc >> nb);
             }
-            return pl;
+            got++;
         }
     }
-    *err = cursor ? "The current entry is not in the file" : "No such entry in the file";
-    return -1;
+    d->acc = acc;
+    d->nb = nb;
+    d->got = got;
+    d->chars = chars;
+}
+
+// The code of a key for the role of the object it is in (0: not one this role looks at).
+static uint8_t f1_code(int role, const char *k, int len)
+{
+    static const char *const root[] = { "checkpoint", "checkpoint_ring", "manifest" };
+    static const char *const ring[] = { "current_id", "entries" };
+    static const char *const entry[] = { "id", "label", "frame", "payload" };
+    const char *const *names = NULL;
+    int n = 0;
+    switch (role) {
+    case R_ROOT: names = root; n = 3; break;
+    case R_MANIFEST: if (len == 7 && !memcmp(k, "machine", 7)) return 1; return 0;
+    case R_MACHINE: if (len == 5 && !memcmp(k, "model", 5)) return 1; return 0;
+    case R_RING: names = ring; n = 2; break;
+    case R_ENTRY: names = entry; n = 4; break;
+    case R_CP: names = f1_keep; n = F1K_N; break;
+    case R_TA_RAM: case R_TA_FLASH: case R_TA_CRAM: if (len == 3 && !memcmp(k, "b64", 3)) return 1; return 0;
+    case R_CARTSTATE: if (len == 7 && !memcmp(k, "cartRam", 7)) return 1; return 0;
+    default: return 0;
+    }
+    for (int i = 0; i < n; i++) {
+        if (int(strlen(names[i])) == len && !memcmp(k, names[i], size_t(len))) {
+            return uint8_t(i + 1);
+        }
+    }
+    return 0;
+}
+
+// An entry of checkpoint_ring.entries ended (or the array ended before the cursor's): is it the one wanted? ring_pick's rules, in its order.
+static void f1_entry_end(F1Scan *s, bool obj)
+{
+    uint32_t k = s->entry_k;
+    bool hit = false;
+    if (s->by_index) {
+        hit = int64_t(k) == s->idx_want;
+    } else if (!obj) {
+        hit = false;
+    } else if (s->cursor) {
+        if (!s->cur.seen) {
+            s->undecided = true;    // current_id comes after the entries: pass 1 again, with it
+            return;
+        }
+        hit = s->id.seen && !s->id.over && !s->cur.over && s->id.len == s->cur.len && !memcmp(s->id.s, s->cur.s, size_t(s->id.len));
+    } else {
+        hit = (s->id.seen && s->id.str && small_is(&s->id, s->want)) || (s->label.seen && s->label.str && small_is(&s->label, s->want)) ||
+              (s->frame.seen && !s->frame.over && all_digits(s->want) && r_strtoll(s->frame.s) == r_strtoll(s->want));
+    }
+    if (hit) {
+        s->hit = true;
+        s->hit_k = k;
+        s->hit_payload = obj && s->pay_there;
+        s->cp = s->ent;
+    }
+}
+
+// A value starts at depth s->depth (its parent is lv[depth - 1], or none for the root): kind '{', '[', '"' or 'p'. Sets what it is.
+static void f1_value_start(F1Scan *s, char kind)
+{
+    int role = R_OTHER;
+    s->str = FS_NONE;
+    if (s->depth == 0) {
+        role = s->pass2 ? R_CP : R_ROOT;
+        if (s->pass2 && kind != '{') {
+            s->bad = true;
+        }
+    } else {
+        F1Lvl &p = s->lv[s->depth - 1];
+        int c = 0;
+        if (p.obj) {
+            c = p.key;
+            if (c && (p.seen & (1u << c))) {
+                c = 0;              // a name seen before in this object: json_key never reads it
+            } else if (c) {
+                p.seen |= 1u << c;
+            }
+        }
+        switch (p.role) {
+        case R_ROOT:
+            if (c == 1 && !s->ring) {
+                s->cp.there = true;
+                s->cp.obj = kind == '{';
+                role = s->cp.obj ? R_CP : R_OTHER;
+            } else if (c == 2 && s->ring) {
+                s->ring_obj = kind == '{';
+                role = s->ring_obj ? R_RING : R_OTHER;
+            } else if (c == 3 && kind == '{') {
+                role = R_MANIFEST;
+            }
+            break;
+        case R_MANIFEST:
+            role = (c == 1 && kind == '{') ? R_MACHINE : R_OTHER;
+            break;
+        case R_MACHINE:
+            if (c == 1 && (kind == '"' || kind == 'p')) {
+                s->str = FS_MODEL;
+                small_start(&s->model, kind == '"');
+            }
+            break;
+        case R_RING:
+            if (c == 1) {
+                small_start(&s->cur, kind == '"');
+                if (kind == '"' || kind == 'p') {
+                    s->str = FS_CUR;
+                } else {
+                    s->cur.over = true;     // a container: never equal to an id
+                }
+            } else if (c == 2) {
+                s->entries_arr = kind == '[';
+                role = s->entries_arr ? R_ENTRIES : R_OTHER;
+            }
+            break;
+        case R_ENTRIES:
+            s->entry_k = p.count - 1;
+            s->id.seen = s->label.seen = s->frame.seen = false;
+            s->pay_there = false;
+            memset(&s->ent, 0, sizeof(s->ent));
+            if (kind == '{' && !s->hit && !s->undecided) {
+                role = R_ENTRY;
+            } else if (!s->hit && !s->undecided) {
+                f1_entry_end(s, false);     // an element that is not an object: only "#N" can name it, and it has no payload
+            }
+            break;
+        case R_ENTRY:
+            if (c == 1 || c == 2 || c == 3) {
+                F1Small *v = c == 1 ? &s->id : c == 2 ? &s->label : &s->frame;
+                small_start(v, kind == '"');
+                if (kind == '"' || kind == 'p') {
+                    s->str = c == 1 ? FS_ID : c == 2 ? FS_LABEL : FS_FRAME;
+                } else {
+                    v->over = true;
+                }
+            } else if (c == 4) {
+                s->pay_there = true;
+                s->ent.there = true;
+                s->ent.obj = kind == '{';
+                role = s->ent.obj ? R_CP : R_OTHER;
+            }
+            break;
+        case R_CP:
+            if (c) {
+                const char *k = f1_keep[c - 1];
+                if (p.seen & 1u) {          // bit 0: a member is kept already (the codes start at 1)
+                    f1_emit(s, ",", 1);
+                }
+                p.seen |= 1u;
+                f1_emit(s, "\"", 1);
+                f1_emit(s, k, uint32_t(strlen(k)));
+                f1_emit(s, "\":", 2);
+                s->copy = true;
+                if (kind == '{') {
+                    role = c - 1 == F1K_RAM ? R_TA_RAM : c - 1 == F1K_CARTFLASH ? R_TA_FLASH : c - 1 == F1K_CARTSTATE ? R_CARTSTATE : R_KEEP;
+                } else {
+                    role = R_KEEP;
+                }
+            }
+            break;
+        case R_TA_RAM: case R_TA_FLASH: case R_TA_CRAM:
+            if (c == 1 && kind == '"') {
+                s->str = p.role == R_TA_RAM ? FS_RAM : p.role == R_TA_FLASH ? FS_FLASH : FS_CRAM;
+                F1Side *d = p.role == R_TA_RAM ? &s->ram : p.role == R_TA_FLASH ? &s->flash : &s->cram;
+                d->seen = true;
+                if (p.role == R_TA_FLASH && !s->pass2) {
+                    d->chars = d->pads = 0;
+                }
+            }
+            role = R_KEEP;
+            break;
+        case R_CARTSTATE:
+            if (c == 1) {
+                s->cram_flag = true;
+            }
+            role = (c == 1 && kind == '{') ? R_TA_CRAM : R_KEEP;
+            break;
+        case R_KEEP:
+            role = R_KEEP;
+            break;
+        default:
+            break;
+        }
+    }
+    if (kind == '{' || kind == '[') {
+        if (s->depth >= F1_DEPTH) {
+            s->bad = true;
+            return;
+        }
+        F1Lvl &l = s->lv[s->depth++];
+        l.role = uint8_t(role);
+        l.obj = kind == '{';
+        l.key = 0;
+        l.seen = 0;
+        l.count = 0;
+        if (role == R_CP) {
+            s->cp_depth = s->depth - 1;
+            F1Cand &c = (s->ring && !s->pass2) ? s->ent : s->cp;
+            c.start = s->pos;
+            c.blk_in = s->z ? s->z->blk_in : 0;
+            c.blk_out = s->z ? s->z->blk_out : 0;
+            c.flash_seen = false;
+            c.cram_there = false;
+            s->cram_flag = false;
+            s->flash.chars = s->flash.pads = 0;
+            s->flash.seen = false;
+            s->text_len = 0;
+            f1_emit(s, "{", 1);
+        }
+    }
+}
+
+// The value at depth s->depth ended (a container: it was just popped back to that depth).
+static void f1_value_end(F1Scan *s, int role)
+{
+    if (s->copy && s->depth == s->cp_depth + 1) {
+        s->copy = false;            // a member of the checkpoint ends
+    }
+    if (role == R_CP) {
+        F1Cand &c = (s->ring && !s->pass2) ? s->ent : s->cp;
+        f1_emit(s, "}", 1);
+        c.end = s->pos + 1;
+        c.text = s->text_len;
+        c.flash_seen = s->flash.seen;
+        c.flash_chars = s->flash.chars;
+        c.flash_pads = s->flash.pads;
+        c.cram_there = s->cram_flag;
+        s->cp_depth = -1;
+        if (s->pass2) {
+            s->state = F_DONE;
+        }
+    } else if (role == R_ENTRY && !s->hit && !s->undecided) {
+        f1_entry_end(s, true);
+    }
+}
+
+// The end of a string's or a primitive's text.
+static void f1_str_end(F1Scan *s)
+{
+    s->str = FS_NONE;
+}
+
+// Bytes p[0..n) of the stream, at stream offset s->pos. Answers how many were taken (all, or up to the end of pass 2's checkpoint).
+static uint32_t f1_feed(F1Scan *s, const uint8_t *p, uint32_t n)
+{
+    uint32_t i = 0;
+    while (i < n && !s->bad) {
+        uint8_t c = p[i];
+        s->pos = s->base + i;
+        switch (s->state) {
+        case F_VALUE:
+        case F_KEY_OR_END:
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                i++;
+                continue;
+            }
+            if (s->state == F_KEY_OR_END) {
+                if (c == '"') {
+                    s->state = F_KEY;
+                    s->key_len = 0;
+                    s->key_over = false;
+                    s->esc = false;
+                    if (s->copy) {
+                        f1_emit(s, "\"", 1);
+                    }
+                    i++;
+                    continue;
+                }
+                if (c == '}' && s->lv[s->depth - 1].count == 0) {
+                    goto close;
+                }
+                s->bad = true;
+                continue;
+            }
+            if (c == ']' && s->depth && !s->lv[s->depth - 1].obj && s->lv[s->depth - 1].count == 0) {
+                goto close;
+            }
+            if (s->depth && !s->lv[s->depth - 1].obj) {
+                s->lv[s->depth - 1].count++;
+            }
+            if (c == '{' || c == '[') {
+                f1_value_start(s, char(c));
+                if (s->copy) {
+                    f1_emit(s, (const char *)&c, 1);
+                }
+                s->state = c == '{' ? F_KEY_OR_END : F_VALUE;
+                i++;
+                continue;
+            }
+            if (c == '"') {
+                f1_value_start(s, '"');
+                if (s->copy) {
+                    f1_emit(s, "\"", 1);
+                }
+                s->esc = false;
+                s->state = F_STR;
+                i++;
+                continue;
+            }
+            if (c == '}' || c == ']' || c == ',' || c == ':') {
+                s->bad = true;
+                continue;
+            }
+            f1_value_start(s, 'p');
+            s->state = F_PRIM;
+            continue;               // the byte is the primitive's first
+        case F_KEY:
+            if (s->esc) {
+                s->esc = false;
+            } else if (c == '\\') {
+                s->esc = true;
+            } else if (c == '"') {
+                if (s->copy) {
+                    f1_emit(s, "\"", 1);
+                }
+                F1Lvl &l = s->lv[s->depth - 1];
+                l.key = s->key_over ? 0 : f1_code(l.role, s->key, s->key_len);
+                l.count++;
+                s->state = F_COLON;
+                i++;
+                continue;
+            }
+            if (s->key_len < int(sizeof(s->key))) {
+                s->key[s->key_len++] = char(c);
+            } else {
+                s->key_over = true;
+            }
+            if (s->copy) {
+                f1_emit(s, (const char *)&c, 1);
+            }
+            i++;
+            continue;
+        case F_COLON:
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                i++;
+                continue;
+            }
+            if (c != ':') {
+                s->bad = true;
+                continue;
+            }
+            if (s->copy) {
+                f1_emit(s, ":", 1);
+            }
+            s->state = F_VALUE;
+            i++;
+            continue;
+        case F_STR: {
+            // the run up to the next quote or backslash in one piece
+            uint32_t j = i;
+            if (!s->esc) {
+                while (j < n && p[j] != '"' && p[j] != '\\') {
+                    j++;
+                }
+            } else {
+                j = i + 1;          // the escaped byte
+                s->esc = false;
+            }
+            if (j > i) {
+                const uint8_t *q = p + i;
+                uint32_t m = j - i;
+                switch (s->str) {
+                case FS_MODEL: small_add(&s->model, q, m); break;
+                case FS_CUR: small_add(&s->cur, q, m); break;
+                case FS_ID: small_add(&s->id, q, m); break;
+                case FS_LABEL: small_add(&s->label, q, m); break;
+                case FS_FRAME: small_add(&s->frame, q, m); break;
+                case FS_RAM: if (s->pass2) side_add(&s->ram, q, m, true); break;
+                case FS_CRAM: if (s->pass2) side_add(&s->cram, q, m, true); break;
+                case FS_FLASH: side_add(&s->flash, q, m, s->pass2); break;
+                default: break;
+                }
+                if (s->copy && s->str != FS_RAM && s->str != FS_CRAM && s->str != FS_FLASH) {
+                    f1_emit(s, (const char *)q, m);
+                }
+                i = j;
+                continue;
+            }
+            if (c == '\\') {
+                s->esc = true;
+                switch (s->str) {
+                case FS_MODEL: small_add(&s->model, p + i, 1); break;
+                case FS_CUR: small_add(&s->cur, p + i, 1); break;
+                case FS_ID: small_add(&s->id, p + i, 1); break;
+                case FS_LABEL: small_add(&s->label, p + i, 1); break;
+                case FS_FRAME: small_add(&s->frame, p + i, 1); break;
+                case FS_RAM: if (s->pass2) side_add(&s->ram, p + i, 1, true); break;
+                case FS_CRAM: if (s->pass2) side_add(&s->cram, p + i, 1, true); break;
+                case FS_FLASH: side_add(&s->flash, p + i, 1, s->pass2); break;
+                default: break;
+                }
+                if (s->copy && s->str != FS_RAM && s->str != FS_CRAM && s->str != FS_FLASH) {
+                    f1_emit(s, "\\", 1);
+                }
+                i++;
+                continue;
+            }
+            // the closing quote
+            if (s->copy) {
+                f1_emit(s, "\"", 1);
+            }
+            f1_str_end(s);
+            f1_value_end(s, R_OTHER);
+            s->state = F_AFTER;
+            i++;
+            continue;
+        }
+        case F_PRIM:
+            if (c == ',' || c == '}' || c == ']' || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                f1_str_end(s);
+                f1_value_end(s, R_OTHER);
+                s->state = F_AFTER;
+                continue;           // the delimiter is the container's
+            }
+            switch (s->str) {
+            case FS_MODEL: small_add(&s->model, p + i, 1); break;
+            case FS_CUR: small_add(&s->cur, p + i, 1); break;
+            case FS_ID: small_add(&s->id, p + i, 1); break;
+            case FS_LABEL: small_add(&s->label, p + i, 1); break;
+            case FS_FRAME: small_add(&s->frame, p + i, 1); break;
+            default: break;
+            }
+            if (s->copy) {
+                f1_emit(s, (const char *)p + i, 1);
+            }
+            i++;
+            continue;
+        case F_AFTER:
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                i++;
+                continue;
+            }
+            if (!s->depth) {
+                s->state = F_DONE;  // the root ended; what follows is not read
+                continue;
+            }
+            if (c == ',') {
+                if (s->copy) {
+                    f1_emit(s, ",", 1);
+                }
+                s->state = s->lv[s->depth - 1].obj ? F_KEY_OR_END : F_VALUE;
+                i++;
+                continue;
+            }
+            if (c == '}' || c == ']') {
+                goto close;
+            }
+            s->bad = true;
+            continue;
+        default:                    // F_DONE
+            return i;
+        }
+    close:
+        {
+            F1Lvl &l = s->lv[s->depth - 1];
+            if ((c == '}') != l.obj) {
+                s->bad = true;
+                continue;
+            }
+            if (s->copy) {
+                f1_emit(s, (const char *)&c, 1);
+            }
+            int role = l.role;
+            s->depth--;
+            f1_value_end(s, role);
+            if (s->state != F_DONE) {
+                s->state = F_AFTER;
+            }
+            i++;
+            if (s->state == F_DONE) {
+                return i;
+            }
+        }
+    }
+    return i;
+}
+
+// The member's deflate data from the file (the trailer's 8 bytes are not in it); pass 1 hashes a .c64re's body on the way and shows the progress.
+struct F1Src {
+    RFile *f;
+    uint64_t at, end;
+    TrxSha256 *sha;                 // NULL: no hash
+    uint32_t from, size, next;      // the progress: the offset the data starts at, the file's size, the next offset to report at
+    uint16_t last;                  // the time: r_ms_timer at the last read, the milliseconds summed (each read is short, so the 16-bit timer does)
+    uint32_t ms;
+};
+
+static void f1_tick(F1Src *s)
+{
+    uint16_t now = r_ms_timer();
+    s->ms += uint16_t(now - s->last);
+    s->last = now;
+}
+
+static int f1_src(void *ctx, uint8_t *buf, uint32_t cap)
+{
+    F1Src *s = (F1Src *)ctx;
+    if (s->at >= s->end) {
+        return 0;
+    }
+    uint32_t n = s->end - s->at > cap ? cap : uint32_t(s->end - s->at);
+    f1_tick(s);
+    if (!rf_seek(s->f, s->at) || !rf_read(s->f, buf, n)) {
+        return -1;
+    }
+    if (s->sha) {
+        trx_sha_add(s->sha, buf, n);
+    }
+    s->at += n;
+    if (s->next && s->at >= s->next && g_stage_progress) {
+        g_stage_progress(int((s->at - s->from) >> 10), int((s->size - s->from) >> 10), g_stage_ctx);
+        s->next += (s->size - s->from) / 32 + 1;     // about 32 steps whatever the size: each one may redraw the menu
+    }
+    return int(n);
+}
+
+struct F1Sink {
+    F1Scan *sc;
+    uint32_t out;                   // the stream offset of the next byte
+    uint32_t isize;                 // pass 1: what the trailer says the stream is
+    bool full;                      // pass 1: the stream went past it
+    bool pass2;
+    uint32_t start;                 // pass 2: the checkpoint's first byte
+};
+
+static int f1_sink(void *ctx, const uint8_t *p, uint32_t n)
+{
+    F1Sink *k = (F1Sink *)ctx;
+    uint32_t at = k->out;
+    k->out += n;
+    F1Scan *sc = k->sc;
+    if (!k->pass2) {
+        if (k->out > k->isize || k->out < at) {
+            k->full = true;
+            return -1;
+        }
+        if (sc->state != F_DONE && !sc->bad) {
+            sc->base = at;
+            f1_feed(sc, p, n);
+        }
+        return 0;
+    }
+    if (at + n <= k->start) {
+        return 0;
+    }
+    uint32_t skip = at < k->start ? k->start - at : 0;
+    sc->base = at + skip;
+    f1_feed(sc, p + skip, n - skip);
+    return (sc->state == F_DONE || sc->bad) ? 1 : 0;
+}
+
+static inline uint32_t f1_le32(const uint8_t *p)
+{
+    return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+}
+
+// What the format 1 read gives the stage: the document kept (js, jl), and the typed arrays decoded into the buffers the staged state keeps.
+struct F1Out {
+    char *js;
+    uint32_t jl;
+    uint8_t *ram, *col, *cart, *rom;
+    uint32_t ram_got;               // ram's bytes (65536 when it is whole), 0 when the checkpoint had no typed ram
+    int cart_got;                   // cartState.cartRam's bytes as trx_c64re_cart_ram counts them, -1: not a typed array, read it from js
+    uint32_t rom_cap, rom_got;      // cartFlash: the bytes wanted (tok_ta_len, capped at the source's image), the bytes decoded
+};
+
+static void f1_free(F1Out *o)
+{
+    r_free(o->js);
+    r_free(o->ram);
+    r_free(o->col);
+    r_free(o->cart);
+    r_free(o->rom);
+    memset(o, 0, sizeof(*o));
+}
+
+static void f1_scan_init(F1Scan *sc, bool ring, const char *want, const TrxInflate *z)
+{
+    memset(sc, 0, sizeof(*sc));
+    sc->ring = ring;
+    sc->cursor = !want || !*want;
+    sc->by_index = !sc->cursor && want[0] == '#';
+    sc->idx_want = sc->by_index ? r_strtoll(want + 1) : -1;
+    sc->want = want;
+    sc->cp_depth = -1;
+    sc->state = F_VALUE;
+    sc->z = z;
+}
+
+// Reads a .c64re of format 1 (head 41 bytes, the SHA-256 of the body at 9) or a .c64rering (head 9 bytes) in two streamed passes (see above).
+static const char *f1_read(RFile *file, uint32_t size, bool ring, const uint8_t *digest, const char *want, F1Out *o)
+{
+    memset(o, 0, sizeof(*o));
+    const uint32_t hdr = ring ? 9 : 41;
+    uint8_t tail[8], magic[3];
+    if (!rf_seek(file, size - 8) || !rf_read(file, tail, 8) || !rf_seek(file, hdr) || !rf_read(file, magic, 3)) {
+        return "The file could not be read";
+    }
+    const uint32_t crc_want = f1_le32(tail), isize = f1_le32(tail + 4);
+    uint8_t *in = (uint8_t *)r_malloc(F1_IN);
+    F1Scan *sc = (F1Scan *)r_malloc(sizeof(F1Scan));
+    uint8_t *win = NULL;
+    const char *err = (in && sc) ? NULL : "Out of memory";
+    TrxSha256 sha;
+    TrxInflate z;
+    F1Src src;
+    F1Sink sk;
+    F1Small cur_kept;
+    bool cur_preset = false;
+    uint32_t ms1 = 0, ms2 = 0;      // the passes' times
+    bool gz_ok = magic[0] == 0x1F && magic[1] == 0x8B && magic[2] == 8 && isize;
+    // pass 1: the whole file; again with a window when a Huffman block came, again with current_id when it came after the entries
+    while (!err) {
+        f1_scan_init(sc, ring, want, &z);
+        if (cur_preset) {
+            sc->cur = cur_kept;
+        }
+        memset(&src, 0, sizeof(src));
+        src.f = file;
+        src.at = hdr;
+        src.end = size - 8;
+        src.sha = ring ? NULL : &sha;
+        src.from = hdr;
+        src.size = size;
+        src.next = hdr + 1;
+        src.last = r_ms_timer();
+        src.ms = ms1;
+        if (!ring) {
+            trx_sha_init(&sha);
+        }
+        memset(&sk, 0, sizeof(sk));
+        sk.sc = sc;
+        sk.isize = isize;
+        memset(&z, 0, sizeof(z));
+        z.src = f1_src;
+        z.src_ctx = &src;
+        z.in = in;
+        z.in_cap = F1_IN;
+        z.sink = f1_sink;
+        z.sink_ctx = &sk;
+        z.win = win;
+        trx_inf_init(&z);
+        int e = gz_ok ? trx_inf_gzip_header(&z) : TRX_INF_OK;
+        if (gz_ok && !e) {
+            e = trx_inf_run(&z);
+        }
+        f1_tick(&src);
+        ms1 = src.ms;
+        if (e == TRX_INF_NEEDWIN && !win) {
+            win = (uint8_t *)r_malloc(TRX_INF_WSIZE);
+            if (!win) {
+                err = "Out of memory";
+            }
+            continue;
+        }
+        // a .c64re: the rest of the body into the hash (what the inflate did not read, the trailer), then the hash before anything else
+        if (!ring) {
+            while (src.at < src.end) {
+                int got = f1_src(&src, in, F1_IN);
+                if (got <= 0) {
+                    break;
+                }
+            }
+            trx_sha_add(&sha, tail, 8);
+            uint8_t d[32];
+            trx_sha_final(&sha, d);
+            if (memcmp(d, digest, 32)) {
+                err = "Hash mismatch";
+                break;
+            }
+        }
+        if (!gz_ok) {
+            err = "Not a gzip body";
+        } else if (sk.full) {
+            err = trx_inflate_error(TRX_INF_FULL);
+        } else if (e) {
+            err = trx_inflate_error(e);
+        } else if (z.out != isize || (z.crc != crc_want)) {
+            err = trx_inflate_error(TRX_INF_BADCRC);
+        } else if (sc->bad || (sc->state != F_DONE && !(sc->depth == 0 && (sc->state == F_AFTER || sc->state == F_PRIM)))) {
+            err = "Bad JSON";
+        } else if (ring && sc->undecided && sc->cur.seen && !cur_preset) {
+            cur_kept = sc->cur;
+            cur_preset = true;
+            continue;
+        } else if (ring) {
+            if (!sc->ring_obj || !sc->entries_arr || (sc->cursor && !sc->cur.seen)) {
+                err = "No checkpoint_ring entries";
+            } else if (!sc->hit) {
+                err = sc->cursor ? "The current entry is not in the file" : "No such entry in the file";
+            } else if (!sc->hit_payload) {
+                err = "That entry carries no payload";
+            }
+        }
+        break;
+    }
+    const F1Cand cp = sc ? sc->cp : F1Cand();
+    const uint32_t first_huff = z.first_huff;
+    const F1Small model = sc ? sc->model : F1Small();
+    const uint32_t hit_k = sc ? sc->hit_k : 0;
+    // the buffers the staged state keeps, and the document
+    uint32_t fl = 0;
+    if (!err && cp.obj && cp.flash_seen) {
+        uint32_t whole = (cp.flash_chars / 4) * 3;       // tok_ta_len
+        switch (cp.flash_chars % 4) {
+        case 2: fl = whole + 1; break;
+        case 3: fl = whole + 2; break;
+        default: fl = whole - (cp.flash_pads > 2 ? 2 : cp.flash_pads); break;
+        }
+        if (g_src_on && g_src.rom_bytes && fl > g_src.rom_bytes) {
+            fl = g_src.rom_bytes;
+        }
+    }
+    char pre[F1_SMALL + 64];
+    int pl = 0;
+    if (!err) {
+        pl = r_snprintf(pre, sizeof(pre), "{");
+        if (model.seen) {
+            pl += r_snprintf(pre + pl, int(sizeof(pre)) - pl, "\"manifest\":{\"machine\":{\"model\":%s%.*s%s%s}}%s", model.str ? "\"" : "",
+                             model.len, model.s, model.over ? "~" : "", model.str ? "\"" : "", cp.there ? "," : "");
+        }
+        if (cp.there) {
+            pl += r_snprintf(pre + pl, int(sizeof(pre)) - pl, "\"checkpoint\":%s", cp.obj ? "" : "null");
+        }
+        o->ram = (uint8_t *)r_malloc(65536);
+        o->col = (uint8_t *)r_malloc(1024);
+        o->cart = cp.obj && cp.cram_there ? (uint8_t *)r_malloc(TRX_CART_RAM_BYTES) : NULL;
+        o->rom = fl ? (uint8_t *)r_malloc(fl) : NULL;
+        o->rom_cap = fl;
+        o->jl = uint32_t(pl) + (cp.obj ? cp.text : 0) + 1;
+        o->js = (char *)r_malloc(o->jl + 1);
+        if (!o->ram || !o->col || !o->js) {
+            err = "Out of memory";
+        } else {
+            memcpy(o->js, pre, size_t(pl));
+            o->js[o->jl - 1] = '}';
+            o->js[o->jl] = 0;
+        }
+    }
+    o->cart_got = -1;
+    // pass 2: the checkpoint again, from the stored block it starts in (or from the start when Huffman blocks come before its end)
+    if (!err && cp.obj) {
+        f1_scan_init(sc, ring, want, NULL);
+        sc->pass2 = true;
+        sc->text = o->js + pl;
+        sc->text_cap = cp.text;
+        sc->ram.dst = o->ram;
+        sc->ram.cap = 65536;
+        sc->cram.dst = o->cart;
+        sc->cram.cap = o->cart ? TRX_CART_RAM_BYTES : 0;
+        sc->flash.dst = o->rom;
+        sc->flash.cap = o->rom ? fl : 0;
+        bool seek = first_huff >= cp.end;
+        memset(&src, 0, sizeof(src));
+        src.f = file;
+        src.at = seek ? hdr + cp.blk_in : hdr;
+        src.end = size - 8;
+        src.last = r_ms_timer();
+        memset(&sk, 0, sizeof(sk));
+        sk.sc = sc;
+        sk.pass2 = true;
+        sk.start = cp.start;
+        sk.out = seek ? cp.blk_out : 0;
+        memset(&z, 0, sizeof(z));
+        z.src = f1_src;
+        z.src_ctx = &src;
+        z.in = in;
+        z.in_cap = F1_IN;
+        z.sink = f1_sink;
+        z.sink_ctx = &sk;
+        z.win = seek ? NULL : win;
+        z.out = sk.out;
+        trx_inf_init(&z);
+        int e = seek ? TRX_INF_OK : trx_inf_gzip_header(&z);
+        if (!e) {
+            e = trx_inf_run(&z);
+        }
+        f1_tick(&src);
+        ms2 = src.ms;
+        if (e < 0 && e != TRX_INF_SINK) {
+            err = trx_inflate_error(e);
+        } else if (sc->bad || sc->state != F_DONE || sc->text_len != cp.text) {
+            err = "The file changed while it was read";
+        } else {
+            o->ram_got = sc->ram.seen ? sc->ram.got : 0;
+            if (sc->cram.seen) {
+                o->cart_got = int(sc->cram.got < TRX_CART_RAM_BYTES ? sc->cram.got : TRX_CART_RAM_BYTES);
+            }
+            o->rom_got = sc->flash.got < fl ? sc->flash.got : fl;
+        }
+    }
+    if (!err) {
+        char what[24];
+        what[0] = 0;
+        if (ring) {
+            r_snprintf(what, sizeof(what), ", entry #%u", (unsigned)hit_k);
+        }
+        r_log("[C64RE] %s%s: %u bytes from %u, pass 1 %u ms%s, pass 2 %u ms (%u bytes of the checkpoint kept)\n", ring ? ".c64rering" : ".c64re format 1",
+              what, (unsigned)isize, (unsigned)size, (unsigned)ms1, win ? " (Huffman blocks: with the window)" : "", (unsigned)ms2, (unsigned)cp.text);
+    }
+    r_free(in);
+    r_free(win);
+    r_free(sc);
+    if (err) {
+        f1_free(o);
+    }
+    return err;
 }
 
 // The chip block of the machine as it runs now: the newest timeline entry that
@@ -2559,7 +3467,7 @@ static const char *model_refusal(const char *js, const jsmntok_t *t, int n)
 // user is told the load is not exact, and by how much.
 static void say_coarse(const TrxNodeState *ns)
 {
-    r_log("[C64RE] coarse load (no trx64Hw node): cpu%s%s%s%s%s%s%s%s\n",
+    r_log("[C64RE] coarse load (no trx64Hw node):%s%s%s%s%s%s%s%s%s\n", (ns->have & TRX_NODE_CPU) ? " cpu" : "",
           (ns->have & TRX_NODE_PORT) ? " port" : "", (ns->have & TRX_NODE_CIA1) ? " cia1" : "",
           (ns->have & TRX_NODE_CIA2) ? " cia2" : "", (ns->have & TRX_NODE_VIC) ? " vic" : "",
           (ns->have & TRX_NODE_COLOR) ? " colour" : "", (ns->have & TRX_NODE_RAM) ? " ram" : "",
@@ -2567,6 +3475,12 @@ static void say_coarse(const TrxNodeState *ns)
           (ns->have & TRX_NODE_CARTRAM) ? " cart-ram" : "");
     r_log("[C64RE] not restored: the VIC's raster position (file line %d cycle %d) and pixel pipeline, "
           "the SID, the drive\n", ns->line, ns->cycle);
+    if (!(ns->have & TRX_NODE_CPU)) {
+        r_log("[C64RE] the file has no cpu node: the 6510's registers are the running machine's (its newest frame)\n");
+    }
+    if (!(ns->have & (TRX_NODE_CIA1 | TRX_NODE_CIA2))) {
+        r_log("[C64RE] the file has no cia nodes: both CIAs are the running machine's\n");
+    }
     if (ns->keys_pressed) {
         r_log("[C64RE] %d key(s) were held down in the file; they are not pressed here\n", ns->keys_pressed);
     }
@@ -2673,8 +3587,6 @@ static void tok_copy(const char *js, const jsmntok_t *t, int i, char *dst, int c
     dst[n] = 0;
 }
 
-static trx_progress_fn g_stage_progress;    // the load's bar (U9): set for one stage_v2()
-static void *g_stage_ctx;
 static TrxC64reMissing *g_stage_miss;       // U9 D3d: filled when the medium is why it failed
 static const char *g_stage_medium;          // the answer to the last refusal, tried first
 
@@ -3063,51 +3975,38 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
         return "The file could not be opened";
     }
     uint32_t size = uint32_t(rf_size(file));
-    // format 2 is read where it stands, section by section (U8 §4); only format 1
-    // needs the whole file plus its unpacked document in the heap at once, which
-    // is what "Out of memory" on a 2.9 MB file was (U8 §1).
+    // format 2 is read where it stands, section by section (U8 §4); format 1 streams through f1_read (the whole file and its unpacked
+    // document in the heap at once was "Out of memory" on a 2.9 MB file, U8 §1, and on every 64-entry ring)
     uint8_t head[41];
-    if (size >= sizeof(head) && rf_read(file, head, sizeof(head)) && !memcmp(head, "C64RESNP", 8) && head[8] == C64RE_FORMAT) {
+    memset(head, 0, sizeof(head));
+    if (!rf_read(file, head, size < sizeof(head) ? size : uint32_t(sizeof(head)))) {
+        rf_close(file);
+        return "The file could not be read";
+    }
+    if (size >= sizeof(head) && !memcmp(head, "C64RESNP", 8) && head[8] == C64RE_FORMAT) {
         const char *e2 = stage_v2(file, head, size, path, out);
         rf_close(file);
         return e2;
     }
-    rf_seek(file, 0);
-    uint8_t *raw = (uint8_t *)r_malloc(size ? size : 1);
     const char *err = NULL;
-    if (!raw) {
-        err = "Out of memory";
-    } else if (!rf_read(file, raw, size)) {
-        err = "The file could not be read";
-    }
-    rf_close(file);
-    bool ring = !err && size >= 9 + 18 && !memcmp(raw, "C64RERNG", 8) && raw[8] == 1;
-    if (!err && !ring && (size < 41 + 18 || memcmp(raw, "C64RESNP", 8) || raw[8] != 1)) {
+    bool ring = size >= 9 + 18 && !memcmp(head, "C64RERNG", 8) && head[8] == 1;
+    if (!ring && (size < 41 + 18 || memcmp(head, "C64RESNP", 8) || head[8] != 1)) {
         err = "Not a .c64re or .c64rering (format 1)";
     }
-    if (!err && !ring) {
-        TrxSha256 s;
-        uint8_t d[32];
-        trx_sha_init(&s);
-        trx_sha_add(&s, raw + 41, size - 41);
-        trx_sha_final(&s, d);
-        if (memcmp(d, raw + 9, 32)) {
-            err = "Hash mismatch";
-        }
-    }
-    char *js = NULL;
-    uint32_t jl = 0;
+    F1Out fo;
+    memset(&fo, 0, sizeof(fo));
     if (!err) {
-        uint32_t hdr = ring ? 9 : 41;
-        js = gunzip(raw + hdr, size - hdr, &jl, &err);
+        err = f1_read(file, size, ring, head + 9, want, &fo);
     }
-    r_free(raw);
+    rf_close(file);
+    char *js = fo.js;
+    fo.js = NULL;
     jsmntok_t *t = NULL;
     int n = 0;
     if (!err) {
         jsmn_parser p;
         jsmn_init(&p);
-        int need = jsmn_parse(&p, js, jl, NULL, 0);
+        int need = jsmn_parse(&p, js, fo.jl, NULL, 0);
         if (need < 1) {
             err = "Bad JSON";
         } else {
@@ -3116,21 +4015,15 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
                 err = "Out of memory";
             } else {
                 jsmn_init(&p);
-                n = jsmn_parse(&p, js, jl, t, need);
+                n = jsmn_parse(&p, js, fo.jl, t, need);
                 if (n < 1) {
                     err = "Bad JSON";
                 }
             }
         }
     }
-    int cp = -1;
-    if (!err && !ring) {
-        cp = json_key(js, t, n, 0, "checkpoint");
-    } else if (!err) {
-        // checkpoint_ring.entries[k].payload - the cursor's entry, or the one
-        // `want` names (T66 part 3)
-        cp = ring_pick(js, t, n, want, &err);
-    }
+    // the checkpoint: the .c64re's, or the entry of the ring that f1_read picked (the cursor's, or the one `want` names: T66 part 3)
+    int cp = err ? -1 : json_key(js, t, n, 0, "checkpoint");
     uint8_t *ram = NULL, *col = NULL, *cart = NULL, *rom = NULL;
     TrxDriveState *drive = NULL;
     uint32_t rom_len = 0;
@@ -3159,13 +4052,12 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
                   (int)tok_int(js, t, json_key(js, t, n, tb, "menuIndex")));
         }
         int hw = json_key(js, t, n, cp, "trx64Hw");
-        ram = (uint8_t *)r_malloc(65536);
-        col = (uint8_t *)r_malloc(1024);
-        // cartridge RAM rides in the cartState node of both file kinds; a file
-        // without it leaves the window as it is (T66 part 5)
-        if (json_key(js, t, n, json_key(js, t, n, cp, "cartState"), "cartRam") >= 0) {
-            cart = (uint8_t *)r_malloc(TRX_CART_RAM_BYTES);
-        }
+        // f1_read made them: ram and col always, cart when the cartState node has cartRam (it rides in both file kinds; a file without it
+        // leaves the window as it is, T66 part 5), rom when there is a cartFlash typed array
+        ram = fo.ram;
+        col = fo.col;
+        cart = fo.cart;
+        fo.ram = fo.col = fo.cart = NULL;
         // A cartridge snapshot only fits the cartridge that is on: the banking
         // registers, the RAM window and the ROM image all belong to that type.
         int ft = trx_c64re_cart_type(js, t, n, cp);
@@ -3178,23 +4070,21 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
         // into DDR2 with the load, because no log carries flash writes. The
         // firmware caps it at the ROM window; here the cap is the image the
         // cartridge in the port has (the source's rom_bytes), when it says one.
-        uint32_t fl = err ? 0 : trx_c64re_cart_flash_len(js, t, n, cp);
+        // f1_read decoded it (tok_ta_len's length, capped as here) into fo.rom.
+        uint32_t fl = err ? 0 : fo.rom_cap;
         if (fl) {
-            if (g_src_on && g_src.rom_bytes && fl > g_src.rom_bytes) {
-                fl = g_src.rom_bytes;
-            }
-            rom = (uint8_t *)r_malloc(fl);
-            if (rom && trx_c64re_cart_flash(js, t, n, cp, rom, fl) == fl) {
+            if (fo.rom && fo.rom_got == fl) {
+                rom = fo.rom;
+                fo.rom = NULL;
                 rom_len = fl;
-            } else {
-                r_free(rom);        // short or no memory: the window stays as it is
-                rom = NULL;
+            } else {                // short or no memory: the window stays as it is
                 r_log("[C64RE] the file's cartFlash node (%u KB) could not be read: the cartridge "
                       "image in memory stays as it is\n", (unsigned)(fl >> 10));
             }
         }
-        // drive A (T66 part 8): both kinds of file carry the node the same way
-        if (!err && json_key(js, t, n, cp, "trx64Drive") >= 0 && trx_drive_present()) {
+        // drive A (T66 part 8): both kinds of file carry the node the same way (a ring entry's is null: nothing to read)
+        int dn = err ? -1 : json_key(js, t, n, cp, "trx64Drive");
+        if (dn >= 0 && t[dn].type == JSMN_OBJECT && trx_drive_present()) {
             drive = (TrxDriveState *)r_malloc(sizeof(TrxDriveState));
             if (drive && !trx_c64re_drive_from_node(js, t, n, cp, drive)) {
                 r_free(drive);
@@ -3220,6 +4110,8 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
             err = model_refusal(js, t, n);
             TrxNodeState ns;
             ns.cart = cart;
+            ns.ram_bytes = int(fo.ram_got);     // f1_read decoded the typed arrays: from_nodes takes what it got
+            ns.cart_bytes = fo.cart_got;
             if (!err && !base_block(ns.w, &ns.x)) {
                 err = "No frame of this machine to build on: let Timewarp run first";
             }
@@ -3238,7 +4130,7 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
                 }
                 say_coarse(&ns);
             }
-        } else if (!tok_ta(js, t, n, json_key(js, t, n, cp, "ram"), ram, 65536) ||
+        } else if (fo.ram_got != 65536 ||
                    !tok_ta(js, t, n, json_key(js, t, n, hw, "block"), blk, sizeof(blk)) ||
                    !tok_ta(js, t, n, json_key(js, t, n, hw, "ramUnderIo"), under, 1024) ||
                    !tok_ta(js, t, n, json_key(js, t, n, hw, "colorRam"), col, 1024)) {
@@ -3256,7 +4148,7 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
                 say_media(js, t, n, cp);
             }
             if (!err && cart &&
-                trx_c64re_cart_ram(js, t, n, cp, cart, TRX_CART_RAM_BYTES) != TRX_CART_RAM_BYTES) {
+                (fo.cart_got >= 0 ? fo.cart_got : trx_c64re_cart_ram(js, t, n, cp, cart, TRX_CART_RAM_BYTES)) != TRX_CART_RAM_BYTES) {
                 r_free(cart);               // a short cartRam node: leave the window alone
                 cart = NULL;
             }
@@ -3264,6 +4156,7 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
     }
     r_free(t);
     r_free(js);
+    f1_free(&fo);                   // what was not taken over (all of it after an error)
     TrxC64reStaged *st = NULL;
     if (!err) {
         st = (TrxC64reStaged *)r_calloc(1, sizeof(TrxC64reStaged));
