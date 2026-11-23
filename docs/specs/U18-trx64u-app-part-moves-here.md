@@ -647,8 +647,8 @@ Nothing decided yet.
     user of a general overlay facility (a library or app puts pixels over the machine's picture, also while it runs), in
     the base and the SDK or in a shared library. Its shape (service or library, push or pull, who owns the layer with the
     menu closed, the still and the PAUSED tag as users) is MultiCore's to design, as advisor.
-  - **The overlay is MultiCore's T256, a base service in the SDK (Alex D1-D7, 2026-11-23); what it means for us (agreed
-    with MultiCore).**
+  - **The overlay is MultiCore's T256, a base service in the SDK (Alex D1-D7, 2026-11-23); what it means for us (a draft
+    discussed with MultiCore, on hold, see the next entry).**
     - Alex's decisions there:
       - D1: no new gateware.
       - D2: only the base drives the pixel layer.
@@ -669,4 +669,17 @@ Nothing decided yet.
     - **PAUSED:** the library that paused (`op_pause_toggle`) shows how to go on with a small key-coloured element of its
       own, shown at pause and hidden at resume. The base's still lies behind it.
     - One buffer per surface: `begin` waits at most one render and never fails, and the base copies the surface into its
-      canvas, never scans our memory out. Waits for MultiCore's spec draft and SDK.
+      canvas, never scans our memory out.
+  - **trx64u does not wait for T256 (Alex via MultiCore, 2026-11-23; MultiCore T239.3 D24, D25: "not everything at
+    once").** trx64u and the VIC-20 are the SDK's test cores; T256 follows them as its own step. trx64u is built and
+    tested on `t239.3` as it is (base 3.3, dev SDK `e4f99648`). Until T256: Timewarp is the base's timeline page with the
+    bar over black, no still; Pause shows the base's PAUSED tag; our pause hint waits. The `ovl` group, `begin`/`end`
+    and `still_map` are a draft that will change, and MultiCore's acceptance of `still_map` is on hold: nothing is built
+    against them. D25's changes on `t239.3` (other cores' TOML copies, the Amiga's mouse rows) do not touch trx64u.
+  - **Two small monitor faults of the second run fixed (2026-11-23).**
+    - Before the run control was taken (`mach_own`), trxmon reported runState from `M.running`, which `mach_init` zeroes,
+      so "paused" while the C64 ran (the firmware's service the same). `rpc.c` `run_state()` now asks the hardware
+      (`ST_SHUT`) until then; trxmon host test 1133 checks, 0 failed.
+    - The version said "unknown": `monitor/Makefile` now passes `TRXMON_BUILD` "in-trx64u", as the firmware's makefile
+      passes "in-firmware".
+    - Monitor image + bss 209,004 + 473,264 B.

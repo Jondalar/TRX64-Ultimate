@@ -11,14 +11,15 @@ LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_monitor.cc): the F4 screen.
 LIB_EXPORTS = textgrid=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as linked against SDK
-# 0.3.0 (base 3.3) on 2026-11-23, 208,940 + 473,264 bytes; heap (U18 S13): no block held while idle, at most 50,240 bytes at once (one RPC client while
+# 0.3.0 (base 3.3) on 2026-11-23, 209,004 + 473,264 bytes; heap (U18 S13): no block held while idle, at most 50,240 bytes at once (one RPC client while
 # gated); the counts: lib_register's record (ops 4, states 1, the poll monitor.serve).
-LIB_BUDGET = image=682204 heap_keep=0 heap_peak=50240 ops=4 states=1 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
+LIB_BUDGET = image=682268 heap_keep=0 heap_peak=50240 ops=4 states=1 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
 include $(SDK)/mk/lib.mk
 
 # trxmon is built against the firmware's application ABI (u2p_app.h with the whole ring table), not the SDK's ABI 2 shim: one source for both (D4), and the
-# ring table is the ring library's own export (MultiCore's interim rule while R4 was open, the rule since).
-TRXMON_CFLAGS = -I$(APPSDK) -I$(APPLOADER) $(LIB_CFLAGS)
+# ring table is the ring library's own export (MultiCore's interim rule while R4 was open, the rule since). TRXMON_BUILD names the build in ping's
+# version, as the firmware's makefile names its own ("in-firmware").
+TRXMON_CFLAGS = -I$(APPSDK) -I$(APPLOADER) $(LIB_CFLAGS) -DTRXMON_BUILD=\"in-trx64u\"
 trxmon/%.o: trxmon/%.c
 	$(CC_RV) $(TRXMON_CFLAGS) -MMD -MP -c $< -o $@
 

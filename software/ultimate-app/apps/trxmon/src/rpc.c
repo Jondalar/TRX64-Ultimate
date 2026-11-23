@@ -198,11 +198,22 @@ static uint16_t cur_pc(void)
     return mach_pc(&c);
 }
 
+/* M.running is the run control's state once mach_own() has taken it; until then
+ * the machine runs or stands as the menu left it, which only the hardware knows
+ * (ST_SHUT: held). */
+static const char *run_state(void)
+{
+    if (!M.owned) {
+        return (hw_status() & ST_SHUT) ? "paused" : "running";
+    }
+    return M.running ? "running" : "paused";
+}
+
 /* TRX64 build_debug_state */
 static void debug_state(jw_t *w)
 {
     jw_obj(w);
-    jw_kstr(w, "runState", M.running ? "running" : "paused");
+    jw_kstr(w, "runState", run_state());
     pacing(w);
     jw_ku64(w, "pc", cur_pc());
     jw_ku64(w, "cycles", mach_cycles());
@@ -685,7 +696,7 @@ static void m_session_state(void)
     begin_result();
     jw_obj(&W);
     jw_ku64(&W, "c64Cycles", cyc);
-    jw_kstr(&W, "runState", M.running ? "running" : "paused");
+    jw_kstr(&W, "runState", run_state());
     jw_kbool(&W, "powered", 1);
     jw_kstr(&W, "mode", "hardware");
     jw_kstr(&W, "backend", "c64u");
@@ -1672,7 +1683,7 @@ static void m_quit(void)
     begin_result();
     jw_obj(&W);
     jw_kbool(&W, "quitting", 1);
-    jw_kstr(&W, "runState", M.running ? "running" : "paused");
+    jw_kstr(&W, "runState", run_state());
     jw_end_obj(&W);
     finish(Qcid);
 }

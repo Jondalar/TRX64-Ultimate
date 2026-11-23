@@ -562,6 +562,11 @@ static void test_rpc(void)
     CHECK(has(a, "\"model\":\"c64-pal\""));
     CHECK(has(a, "\"cart\":{\"path\":\"/Usb0/games/test.crt\"}"));
     CHECK(has(a, "\"screenBase\":1024"));
+    /* before the run control is taken the state is the hardware's: a machine the menu left running reports running */
+    F.shut = 0;
+    a = call("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"session/state\",\"params\":{\"session_id\":\"x\"}}");
+    CHECK(has(a, "\"runState\":\"running\"") && !F.owner);
+    F.shut = 1;
 
     /* read_memory: TRX64 ranges, base64 */
     a = call("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"session/read_memory\",\"params\":{\"ranges\":[{\"addr\":49152,"
