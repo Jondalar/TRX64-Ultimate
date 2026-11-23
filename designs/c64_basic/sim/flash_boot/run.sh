@@ -31,7 +31,9 @@ $GH -a $F $root/designs/c64_basic/sim/usb/tl_string_util_pkg.vhd \
     $R/core_pkg.vhd $R/alu_pkg.vhd $R/alu_logical.vhd $R/alu_branch.vhd $R/multiply.vhd \
     $R/dsram.vhd $R/gprf.vhd $R/csr.vhd decode_comb_sim.vhd $R/decode.vhd $R/fetch.vhd \
     $R/execute.vhd $R/writeback.vhd $R/core.vhd $R/icache.vhd $R/bus_converter.vhd \
-    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd $R/rvlite_wrapper.vhd \
+    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd \
+    $root/designs/c64_basic/cache_cfg_pkg.vhd $root/designs/c64_basic/rv_dcache.vhd \
+    $root/designs/c64_basic/rv_icache.vhd $root/designs/c64_basic/rvlite_wrapper_dc.vhd \
     $here/flash_rom_model.vhd $here/tb_flash_boot.vhd
 $GH -e $F tb_flash_boot
 python3 "$here/run.py" "$@"

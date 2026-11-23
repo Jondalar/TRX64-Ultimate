@@ -52,7 +52,7 @@ body = open(tcl).read().split("\nset g ", 1)[1].split("read_vhdl -library work [
 for tok in body.replace("\\", " ").split():
     p = tok.replace("$g", g)
     p = p if p.startswith("/") else design + "/" + p
-    if p.endswith("/rvlite_wrapper.vhd"): p = here + "/rvlite_stub.vhd"
+    if p.endswith("/rvlite_wrapper_dc.vhd"): p = here + "/rvlite_stub.vhd"
     if p.endswith("/async_fifo_ft.vhd"): p = here + "/async_fifo_stub.vhd"
     if p.endswith("/usb_host_nano.vhd"): p = here + "/usb_stub.vhd"
     if p.endswith("/drive_unit.vhd"): p = here + "/drive_stub.vhd"

@@ -22,6 +22,7 @@ the chip, use the real block on the real pins.
 | Core | Gideon's **rvlite** ("Frenix"), `fpga/cpu_unit/rvlite/vhdl_source/rvlite_wrapper.vhd` | bootloader Makefile writes `bootrom_u64ii_pkg.vhd` into the rvlite tree; app Makefile "core has no divider" |
 | ISA | RV32I + Zicsr + **MUL/MULH/MULHSU/MULHU only** (no DIV/REM; rvlite decodes them as MUL). No C, A, F, D. M-mode only | `decode_comb.vhd`, `multiply.vhd`; ELF: 0 DIV, no compressed |
 | Generics | `g_mult=true, g_icache=true, g_bootrom=true, g_start_addr=X"80000000"` (defaults) | `rvlite_wrapper.vhd:19-25` |
+| Caches | `c64_basic` since U19: MultiCore's `rvlite_wrapper_dc.vhd` (same entity and bus converter) with an 8 KB write-through data cache and an 8 KB instruction cache, 16-byte lines; cacheable below 0xEA0000. The app needs nothing: other writers clear lines in hardware. FENCE.I stays a NOP and a CPU reset does not clear the instruction cache | [U19](specs/U19-app-riscv-caches.md) |
 | Clock | **100 MHz** sys clock is assumed by the binary: tick reload `(100e6>>8)/200-1 = 0x07A0` → 200 Hz FreeRTOS tick; WiFi UART divisor `((2*CLOCK_FREQ/bps)+1)/2-1` | `riscv_main.c:173-186`, `dma_uart.cc:139-144` |
 | Reset vector | `0x80000000` (boot BRAM: code 0x1C00 + data 0x400, 8 KB image) | `bootloader/linker.x`, `fetch.vhd` |
 | CSRs | mstatus (MIE b3, MPIE b7 only), mie (MEIE b11 only), mtvec (bits 1:0 forced 0), mepc, mcause, mscratch; mtval reads 0; all others RAZ/WI, **never trap** | `csr.vhd` |
@@ -29,7 +30,7 @@ the chip, use the real block on the real pins.
 | Interrupts | One level line `irq_i` from ITU `irq_out` → MEIP, mcause `0x8000000B`. No CLINT/MTIME, no FIRQ. Software demux via ITU regs | `riscv_main.c:82-134` |
 | Bus split | Data address bit 28 = 0 → DDR (26-bit, 64 MB, wraps); bit 28 = 1 → 8-bit IO bus (24-bit addr). Instruction fetch always DDR (except boot BRAM page 0x8000xxxx). **16/32-bit IO accesses become 2/4 byte strobes at addr+0..3, LSB first** — the app relies on it (RMII, flash DATA_32, WiFi). No bus errors exist | `bus_converter.vhd:56,82-185` |
 
-Use `rvlite_wrapper` unchanged; it already contains the bus converter with this behaviour.
+Use `rvlite_wrapper`'s bus converter unchanged; it has this behaviour. `c64_basic` lists `rvlite_wrapper_dc.vhd` (U19), which keeps it and adds the caches.
 
 ## 2. Boot ROM and how the app gets into DDR
 

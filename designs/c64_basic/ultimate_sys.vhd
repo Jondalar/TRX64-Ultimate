@@ -344,7 +344,13 @@ port (
     drv_mem_wdata   : out std_logic_vector(31 downto 0);
     drv_mem_be      : out std_logic_vector(3 downto 0);
     drv_mem_done    : in  std_logic;
-    drv_mem_rdata   : in  std_logic_vector(127 downto 0) );
+    drv_mem_rdata   : in  std_logic_vector(127 downto 0);
+    -- U19 (MultiCore T133): the RISC-V's data cache. dc_ext_tgl toggles for every DDR2 write into its cacheable window that is not on
+    -- the CPU's bus (top.v, mig_arb ext_wr_tgl); dc_line / dc_line_adr are the 128-bit word of the CPU's last DDR2 read and its line
+    -- address (top.v, cpu_mem_bridge): the caches fill whole 16-byte lines from it
+    dc_ext_tgl      : in  std_logic := '0';
+    dc_line         : in  std_logic_vector(127 downto 0) := (others => '0');
+    dc_line_adr     : in  std_logic_vector(21 downto 0) := (others => '0') );
 end entity;
 
 architecture rtl of ultimate_sys is
@@ -491,6 +497,8 @@ architecture rtl of ultimate_sys is
     signal app_joy_i    : std_logic_vector(9 downto 0) := (others => '0');   -- port 2, port 1
     signal rst_sense_s  : std_logic_vector(1 downto 0) := "00";
     signal rv_pc        : std_logic_vector(31 downto 0);
+    signal dc_snoop_valid : std_logic;
+    signal dc_snoop_addr  : std_logic_vector(25 downto 0);
     signal rv_io_busy   : std_logic;
     signal dma_wd       : unsigned(25 downto 0) := (others => '0');   -- clocks the open DMA byte has waited
     signal dma_tmo      : unsigned(7 downto 0) := (others => '0');    -- DMA bytes given up on (rv_dbg.v)
@@ -510,6 +518,9 @@ begin
     rv_tap(95)            <= '0';
     rv_tap(103 downto 96) <= std_logic_vector(dma_tmo);
     rv_tap(127 downto 104) <= (others => '0');
+    -- U19: a write by the MAC, WiFi or USB DMA reaches the data cache's snoop; the CPU's own tags (rvlite_wrapper_dc g_tag_i, g_tag_d) do not
+    dc_snoop_valid <= mem_req.request when mem_req.read_writen = '0' and mem_req.tag /= X"20" and mem_req.tag /= X"21" else '0';
+    dc_snoop_addr  <= std_logic_vector(mem_req.address);
     i_cpu: entity work.rvlite_wrapper
     port map (
         clock    => clock,
@@ -520,7 +531,14 @@ begin
         io_busy  => rv_io_busy,
         mem_req  => cpu_mem_req,
         mem_resp => cpu_mem_resp,
-        dbg_pc   => rv_pc );
+        dbg_pc   => rv_pc,
+        dc_snoop_valid => dc_snoop_valid,
+        dc_snoop_addr  => dc_snoop_addr,
+        dc_ext_tgl     => dc_ext_tgl,
+        dc_stat        => open,
+        dc_data        => open,
+        dc_line        => dc_line,
+        dc_line_adr    => dc_line_adr );
 
     -- the MAC's DMA first, then the WiFi UART's, USB, the CPU; all see every
     -- response and pick theirs by tag

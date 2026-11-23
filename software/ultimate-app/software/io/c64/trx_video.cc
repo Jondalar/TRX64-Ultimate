@@ -428,8 +428,10 @@ static inline uint32_t px_ctrl_on(void)
     return PX_CTRL_FMT | (uint32_t(plan.s) << 4) | 1;
 }
 
-// The rvlite core has no data cache, but its stores are posted: a load from the
-// last address written waits for them before the register write that follows.
+// The stores are posted, one open at a time and in order: a load from the last address written waits for them
+// before the register write that follows, unless the data cache (U19) holds that line and answers at once. That
+// case is safe too: PX_FRONT and PX_BACK take the buffer at the next frame start and pix_layer reads it line by
+// line (pix_layer.v flip_req, la), so the last line is read milliseconds after the last store has landed.
 static inline void buf_done(layer_buf_t *b)
 {
     __asm__ volatile ("fence" ::: "memory");

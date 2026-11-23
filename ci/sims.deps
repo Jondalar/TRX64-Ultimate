@@ -28,8 +28,10 @@
 @gideon = software/ultimate-app//fpga tools/gideon_sources.sh tools/vendor_gideon.sh tools/patches/gideon
 # the C64 model of the Verilator benches: the cores, the ROMs and what rom2mem makes of them
 @vcore = cores/icepi cores/trx_sid roms tools/rom2mem.py designs/c64_basic/mem designs/c64_basic/c64_core.v designs/c64_basic/c64_mem.v designs/c64_basic/cart_slot.v designs/c64_basic/slot_port.v designs/c64_basic/trx_dbg.v
+# the app RISC-V's caches (U19): rvlite_wrapper_dc and what it takes
+@cache = designs/c64_basic/cache_cfg_pkg.vhd designs/c64_basic/rv_dcache.vhd designs/c64_basic/rv_icache.vhd designs/c64_basic/rvlite_wrapper_dc.vhd
 # build.tcl's VHDL list is what eth and input compile besides Gideon's files
-@bt_vhdl = designs/c64_basic/build.tcl designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/usb_dpram.vhd designs/c64_basic/pseudo_dpram_8x32_x7.vhd designs/c64_basic/drive_mem.vhd designs/c64_basic/drive_unit.vhd designs/c64_basic/uci_unit.vhd designs/c64_basic/flash_gate.vhd designs/c64_basic/ultimate_sys.vhd designs/c64_basic/sim/usb/unisim_sim.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd
+@bt_vhdl = designs/c64_basic/build.tcl designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/usb_dpram.vhd designs/c64_basic/pseudo_dpram_8x32_x7.vhd designs/c64_basic/drive_mem.vhd designs/c64_basic/drive_unit.vhd designs/c64_basic/uci_unit.vhd designs/c64_basic/flash_gate.vhd designs/c64_basic/ultimate_sys.vhd @cache designs/c64_basic/sim/usb/unisim_sim.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd
 # the shared MIG UI model and DDR2 port
 @mig = designs/c64_basic/ddr2_port.v designs/c64_basic/sim/mig_ui_model.v
 # ddr2_lean, its calibration sequencer, the DDR2 and Xilinx primitive models, the run script (OPT-ddr2)
@@ -68,9 +70,10 @@ still60: designs/c64_basic/sim/pixlayer/run_still.sh designs/c64_basic/sim/pixla
 drive_mem: designs/c64_basic/sim/drive_mem designs/c64_basic/drive_mem.vhd @mig @gideon
 uci: designs/c64_basic/sim/uci/run.sh designs/c64_basic/sim/uci/tb_uci.vhd designs/c64_basic/uci_unit.vhd @gideon
 uci_core: designs/c64_basic/sim/uci designs/c64_basic/uci_unit.vhd @vcore @gideon
-flash_gate: designs/c64_basic/sim/flash_gate designs/c64_basic/flash_gate.vhd designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd tools/flashgate_test.py tools/flashgate @gideon
+flash_gate: designs/c64_basic/sim/flash_gate designs/c64_basic/flash_gate.vhd designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd tools/flashgate_test.py tools/flashgate @cache @gideon
   tools/flashgate_test.py tools/flashgate @gideon
-flash_boot: designs/c64_basic/sim/flash_boot designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @gideon
+flash_boot: designs/c64_basic/sim/flash_boot designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @cache @gideon
+dcache: designs/c64_basic/sim/dcache designs/c64_basic/rv_dcache.vhd @gideon
 eth: designs/c64_basic/sim/eth @bt_vhdl @gideon
 input: designs/c64_basic/sim/input designs/c64_basic/app_input.v @bt_vhdl @vcore @gideon
 slot: designs/c64_basic/sim/slot designs/c64_basic/dma_win.v @vcore

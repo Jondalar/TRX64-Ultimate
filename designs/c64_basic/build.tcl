@@ -145,7 +145,7 @@ read_vhdl -library work [list \
   $g/cpu_unit/rvlite/vhdl_source/writeback.vhd $g/cpu_unit/rvlite/vhdl_source/core.vhd \
   $g/cpu_unit/rvlite/vhdl_source/icache.vhd $g/cpu_unit/rvlite/vhdl_source/bus_converter.vhd \
   bootrom_pkg.vhd $g/cpu_unit/rvlite/vhdl_source/bootrom_8k.vhd \
-  $g/cpu_unit/rvlite/vhdl_source/rvlite_wrapper.vhd \
+  cache_cfg_pkg.vhd rv_dcache.vhd rv_icache.vhd rvlite_wrapper_dc.vhd \
   $g/ip/clock/vhdl_source/fractional_div.vhd $g/ip/srl_fifo/vhdl_source/srl_fifo-xilinx.vhd \
   $g/ip/sync_fifo/vhdl_source/sync_fifo.vhd \
   $g/io/uart_lite/vhdl_source/tx.vhd $g/io/uart_lite/vhdl_source/rx.vhd \

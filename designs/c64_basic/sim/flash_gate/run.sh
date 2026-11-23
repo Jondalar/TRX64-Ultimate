@@ -31,7 +31,9 @@ $GH -a $F $here/../usb/tl_string_util_pkg.vhd \
     $R/core_pkg.vhd $R/alu_pkg.vhd $R/alu_logical.vhd $R/alu_branch.vhd $R/multiply.vhd \
     $R/dsram.vhd $R/gprf.vhd $R/csr.vhd $R/decode_comb.vhd $R/decode.vhd $R/fetch.vhd \
     $R/execute.vhd $R/writeback.vhd $R/core.vhd $R/icache.vhd $R/bus_converter.vhd \
-    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd $R/rvlite_wrapper.vhd \
+    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd \
+    $root/designs/c64_basic/cache_cfg_pkg.vhd $root/designs/c64_basic/rv_dcache.vhd \
+    $root/designs/c64_basic/rv_icache.vhd $root/designs/c64_basic/rvlite_wrapper_dc.vhd \
     $here/tb_cpu.vhd
 $GH -e $F tb_cpu
 
