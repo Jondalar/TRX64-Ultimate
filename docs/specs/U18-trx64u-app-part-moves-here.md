@@ -631,7 +631,7 @@ Nothing decided yet.
     jumped 2, "Resume here" resumed one frame late); `go_to` now finds the frame again by its seq. Image + bss: base
     212,860 B, ring 148,360 B.
   - **Where the Timewarp still is drawn (MultiCore, by Alex's delegation): our library, through a pull hook.**
-    CoreHooks gets `int (*menu_still)(const CoreStillGeom *g, CoreStill *out)` after `menu_video` (major 1, append only).
+    Superseded on 2026-11-23 by MultiCore's overlay service (T256, the entry after the next); never built. CoreHooks gets `int (*menu_still)(const CoreStillGeom *g, CoreStill *out)` after `menu_video` (major 1, append only).
     The base calls it while `menu_video` is on, when the timeline opens and after every scrub step, on the main loop
     without the core lock; it hands the canvas (960 x 540) and where it lands on the HDMI frame, we answer with an RGB565
     rectangle in our memory, which the base places under the bar as an LVGL image. We draw it as the firmware's
@@ -647,3 +647,26 @@ Nothing decided yet.
     user of a general overlay facility (a library or app puts pixels over the machine's picture, also while it runs), in
     the base and the SDK or in a shared library. Its shape (service or library, push or pull, who owns the layer with the
     menu closed, the still and the PAUSED tag as users) is MultiCore's to design, as advisor.
+  - **The overlay is MultiCore's T256, a base service in the SDK (Alex D1-D7, 2026-11-23); what it means for us (agreed
+    with MultiCore).**
+    - Alex's decisions there:
+      - D1: no new gateware.
+      - D2: only the base drives the pixel layer.
+      - D3: a library paints RGB565 surfaces, key-colour pixels are transparent.
+      - D4: elements only while the menu is closed; the still also lies under the key-coloured menu pages.
+      - D5: the base's tag says only "PAUSED".
+      - D6/D7: a library can hide and show the menu by a call.
+    - **The Timewarp still needs no surface of ours.** After every scrub step the host's still capture already holds the
+      frame Timewarp shows: the step runs one frame and waits until the `STILL_STATUS` count moves (`ring/ring.cc`). The
+      base re-reads the capture after every op that returns while a key-coloured page is open, and `still(NULL)` asks for
+      it. No still buffer and no HDMI table code in the library; the bar stays the base's (`build_timeline`).
+    - **The mapping is ours, as data.** The base must not interpret c64_basic's mode registers, so CoreHooks gets
+      `int (*still_map)(int row, int scale, OvlStillMap *m)` after `menu_video`. The base calls it before each conversion
+      of a capture, on the main loop without the core lock, with the row as 0x4F07 reads and the scale it wrote (raw
+      values). We fill `xw0, yw0, hn, hd, vn, vd` and the row's window from `trx_hdmi_geom` / `trx_hdmi_plan`. We answer 0
+      for a pair our table does not have, and then there is no still. The lines of a capture come from its own
+      `STILL_STATUS` b2 (270 or 240), as the firmware clamps them during a System Mode switch.
+    - **PAUSED:** the library that paused (`op_pause_toggle`) shows how to go on with a small key-coloured element of its
+      own, shown at pause and hidden at resume. The base's still lies behind it.
+    - One buffer per surface: `begin` waits at most one render and never fails, and the base copies the surface into its
+      canvas, never scans our memory out. Waits for MultiCore's spec draft and SDK.
