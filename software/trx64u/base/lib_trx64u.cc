@@ -72,7 +72,7 @@ static struct {
     const char *name;
     const void *t;
     uint32_t size;
-} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 } };
+} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 }, { CBMPRG_API_NAME, 0, 0 } };
 
 const void *x_table(int which, uint32_t off)
 {
@@ -183,9 +183,10 @@ static void hook_base_setting_changed(const char *key)
     }
 }
 
-// init, release, media_flush, media_pending: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no warm_reset and no cold_start).
+// init, release, media_flush, media_pending and the mount slots: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no
+// warm_reset and no cold_start).
 static const CoreHooks core_hooks = { sizeof(CoreHooks), c64_hook_init, c64_hook_release, 0, 0, c64_hook_media_flush, c64_hook_media_pending, hook_start,
-                                      hook_menu_closed, hook_base_setting_changed };
+                                      hook_menu_closed, hook_base_setting_changed, c64_hook_slot_spec, c64_hook_slot_mount, c64_hook_slot_eject };
 
 // The library's named exports (base 3.2, LibRecord::export_list); the Makefile's LIB_EXPORTS lists the same names and majors, and the loader refuses the
 // library when lib_register does not return each of them.

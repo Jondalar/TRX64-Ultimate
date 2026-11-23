@@ -472,3 +472,9 @@ Nothing decided yet.
     the firmware builds with the final sources (exit 0); the monitor library links with a stub of the 3.3 accessors,
     passes D19 and packs (image + bss 682,500 B, .u2a 211,488 B). On base 3.2 (no when_frozen poll) the F4 session
     never starts while the menu is open. `software/trx64u/pending/trxmon-ring-steps.patch` holds both trxmon changes.
+  - **Mount-slot hooks, cbmprg, drive reset:** our corehooks implement `slot_spec` / `slot_mount` / `slot_eject`
+    (slot 0 "Drive A" through cbm1541, slot 1 "Cartridge" through c64cart run / remove plus forgetting the program,
+    as c64.cc's MountSlots did); our ops that change a slot themselves call `ctx.mount_notify`; `desc.toml` names
+    `[core] hooks = "trx64u"`; the init hook resets drive A with `cbm1541.reset`. The copy of MultiCore's program loader
+    is gone: placing, typing and relinking go through their export "cbmprg"; until a bundle carries it, Run PRG, Load
+    PRG, DMA, T64, Run with App and Mount & Run refuse with a reason. Image + bss 213,372 B.

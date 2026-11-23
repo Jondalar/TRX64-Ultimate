@@ -1,9 +1,9 @@
 // The C64 descriptor's code (U18): MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09), the TRX2 descriptor of the trx64u core, moved into this library
 // (their boundary map 2.11, 12.1). Its data (identity, ROMs, freeze, hotkeys, mount slot names, report registers, the mouse) is desc.toml; this file is
 // what the data names: the ROM put operations, the freeze mode, the program loads (run, load and start, DMA, T64, run with app, the typed script), the
-// cartridge run and remove, the service poll, the machine's memory as machine.read_mem / write_mem, and the hooks init, release, media_flush and
-// media_pending. The program loader (relink, pointers, typed keys) is MultiCore's app/loaders/cbm_prg.cc and the T64 reader its coreapp/src/t64.cc, both
-// cut to what this core uses. Every handler and hook runs with the core lock (svc_io.h: the register and RAM window calls need it).
+// cartridge run and remove, the service poll, the machine's memory as machine.read_mem / write_mem, and the hooks init, release, media_flush,
+// media_pending and the mount slots. The program loader (relink, pointers, typed keys) is MultiCore's export "cbmprg"; the T64 reader is their
+// coreapp/src/t64.cc cut to what this core uses. Every handler and hook runs with the core lock (svc_io.h: the register and RAM window calls need it).
 #include "c64core.h"
 #include "c64_go.h"
 #include "trx64u_ops.h"
@@ -150,7 +150,7 @@ int c64_put_char(CoreCtx *, const OpArgs &a, OpOut &o)
     return put_rom(a, C64_ROM_CHAR, C64_CHAR_BYTES, "CHAR", o);
 }
 
-// ---- the program loader (MultiCore app/loaders/cbm_prg.cc, the C64's numbers of c64.cc run_params) ------------------------------------------------------
+// ---- the program loader: the export "cbmprg" (MultiCore's app/loaders/cbm_prg.cc) with the C64's numbers (c64.cc run_params, load_params) ------------
 // Gideon's addresses (c64_subsys.cc, bootcrt.tas): BASIC at $0801, the pointer pair $2B/$2C and the three that follow, the keyboard buffer at $0277 with its
 // count at $C6. A file runs from $0801 to $FFFF: the bytes go through the RAM's second port, under BASIC, the I/O area and the KERNAL alike. PRG_READY_MS is
 // the least the machine runs after the reset before the first look at READY; not measured on a board (T104.2 5).
@@ -158,167 +158,49 @@ int c64_put_char(CoreCtx *, const OpArgs &a, OpOut &o)
 #define PRG_MIN_SIZE    3
 #define BASIC_START     0x0801
 #define TXTTAB          0x2B
-#define TXTTAB_MAX      0x9FFF
-#define VARTAB          0x2D
-#define ARYTAB          0x2F
-#define STREND          0x31
-#define KBD_BUFFER      0x0277
-#define KBD_COUNT       0xC6
 #define PRG_READY_MS    1000
 #define READY_WAIT_MAX_MS 4000          // READY is when BASIC's cold start has set the pointer pair; the banner and the editor loop need a moment more
 #define READY_SETTLE_MS   300
 
 // "Run PRG": a load address of $0801 is BASIC (relinked to the machine's start of BASIC, RUN), anything else SYS; $0801-$FFFF behind a .P00 header.
+static CbmPrgMachine run_machine(void)
+{
+    CbmPrgMachine m;
+    memset(&m, 0, sizeof(m));
+    m.size = sizeof(m);
+    m.basic_starts[0] = BASIC_START;
+    m.nbasic_starts = 1;
+    m.txttab = TXTTAB;
+    m.txttab_min = BASIC_START;
+    m.txttab_max = 0x9FFF;
+    m.vartab = 0x2D;
+    m.arytab = 0x2F;
+    m.strend = 0x31;
+    m.kbd_buffer = 0x0277;
+    m.kbd_count = 0xC6;
+    m.ready_ms = PRG_READY_MS;
+    m.p00_header = PRG_P00_HEADER;
+    m.min_size = PRG_MIN_SIZE;
+    m.max_size = PRG_P00_HEADER + 2 + (0x10000 - BASIC_START);
+    return m;
+}
 // "Load PRG and start from": the file goes where it says, anywhere in $0000-$FFFF, nothing is relinked.
-struct PrgParams {
-    bool basic;
-    uint32_t max_size;
-};
-static PrgParams run_params(void)
+static CbmPrgMachine load_machine(void)
 {
-    PrgParams p = { true, PRG_P00_HEADER + 2 + (0x10000 - BASIC_START) };
-    return p;
-}
-static PrgParams load_params(void)
-{
-    PrgParams p = { false, PRG_P00_HEADER + 2 + 0x10000 };
-    return p;
+    CbmPrgMachine m = run_machine();
+    m.nbasic_starts = 0;
+    m.max_size = PRG_P00_HEADER + 2 + 0x10000;
+    return m;
 }
 
-struct PrgResult {
-    uint16_t load;               // where it went
-    uint16_t end;                // the first byte after it
-    bool basic;                  // relinked; RUN starts it
-    uint16_t start;              // the address SYS uses (0 for a BASIC program)
-};
-
-// A BASIC program is a chain of lines: two bytes link to the next line, two bytes line number, the tokenised text, a zero. A link of 0 ends the chain.
-// Moving the program rewrites every link by the difference; nothing else in a line refers to an address. Returns the address after the program.
-static uint16_t relink(uint8_t *prog, uint32_t n, uint16_t from, uint16_t to)
+// The loader's table with the four members this file calls; null with the reason in msg when no library exports it.
+static const CbmPrgApi *prg_lib(char *msg, int msglen)
 {
-    uint32_t off = 0;
-    uint16_t addr = to;
-    while (off + 1 < n) {
-        uint16_t link = (uint16_t)(prog[off] | (prog[off + 1] << 8));
-        if (!link || link < from) {
-            return (uint16_t)(addr + 2);              // the end, or a link backwards: not a chain we can follow
-        }
-        uint32_t next = (uint32_t)(link - from);
-        if (next <= off || next >= n) {
-            return (uint16_t)(addr + 2);              // a link outside the file: stop, do not write past it
-        }
-        uint16_t moved = (uint16_t)(link + (to - from));
-        prog[off] = (uint8_t)(moved & 0xFF);
-        prog[off + 1] = (uint8_t)(moved >> 8);
-        addr = (uint16_t)(addr + (next - off));
-        off = next;
+    const CbmPrgApi *x = X_GET(X_PRG, CbmPrgApi, script_step);
+    if (x && x->place && x->type_start && x->script_check) {
+        return x;
     }
-    return (uint16_t)(addr + 2);
-}
-
-static void wr16(uint16_t addr, uint16_t v)
-{
-    uint8_t b[2] = { (uint8_t)(v & 0xFF), (uint8_t)(v >> 8) };
-    ram_put(addr, b, 2);
-}
-
-// Writes the program into the machine's memory, relinking it in `data` when it is BASIC. `data` is the file as it is on the medium, its two load-address
-// bytes and a .P00's header included. 0, or a reason. The caller has the memory-only mode on.
-static int prg_place(uint8_t *data, uint32_t size, const PrgParams &p, bool is_p00, PrgResult *out, char *msg, int msglen)
-{
-    memset(out, 0, sizeof(*out));
-    uint32_t skip = is_p00 ? PRG_P00_HEADER : 0;
-    if (size < skip + PRG_MIN_SIZE || size > p.max_size) {
-        snprintf(msg, msglen, "%u bytes is not a program", (unsigned)size);
-        return 1;
-    }
-    uint8_t *f = data + skip;
-    uint16_t load = (uint16_t)(f[0] | (f[1] << 8));
-    uint8_t *body = f + 2;
-    uint32_t blen = size - skip - 2;
-    if ((uint32_t)load + blen > 0x10000u) {
-        snprintf(msg, msglen, "$%04X + %u bytes runs past $FFFF", load, (unsigned)blen);
-        return 1;
-    }
-    if (!p.basic || load != BASIC_START) {
-        ram_put(load, body, blen);                    // a machine-language file: it goes where it says, and SYS starts it there
-        out->load = load;
-        out->end = (uint16_t)(load + blen);
-        out->start = load;
-        return 0;
-    }
-    // A BASIC program goes to the machine's own start of BASIC, which the machine itself states; the window keeps a machine that has not finished its reset
-    // from sending the program into nowhere.
-    uint8_t b[2] = { 0, 0 };
-    ram_get(TXTTAB, b, 2);
-    uint16_t txt = (uint16_t)(b[0] | (b[1] << 8));
-    if (txt < BASIC_START || txt > TXTTAB_MAX) {
-        snprintf(msg, msglen, "the machine says BASIC starts at $%04X, which cannot be right", txt);
-        return 1;
-    }
-    if ((uint32_t)txt + blen > 0x10000u) {
-        snprintf(msg, msglen, "the program does not fit above $%04X", txt);
-        return 1;
-    }
-    uint16_t end = relink(body, blen, load, txt);
-    ram_put(txt, body, blen);
-    wr16(VARTAB, end);
-    wr16(ARYTAB, end);
-    wr16(STREND, end);
-    out->load = txt;
-    out->end = end;
-    out->basic = true;
-    return 0;
-}
-
-// Types "RUN\r" for a BASIC program, "SYS<addr>\r" otherwise, into the keyboard buffer; the machine is at READY.
-static void type_start(const PrgResult &r)
-{
-    char line[16];
-    int n = r.basic ? snprintf(line, sizeof(line), "RUN\r") : snprintf(line, sizeof(line), "SYS%u\r", (unsigned)r.start);
-    ram_put(KBD_BUFFER, line, (uint32_t)n);
-    uint8_t k = (uint8_t)n;
-    ram_put(KBD_COUNT, &k, 1);
-}
-
-// T104.1 D15, a typed script (Mount & Run): pieces separated by '|', each at most ten keys - the keyboard buffer. 0, or a reason.
-static int script_check(const char *text, char *msg, int msglen)
-{
-    size_t piece = 0;
-    for (const char *p = text;; p++) {
-        if (*p == '|' || !*p) {
-            if (piece > 10) {
-                snprintf(msg, msglen, "a typed piece of %u keys does not fit the keyboard buffer (10)", (unsigned)piece);
-                return 1;
-            }
-            piece = 0;
-            if (!*p) {
-                return 0;
-            }
-        } else {
-            piece++;
-        }
-    }
-}
-
-// Types the next piece at *pos when the machine has taken the one before (the key count is 0). 1 when the whole script is in and taken.
-static int script_step(const char *script, int *pos)
-{
-    uint8_t cnt = 0;
-    ram_get(KBD_COUNT, &cnt, 1);
-    if (cnt) {
-        return 0;
-    }
-    const char *s = script + *pos;
-    if (!*s) {
-        return 1;
-    }
-    const char *end = strchr(s, '|');
-    size_t n = end ? (size_t)(end - s) : strlen(s);
-    ram_put(KBD_BUFFER, s, (uint32_t)n);
-    uint8_t k = (uint8_t)n;
-    ram_put(KBD_COUNT, &k, 1);
-    *pos += (int)n + (end ? 1 : 0);
+    snprintf(msg, msglen, "No program loader: no library exports \"" CBMPRG_API_NAME "\"");
     return 0;
 }
 
@@ -376,8 +258,8 @@ static const char *base_name(const char *path)
     return slash ? slash + 1 : path;
 }
 
-// The whole file, at most p.max_size bytes, into prgbuf. 0 or a reason.
-static int read_prg(const char *path, const PrgParams &p, uint32_t *size, char *msg, int msglen)
+// The whole file, at most m.max_size bytes, into prgbuf. 0 or a reason.
+static int read_prg(const char *path, const CbmPrgMachine &m, uint32_t *size, char *msg, int msglen)
 {
     SvcFile *f = g_api->fs->open(path, false);
     if (!f) {
@@ -385,8 +267,8 @@ static int read_prg(const char *path, const PrgParams &p, uint32_t *size, char *
         return 1;
     }
     uint64_t n = g_api->fs->fsize(f);
-    uint32_t skip = is_p00(path) ? PRG_P00_HEADER : 0;
-    if (n < skip + PRG_MIN_SIZE || n > p.max_size) {
+    uint32_t skip = is_p00(path) ? m.p00_header : 0;
+    if (n < skip + m.min_size || n > m.max_size) {
         g_api->fs->close(f);
         snprintf(msg, msglen, "%s: %u bytes is not a program", path, (unsigned)fs_size32(n));
         return 1;
@@ -407,10 +289,12 @@ static int read_prg(const char *path, const PrgParams &p, uint32_t *size, char *
     return 0;
 }
 
-static int place(uint32_t size, const PrgParams &p, bool p00, PrgResult *r, char *msg, int msglen)
+// The program in prgbuf into the machine, through the RAM's second port with the memory-only mode on, so that $D000-$DFFF is RAM too and not a bus cycle
+// into the chips (c64.cc place). 0 or a reason.
+static int place(const CbmPrgApi *x, uint32_t size, const CbmPrgMachine &m, bool p00, CbmPrgPlaced *r, char *msg, int msglen)
 {
     c64_ram_memonly(true);
-    int rc = prg_place(prgbuf, size, p, p00, r, msg, msglen);
+    int rc = x->place(prgbuf, size, &m, p00, r, msg, msglen);
     c64_ram_memonly(false);
     return rc;
 }
@@ -441,19 +325,22 @@ static void start_job(int kind, const char *path)
 }
 
 // The operation's half: the file is read and checked, its .cfg loaded, the machine reset, the job queued. The machine is not touched when the file is no
-// program. The reset clears a job that is still waiting (the init hook), so the queue comes after it.
+// program or there is no program loader. The reset clears a job that is still waiting (the init hook), so the queue comes after it.
 static int queue_prg(CoreCtx *c, int kind, const char *path, uint16_t start, char *msg, int msglen)
 {
-    PrgParams p = kind == J_RUN ? run_params() : load_params();
+    if (!prg_lib(msg, msglen)) {
+        return 1;
+    }
+    CbmPrgMachine m = kind == J_RUN ? run_machine() : load_machine();
     uint32_t size;
-    if (read_prg(path, p, &size, msg, msglen)) {
+    if (read_prg(path, m, &size, msg, msglen)) {
         return 1;
     }
     trx64u_load_assoc_cfg(c, path, true);                      // filetype_prg.cc:186-190: the .cfg (or .usr) beside the file goes in before the program runs
     bool p00 = is_p00(path);
     bool go = kind == J_LOAD && c64_go_available();
     if (kind == J_LOAD && !go) {
-        uint32_t skip = p00 ? PRG_P00_HEADER : 0;
+        uint32_t skip = p00 ? m.p00_header : 0;
         uint16_t load = (uint16_t)(prgbuf[skip] | (prgbuf[skip + 1] << 8));
         if (load < 0x0400) {
             snprintf(msg, msglen, "$%04X is in the zero page, stack or KERNAL work area: a typed SYS cannot start it, and this bitstream "
@@ -474,13 +361,14 @@ static int queue_prg(CoreCtx *c, int kind, const char *path, uint16_t start, cha
 }
 
 struct GoPlace {
-    const PrgParams *p;
-    PrgResult *r;
+    const CbmPrgApi *x;
+    const CbmPrgMachine *m;
+    CbmPrgPlaced *r;
 };
 static int go_place(void *user, char *msg, int msglen)
 {
     GoPlace *a = (GoPlace *)user;
-    int rc = place(g_st.size, *a->p, g_st.p00, a->r, msg, msglen);
+    int rc = place(a->x, g_st.size, *a->m, g_st.p00, a->r, msg, msglen);
     if (!rc) {
         poke_dma_id();
     }
@@ -490,30 +378,34 @@ static int go_place(void *user, char *msg, int msglen)
 // The service's half, with the machine at READY.
 static int fire(char *msg, int msglen)
 {
-    PrgParams p = g_st.job == J_RUN ? run_params() : load_params();
-    PrgResult r;
+    const CbmPrgApi *x = prg_lib(msg, msglen);
+    if (!x) {
+        return 1;
+    }
+    CbmPrgMachine m = g_st.job == J_RUN ? run_machine() : load_machine();
+    CbmPrgPlaced r;
     memset(&r, 0, sizeof(r));
     if (g_st.job == J_RUN) {
-        if (place(g_st.size, p, g_st.p00, &r, msg, msglen)) {
+        if (place(x, g_st.size, m, g_st.p00, &r, msg, msglen)) {
             return 1;
         }
         poke_dma_id();
-        type_start(r);
+        x->type_start(&m, &r);
         lib_logf("[c64] %s: $%04X-$%04X, %s", g_st.name, r.load, (unsigned)(r.end - 1) & 0xFFFF, r.basic ? "RUN" : "SYS");
         return 0;
     }
     if (g_st.go) {
-        GoPlace pa = { &p, &r };
+        GoPlace pa = { x, &m, &r };
         if (c64_go(g_st.start, go_place, &pa, msg, msglen)) {
             return 1;
         }
     } else {
-        if (place(g_st.size, p, g_st.p00, &r, msg, msglen)) {
+        if (place(x, g_st.size, m, g_st.p00, &r, msg, msglen)) {
             return 1;
         }
         poke_dma_id();
         r.start = g_st.start;
-        type_start(r);
+        x->type_start(&m, &r);
     }
     lib_logf("[c64] %s: $%04X-$%04X, start $%04X (%s)", g_st.name, r.load, (unsigned)(r.end - 1) & 0xFFFF, g_st.start, g_st.go ? "CPU address set" : "SYS typed");
     return 0;
@@ -558,17 +450,22 @@ static void service_job(void)
     if (g_st.ran_ms - g_st.ready_at < READY_SETTLE_MS) {
         return;
     }
+    char msg[200];
+    msg[0] = 0;
     if (g_st.job == J_TYPE) {
-        if (g_st.ran_ms - g_st.ready_at > 60000) {
+        const CbmPrgApi *x = prg_lib(msg, sizeof(msg));
+        CbmPrgMachine m = run_machine();
+        if (!x) {
+            g_st.job = J_NONE;
+            tell(msg);
+        } else if (g_st.ran_ms - g_st.ready_at > 60000) {
             g_st.job = J_NONE;
             tell("The machine did not take the typed start (is the editor stuck?)");
-        } else if (script_step(g_st.script, &g_st.script_pos)) {
+        } else if (x->script_step(&m, g_st.script, &g_st.script_pos)) {
             g_st.job = J_NONE;
         }
         return;
     }
-    char msg[200];
-    msg[0] = 0;
     if (!fire(msg, sizeof(msg))) {
         remember();
     } else {
@@ -601,13 +498,14 @@ int c64_load(CoreCtx *c, const OpArgs &a, OpOut &o)
 // "DMA": the file goes into RAM where its load address says; nothing is reset, nothing is started (Gideon's DMA load without the run).
 int c64_dma(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    PrgParams p = load_params();
+    const CbmPrgApi *x = prg_lib(o.msg, o.msglen);
+    CbmPrgMachine m = load_machine();
     uint32_t size;
-    if (read_prg(a.s(0), p, &size, o.msg, o.msglen)) {
+    if (!x || read_prg(a.s(0), m, &size, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
-    PrgResult r;
-    if (place(size, p, is_p00(a.s(0)), &r, o.msg, o.msglen)) {
+    CbmPrgPlaced r;
+    if (place(x, size, m, is_p00(a.s(0)), &r, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     snprintf(o.msg, o.msglen, "Loaded $%04X-$%04X into RAM", r.load, (unsigned)(r.end - 1) & 0xFFFF);
@@ -669,7 +567,7 @@ static int load_t64(const char *path, int index, uint32_t *size, char *msg, int 
 int c64_run_t64(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     uint32_t size;
-    if (load_t64(a.s(0), a.i(1), &size, o.msg, o.msglen)) {
+    if (!prg_lib(o.msg, o.msglen) || load_t64(a.s(0), a.i(1), &size, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     if (cold_reset(o.msg, o.msglen)) {
@@ -684,12 +582,13 @@ int c64_run_t64(CoreCtx *, const OpArgs &a, OpOut &o)
 
 int c64_dma_t64(CoreCtx *, const OpArgs &a, OpOut &o)
 {
+    const CbmPrgApi *x = prg_lib(o.msg, o.msglen);
     uint32_t size;
-    if (load_t64(a.s(0), a.i(1), &size, o.msg, o.msglen)) {
+    if (!x || load_t64(a.s(0), a.i(1), &size, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
-    PrgResult r;
-    if (place(size, load_params(), false, &r, o.msg, o.msglen)) {
+    CbmPrgPlaced r;
+    if (place(x, size, load_machine(), false, &r, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     snprintf(o.msg, o.msglen, "Loaded $%04X-$%04X into RAM", r.load, (unsigned)(r.end - 1) & 0xFFFF);
@@ -771,7 +670,8 @@ int c64_run_with_app(CoreCtx *c, const OpArgs &a, OpOut &o)
 // c64.type_script (desc.toml [core] type_op; T104.1 D15, Mount & Run): reset, and type the script at READY in pieces of at most ten keys
 int c64_type(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    if (script_check(a.s(0), o.msg, o.msglen)) {
+    const CbmPrgApi *x = prg_lib(o.msg, o.msglen);
+    if (!x || x->script_check(a.s(0), o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     if (cold_reset(o.msg, o.msglen)) {
@@ -818,55 +718,151 @@ int c64_set_rom(CoreCtx *, const OpArgs &a, OpOut &o)
 }
 
 // ---- the cartridge (the export "c64cart") --------------------------------------------------------------------------------------------------------
-// The Library's .crt: its .cfg first (filetype_crt.cc:75), then the cartridge is placed and the machine reset into it; the program that ran is gone with it.
+// The .crt at `path` placed and the machine reset into it (c64cart.run); the program that ran is gone with it. 0, or the reason.
+static int cart_run(const char *path, char *msg, int msglen)
+{
+    const C64CartApi *k = X_GET(X_CART, C64CartApi, run);
+    if (!k) {
+        snprintf(msg, msglen, "No cartridge library: the cartridge cannot be started");
+        return 1;
+    }
+    if (k->run(path, msg, msglen)) {
+        return 1;
+    }
+    forget_program();
+    return 0;
+}
+
+// The cartridge taken away and the machine cold reset (c64cart.remove); the program's name goes, its path stays (c64.cc). 0, or the reason; -1 with the
+// reason when there is no cartridge library.
+static int cart_remove(char *msg, int msglen)
+{
+    const C64CartApi *k = X_GET(X_CART, C64CartApi, remove);
+    if (!k) {
+        snprintf(msg, msglen, "No cartridge library");
+        return -1;
+    }
+    if (k->remove(msg, msglen)) {
+        return 1;
+    }
+    g_st.program[0] = 0;
+    return 0;
+}
+
+// The Library's .crt: its .cfg first (filetype_crt.cc:75), then the cartridge. The slot is told changed whatever the answer: a run that fails after the
+// machine was held leaves the port empty.
 int c64_run_crt(CoreCtx *c, const OpArgs &a, OpOut &o)
 {
     trx64u_load_assoc_cfg(c, a.s(0), false);
-    const C64CartApi *k = X_GET(X_CART, C64CartApi, run);
-    if (!k) {
-        snprintf(o.msg, o.msglen, "No cartridge library: the cartridge cannot be started");
-        return OPE_FAILED;
-    }
-    if (k->run(a.s(0), o.msg, o.msglen)) {
-        return OPE_FAILED;
-    }
-    forget_program();
-    return OPE_OK;
+    int rc = cart_run(a.s(0), o.msg, o.msglen);
+    slot_changed(SLOT_CART);
+    return rc ? OPE_FAILED : OPE_OK;
 }
 
 int c64_remove_cart(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    const C64CartApi *k = X_GET(X_CART, C64CartApi, remove);
-    if (!k) {
-        snprintf(o.msg, o.msglen, "No cartridge library");
-        return OPE_FAILED;
+    int rc = cart_remove(o.msg, o.msglen);
+    if (rc >= 0) {
+        slot_changed(SLOT_CART);
     }
-    if (k->remove(o.msg, o.msglen)) {
-        return OPE_FAILED;
+    return rc ? OPE_FAILED : OPE_OK;
+}
+
+// ---- the mount slots (core_hooks.h slot_*: MountSlots' meaning; c64.cc slot_spec, slot_mount, slot_eject) --------------------------------------------
+// SLOT_DRIVE_A is the drive library's slot. SLOT_CART's spec is the path of the .crt in the port, and its mount is the Library's run without the .cfg:
+// the program that was running is gone with it. No mount here releases the machine: the drive's has no reset, and the cartridge's reset is the base's
+// machine.cold_reset, which while ctx.state has CTX_MEDIA_RESTORING leaves the machine held for the base to release. A mount or an eject asked for here
+// is the base's doing, so these do not call slot_changed.
+
+// `s` into buf: its length; 0 for none (buf ""); -1 when it does not fit in n - 1 bytes
+static int put_spec(const char *s, char *buf, int n)
+{
+    if (n > 0) {
+        buf[0] = 0;
     }
-    g_st.program[0] = 0;
-    return OPE_OK;
+    if (!s || !s[0]) {
+        return 0;
+    }
+    size_t len = strlen(s);
+    if (n <= 0 || len > (size_t)(n - 1)) {
+        return -1;
+    }
+    memcpy(buf, s, len + 1);
+    return (int)len;
+}
+
+int c64_hook_slot_spec(int slot, char *buf, int n)
+{
+    const char *s = 0;
+    if (slot == SLOT_DRIVE_A) {
+        const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, slot_spec);
+        s = d ? d->slot_spec() : 0;
+    } else if (slot == SLOT_CART && cart_active()) {
+        const C64CartApi *k = X_GET(X_CART, C64CartApi, path);
+        s = k ? k->path() : 0;
+    }
+    return put_spec(s, buf, n);
+}
+
+int c64_hook_slot_mount(int slot, const char *spec, char *msg, int msglen)
+{
+    if (slot == SLOT_DRIVE_A) {
+        const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, slot_mount);
+        if (!d) {
+            snprintf(msg, msglen, "This machine has no drive A");
+            return 1;
+        }
+        return d->slot_mount(spec, msg, msglen);
+    }
+    if (slot == SLOT_CART) {
+        return cart_run(spec, msg, msglen);
+    }
+    snprintf(msg, msglen, "No mount slot %d", slot);
+    return 1;
+}
+
+int c64_hook_slot_eject(int slot, char *msg, int msglen)
+{
+    if (slot == SLOT_DRIVE_A) {
+        const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, slot_eject);
+        return d ? d->slot_eject(msg, msglen) : 0;                   // no drive library: the slot is empty
+    }
+    if (slot == SLOT_CART) {
+        int rc = cart_remove(msg, msglen);
+        return rc < 0 ? 0 : rc;                                      // no cartridge library: the port is empty
+    }
+    snprintf(msg, msglen, "No mount slot %d", slot);
+    return 1;
 }
 
 // ---- the hooks (core_hooks.h; lib_trx64u.cc exports them) ------------------------------------------------------------------------------------------
 // init: CTRL+P / CTRL+N at power-on (once, before the settings are applied, T228 R21), the machine held in reset (C64_MODE), drive A reset with it when
 // "Resets when C64 resets" is on, and what the reset ends: a program that was still waiting for READY, a SID tune that was waiting for its player
-// cartridge, the SID player's cartridge itself (the one before it comes back), the program the machine had run (T228 R20 1/7). The drive reset is the
-// drive library's operation; its result is not the reset's (c64.cc ignored it too), a missing drive library answers OPE_NOT_FOUND.
+// cartridge, the SID player's cartridge itself (the one before it comes back: the cartridge slot changes), the program the machine had run (T228 R20 1/7).
+// The drive reset is cbm1541.reset, which makes no drive (-1: none there); its result is not the reset's (c64.cc ignored it), a failure is logged.
 int c64_hook_init(char *, int)
 {
     u64cfg_power_on_keys();
     c64_mode_reset(true);
     if (setting_ix("Resets when C64 resets", 1)) {
-        OpIn in[1] = { in_str("slot", "iec:drive_a") };
+        const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, reset);
         char m[OP_MSG_MAX];
-        op_call("drive.reset", in, 1, m, sizeof(m));
+        m[0] = 0;
+        int rc = d ? d->reset(m, sizeof(m)) : -1;
+        if (rc && rc != -1) {
+            lib_logf("[c64] drive A reset: %s", m);
+        }
     }
     g_st.job = J_NONE;
     trx64u_sid_cancel();
     const C64CartApi *k = X_GET(X_CART, C64CartApi, player_end);
     if (k) {
+        const C64CartApi *pa = X_GET(X_CART, C64CartApi, player_active);
+        bool was = pa && pa->player_active();
         k->player_end();
+        if (was && !pa->player_active()) {
+            slot_changed(SLOT_CART);
+        }
     }
     forget_program();
     return 0;

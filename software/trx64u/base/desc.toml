@@ -5,8 +5,8 @@
 # ---- the descriptor's data (T239.3 D17, record version 6) -------------------------------------------------------------------------------------------
 # What MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09) held as the TRX2 descriptor `c64_desc`, as the sections of their tools/descrec.py. Its code is
 # this library: the operations the data names (put_op, service_op, type_op, run_op, the hotkey's core_op) are lib_trx64u.cc's record, and init, release,
-# media_flush and media_pending are the export "corehooks" (c64core.cc). The settings, tasks, media rows, file types, machine_info and the key table are
-# menu.toml's. Register numbers are offsets in the core window (c64u_regs.h C64U_*).
+# media_flush, media_pending and the [mount] slots' spec, mount and eject are the export "corehooks" (c64core.cc) of the library [core] hooks names. The
+# settings, tasks, media rows, file types, machine_info and the key table are menu.toml's. Register numbers are offsets in the core window (c64u_regs.h C64U_*).
 
 [core]
 id = "TRX2"                            # the ID block of the TRX64 Ultimate bitstream
@@ -16,6 +16,7 @@ short_title = "C64"
 folder = "c64"
 store = "C64 Settings"
 min_contract = 1
+hooks = "trx64u"                       # the library whose export "corehooks" holds this core's hooks: this one (Makefile LIB_NAME)
 reset_ms = 50
 service_op = "c64.service"
 service_period_ms = 20                 # not poll_when_frozen: a program waits for READY while the machine runs, not while the menu holds it
@@ -60,7 +61,8 @@ core_key = "Hotkey swap disk"
 core_label = "Swap disk"
 
 # the slots of the core's own media engines, for "Persist medium mounts", the media sets and ctx.media_source (T180 D2, D5): slot 0 drive A (the drive
-# library), slot 1 the cartridge port (the .crt's path). Their spec, mount and eject are code; CoreHooks (base 3.3) has no member for them yet.
+# library), slot 1 the cartridge port (the .crt's path). Their spec, mount and eject are CoreHooks' slot_spec, slot_mount, slot_eject (c64core.cc), by
+# position in this list (SLOT_DRIVE_A, SLOT_CART in trx64u_lib.h).
 [mount]
 names = ["Drive A", "Cartridge"]
 

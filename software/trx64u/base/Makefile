@@ -15,7 +15,7 @@ LIB_EXPORTS = corehooks=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as packed on 2026-11-23,
 # the base 3.3 accessors stubbed (56 bytes); 65,564 bytes of the bss are c64core.cc's program buffer, which a queued program job holds until the service
 # starts it. heap: no block held while idle, at most 66,044 bytes at once (U18 S13); the counts: lib_register's record.
-LIB_BUDGET = image=212500 heap_keep=0 heap_peak=66044 ops=66 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
+LIB_BUDGET = image=213372 heap_keep=0 heap_peak=66044 ops=66 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
 include $(SDK)/mk/lib.mk
 
 # setting.cc's lists of the values of every choice setting, from the core's menu.toml (setlists.py)

@@ -27,11 +27,15 @@ const char *c64_prg_name(CoreCtx *c);
 const char *c64_prg_pending(CoreCtx *c);
 const char *c64_prg_path(CoreCtx *c);
 
-// The descriptor's hooks (core_hooks.h, same meaning as CoreDesc::init, release, media_flush, media_pending): init holds the machine and ends what the reset
-// ends, release lets it go, the media hooks are drive A's write-back.
+// The descriptor's hooks (core_hooks.h, same meaning as CoreDesc::init, release, media_flush, media_pending and MountSlots): init holds the machine and
+// ends what the reset ends, release lets it go, the media hooks are drive A's write-back, the slot hooks are desc.toml's [mount] slots (SLOT_DRIVE_A,
+// SLOT_CART).
 int c64_hook_init(char *msg, int msglen);
 int c64_hook_release(char *msg, int msglen);
 int c64_hook_media_flush(char *msg, int msglen);
 bool c64_hook_media_pending(void);
+int c64_hook_slot_spec(int slot, char *buf, int n);
+int c64_hook_slot_mount(int slot, const char *spec, char *msg, int msglen);
+int c64_hook_slot_eject(int slot, char *msg, int msglen);
 
 #endif

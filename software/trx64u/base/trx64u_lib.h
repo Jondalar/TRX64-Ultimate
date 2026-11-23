@@ -16,6 +16,7 @@
 #include "uci_api.h"
 #include "sid_api.h"
 #include "tempdisk_api.h"
+#include "cbmprg_api.h"
 
 extern const LibApi *g_api;
 
@@ -42,6 +43,17 @@ static inline uint32_t ctx_state(void)
 {
     const SvcCtx *c = b33_ctx();
     return c ? c->state() : 0;
+}
+
+// The mount slots of this core, positions in desc.toml's [mount] list (core_hooks.h slot_*). slot_changed: a slot changed by this library's doing
+// (ctx.mount_notify; the base stores it for "Persist medium mounts" and the media sets). Nothing without the group or the member.
+enum { SLOT_DRIVE_A = 0, SLOT_CART = 1 };
+static inline void slot_changed(int slot)
+{
+    const SvcCtx *c = b33_ctx();
+    if (c && c->size >= offsetof(SvcCtx, mount_notify) + sizeof(c->mount_notify) && c->mount_notify) {
+        c->mount_notify(slot);
+    }
 }
 
 // The DDR2 window of the core from offset 0 (io.ddr_read, io.ddr_write): the REU's memory. A write is complete on return. Without the group a read gives zeros.
@@ -139,7 +151,7 @@ int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
 // ---- the exports of MultiCore's shared libraries (api->lib->find(name, U2A3_VERSION(1, 0), &size), major 1): found at the first use and kept, looked
 // for again while not found.
 // x_table answers the table when its size covers the member at `off` and that member is set; else null. X_GET names the member.
-enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk"
+enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_PRG, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk", "cbmprg"
 const void *x_table(int which, uint32_t off);
 #define X_GET(which, T, m) ((const T *)x_table((which), (uint32_t)offsetof(T, m)))
 
