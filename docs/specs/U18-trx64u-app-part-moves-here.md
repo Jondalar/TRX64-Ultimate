@@ -589,3 +589,12 @@ Nothing decided yet.
     in software per step, slow on this board), the gateware not blanking while frozen (the live frozen picture, not the
     scrubbed frame). Waits for the header and the dev SDK. Also from MultiCore's review: an op a start hook calls while it
     holds the lock now runs inline.
+  - **The frozen firmware ring's bugs fixed (Alex, 2026-11-23: fixes in the firmware are fine, it stays stable, no
+    features):** branch `ring-fixes` of the application submodule (Gitea), on `eb3e6be6` (0.3.1), commits `f3a3328f`
+    and `bca3894f`: the `.trxring` header through `%u` and `u64_dec()` (small_printf has no length modifier, so 0.3.1
+    refuses its own `.trxring` files; the header is now byte-identical to the library's, checked on the host); the
+    format 1 stage zeroed (`want`, `eeprom`); `Gz` without its block fails cleanly; a failed `.c64rering` write removes
+    the file; a `.c64re` load refused while the REU is on (A08); the require / prohibit comments; and `%.*s` (small_printf
+    has no precision either: two refusals sprintf'd a pointer made from the length into fixed buffers) through bounded
+    copies. The firmware builds without new warnings; its host tests pass (they do not cover these functions). Not
+    done here: the `.c64rering` dump's 4 MB peak (a rework). Open: a board test, and which release takes it (Alex's).
