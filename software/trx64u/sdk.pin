@@ -1,12 +1,14 @@
 # The TRX64 SDK that software/trx64u builds against (U18). fetch_sdk.sh checks the tarball against this file and
-# unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore (T239.3); its builds are kept
-# read-only in that repository's .ci/sdk/<commit>/.
+# unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore's branch t239.3 (their D26: we take
+# it from there); their builds are in that repository's .ci/sdk/<commit>/ and in their pipeline's artifacts, which expire.
+# A copy of the pinned tarball is in our registry under sdk_package (TREX, generic); fetch_sdk.sh --download takes it there.
 # DEV BUILD: 0.3.0 (base 3.3) from MultiCore's branch t239.3, not a release. This tarball's name does not carry the
 # commit (trx64-sdk-0.3.0.tar.gz, in .ci/sdk/e4f99648/); it unpacks to trx64-sdk-0.3.0/, the name a 0.3.0 release
 # unpacks to as well. build.sh checks the unpacked VERSION against source_commit and the hashes below, so a release
 # unpacked over it is not taken for this build.
 sdk_version=0.3.0
 sdk_tarball=trx64-sdk-0.3.0.tar.gz
+sdk_package=trx64-sdk/0.3.0-e4f99648
 sdk_tarball_sha256=29850e3765d0e0ff561492e37e744a63ae9d9947ea39cadb83ea6461507a23d4
 source_branch=t239.3
 source_commit=e4f99648

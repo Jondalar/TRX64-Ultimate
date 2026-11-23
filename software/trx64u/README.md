@@ -45,8 +45,10 @@ it into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown
 
 ## Packing trx64u.cor
 
-1. The SDK: `./fetch_sdk.sh <tarball>`. Today the tarball is MultiCore's build in their repository
-   (`.ci/sdk/e4f99648/trx64-sdk-0.3.0.tar.gz`, read only); where CI fetches it from is open with MultiCore (U18 R10).
+1. The SDK: `./fetch_sdk.sh --download` takes the pinned tarball from our registry (`sdk.pin` `sdk_package`, TREX generic
+   `trx64-sdk/0.3.0-e4f99648`, a copy of MultiCore's `t239.3` build; their D26: we take the SDK from `t239.3` and keep it).
+   `./fetch_sdk.sh <tarball>` takes a local file. A new pin: build or fetch the SDK at a `t239.3` commit (MultiCore's
+   `tools/sdk_pack.sh`), upload it to `trx64-sdk/<version>-<commit8>`, put its sha256 and hashes into `sdk.pin`.
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
    `curl -o c64_basic.bit http://gitea.example/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit`.
    It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
@@ -66,8 +68,8 @@ What goes in:
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
 | record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass |
 | bitstream | `--bit`, with `--bit-commit` |
+| check of record 6 | `base/ops_trx64u.txt`: the operations and states the application exports, ours (U18 R6); taken from MultiCore's `tests/coreapp/golden/ops_trx64u.txt` at the pinned `e4f99648`. MultiCore names every op the base adds or drops in its note for that SDK commit (D25 adds `mouse.sens`, `mouse.accel`) |
 
-Not passed yet, open with MultiCore (U18 R6 and the heap question): `--heap` (MultiCore's `trx64u.pin` packs 0x950000;
-without it the image's default 0x7A0000 applies) and `--ops` (the check of record 6 against the golden list of exported
-operations). The `.cor` on the board on 2026-11-23 (`trx64u_u19.cor`) was packed without both; `pack_cor.sh` makes it
-byte for byte from the same inputs.
+The heap is the image's own (0x7A0000 in SDK 0.3.0). MultiCore's T239.3 D15 value for trx64u, 0x950000, does not fit
+base 3.3's image: `cor_pack.py` refuses it (image end 0x6B8788 + heap + stack reserve 0x20000 must stay below 0xE90000; at
+most 0x7B7878). `trx64u_u19.cor`, on the board on 2026-11-23, is what `pack_cor.sh` makes from the same inputs, byte for byte.

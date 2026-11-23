@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Unpack the pinned TRX64 SDK (sdk.pin) into software/trx64u/.sdk/ (U18).
 #   software/trx64u/fetch_sdk.sh <path to the tarball sdk.pin names>
+#   software/trx64u/fetch_sdk.sh --download      (our registry's copy, sdk.pin's sdk_package; GITEA_URL, default
+#                                                  http://gitea.example, CI passes its server)
 # The tarball is checked against sdk_tarball_sha256 first; a different file is refused. It unpacks to
 # trx64-sdk-<sdk_version>/ whatever the tarball's own name (a dev build's name carries its commit); its VERSION must
 # match the pin.
@@ -11,7 +13,13 @@ pin() { sed -n "s/^$1=//p" "$HERE/sdk.pin"; }
 VER="$(pin sdk_version)"
 SUM="$(pin sdk_tarball_sha256)"
 DIR="trx64-sdk-$VER"
-TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)>}"
+TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)> | --download}"
+if [ "$TAR" = --download ]; then
+    mkdir -p "$HERE/.sdk"
+    TAR="$HERE/.sdk/$(pin sdk_tarball)"
+    curl -sfL -o "$TAR" "${GITEA_URL:-http://gitea.example}/api/packages/TREX/generic/$(pin sdk_package)/$(pin sdk_tarball)" || {
+        echo "fetch_sdk.sh: cannot download $(pin sdk_package)/$(pin sdk_tarball)" >&2; exit 1; }
+fi
 GOT="$(shasum -a 256 "$TAR" 2>/dev/null || sha256sum "$TAR")"
 GOT="${GOT%% *}"
 if [ "$GOT" != "$SUM" ]; then
