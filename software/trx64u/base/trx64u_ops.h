@@ -37,6 +37,7 @@ int op_clear_reboot(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_save_ram(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_save_reu(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_save_cart(CoreCtx *c, const OpArgs &a, OpOut &o);
+int op_run_record(CoreCtx *c, const OpArgs &a, OpOut &o);      // cfwrun.cc: update.run_record, the `.cfw` run
 const char *state_mp3_a(CoreCtx *c);
 const char *state_mp3_b(CoreCtx *c);
 const char *state_mp3_c(CoreCtx *c);

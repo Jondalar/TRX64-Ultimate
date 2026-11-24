@@ -1,20 +1,23 @@
 # The menu of TRX64U (T104.2 D10, T228): the areas, tabs and everything in them. C++ supplies only the operations, the state values and the settings store the names
-# below refer to. tools/descrec.py compiles this file (and checks every name and binding against what the application exports,
-# tests/coreapp/golden/ops_trx64u.txt); the packer puts the result into the .cor as record 6, and coreapp/cores/trx64u/menu_rec.inc carries the same bytes
-# for a start without a .cor (JTAG, ue2emu). Regenerate it with `tools/gen_menu_rec.py`; the lint stage compares.
+# below refer to. ../pack_cor.sh compiles this file with desc.toml into record 6 of trx64u.cor (the SDK's descrec.py, through cor_pack.py) and checks every
+# name and binding against what the application exports (ops_trx64u.txt, U18). The app is linked without a descriptor: this record is the only copy.
 #
 # T228 (Restart 2026-11-17): the structure is the generic core menu of T212 alone (F1 Home, F3 Library, F5 machine, F7 APP, F8 System); no F2 and no F4
 # area (R1). R2: no "Reboot, clear memory" (F8's generic "Restart core"), no "Pause / resume"; R3: no "Save C64 memory" and no "Save REU memory". R9: F5 has
 # the core's tabs C64, TRX and Expansion with headings, then Video, Audio (R5: "SID sockets" and "Emulated SIDs" are two rows under the heading reDIP:SID at its
-# end, each opens a page), Input. F7 is one tab of sections (T212 D12) with the apps last under their heading "Apps" (a group node); Softboot is hidden
-# under the MultiCore host (DC1: `hide`, read by a flat list when the menu is built). R6: F8 is the one generic System tab; under its Network heading
+# end, each opens a page), Input. F7 is one tab of sections (T212 D12); the sub-apps' rows are not here: each brings them in its own menu record (TREX CRT's
+# Dump, Inspect and Flash on F7, Softboot only a file action, offered off the MultiCore host: its need `standalone`, T228 DC1), and the F3 tab Online
+# comes with the online sub-app (record 7, MultiCore T239.3 L-3). R6: F8 is the one generic System tab; under its Network heading
 # three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs) are in no tab
 # (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
 # Drive A and the cartridge port are media slots whose rows open the drive list (T212 D5); the generic items (Persist mounts, Enter home, Menu opens at, Home
-# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the application's own and not declared here, and so are the menu's look, name squeeze and
+# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the base's rows and not declared here, and so are the menu's look, name squeeze and
 # navigation style and the USB mouse (U18: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation Style and the five Mouse settings are the
 # base's, svc_settings.h; their stored values carry over under the same keys; "Joystick Input" is not offered: the core names no "kbd_joystick" cap). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
 # group's id ('_' is a space; not drawn when it repeats the tab's title). Nothing is saved to flash: every setting is written to the core's .cfg at once (D9-D11).
+# The base's rows take their tab, heading and order from the SDK's base UI TOML (MultiCore T239.3 P2-4, D32; api.md 6.15): its seven routes name F5 "video",
+# F5 "audio" and F7 "settings", tabs this file has, so every base row lands where this menu wants it and the file places none. A `[[place]]` (or a
+# `[[group_route]]`) here moves one (api.md 6.15.5, 6.15.6).
 
 # the machine line of F1 (T212 D13/D15): the values of these settings
 machine_info = "System Mode,REU Size"
@@ -64,13 +67,6 @@ name = "Library"
   layout = "library"
   ui = { title = "Search" }
   n = 2
-  [[area.tab]]
-  id = "online"
-  name = "Online"
-  widget = "nodes"
-  layout = "split"
-  ui = { title = "Assembly64 and CommoServe", side = "Search" }
-  n = 3
 
 [[area]]
 key = "F5"                       # the core's short title ("C64") names it
@@ -157,183 +153,6 @@ bind = [ { arg = "name", text = true } ]
 order = 11
 when_state = "tw.present"
 ui = { ask = "Name of the recording", ask_state = "machine.suggest.ring", job = true, why = "This bitstream has no frame ring", sub = "Up to 30 seconds, one frame in five" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Library"
-op = "online.library"
-order = 10
-ui = { chip = "@online.library", sub = "RETURN switches the library", tone = "violet" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Name"
-op = "online.set"
-bind = [ { arg = "field", str = "name" }, { arg = "text", text = true } ]
-order = 20
-ui = { ask = "Part of the title", ask_state = "online.v.name", chip = "@online.name", tone = "cyan" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Group"
-op = "online.set"
-bind = [ { arg = "field", str = "group" }, { arg = "text", text = true } ]
-order = 21
-ui = { ask = "The group or the publisher", ask_state = "online.v.group", chip = "@online.group", tone = "cyan" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Handle"
-op = "online.set"
-bind = [ { arg = "field", str = "handle" }, { arg = "text", text = true } ]
-order = 22
-ui = { ask = "The scener's handle", ask_state = "online.v.handle", chip = "@online.handle", tone = "cyan" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Event"
-op = "online.set"
-bind = [ { arg = "field", str = "event" }, { arg = "text", text = true } ]
-order = 23
-ui = { ask = "The party or the event", ask_state = "online.v.event", chip = "@online.event", tone = "cyan" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choices"
-op = "online.presets"
-order = 30
-ui = { sub = "Fetch the choices from the server", chip = "Load", tone = "amber", hide = "@online.loaded" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 1"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 0 } ]
-order = 40
-ui = { label = "@online.p0.title", chip = "@online.p0.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p0.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 2"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 1 } ]
-order = 41
-ui = { label = "@online.p1.title", chip = "@online.p1.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p1.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 3"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 2 } ]
-order = 42
-ui = { label = "@online.p2.title", chip = "@online.p2.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p2.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 4"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 3 } ]
-order = 43
-ui = { label = "@online.p3.title", chip = "@online.p3.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p3.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 5"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 4 } ]
-order = 44
-ui = { label = "@online.p4.title", chip = "@online.p4.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p4.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 6"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 5 } ]
-order = 45
-ui = { label = "@online.p5.title", chip = "@online.p5.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p5.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 7"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 6 } ]
-order = 46
-ui = { label = "@online.p6.title", chip = "@online.p6.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p6.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 8"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 7 } ]
-order = 47
-ui = { label = "@online.p7.title", chip = "@online.p7.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p7.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 9"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 8 } ]
-order = 48
-ui = { label = "@online.p8.title", chip = "@online.p8.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p8.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 10"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 9 } ]
-order = 49
-ui = { label = "@online.p9.title", chip = "@online.p9.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p9.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 11"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 10 } ]
-order = 50
-ui = { label = "@online.p10.title", chip = "@online.p10.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p10.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 12"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 11 } ]
-order = 51
-ui = { label = "@online.p11.title", chip = "@online.p11.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p11.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Search"
-op = "online.search"
-order = 5
-closes_menu = false
-ui = { primary = true, goto = "F3", chip = "@online.results", sub = "Results open in Browse", tone = "violet" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Clear the form"
-op = "online.clear"
-order = 110
-ui = { confirm = "Empty every field of the form?", tone = "muted" }
 
 [[node]]                          # gate fix 2 (S1: F8 System > Actions): the generic System tab's Actions heading takes the nodes anchored to its group "actions"
 anchor = "F8/expert/actions"
@@ -835,13 +654,13 @@ ext = ".prg"
   [[filetype.action]]
   label = "Run PRG"
   key = "R"
-  op = "c64.run_prg"
+  op = "prg.run"
   bind = [ { arg = "path", file = true } ]
   closes_menu = true
   [[filetype.action]]
   label = "Load PRG and start from"
   key = "L"
-  op = "c64.load_prg"
+  op = "prg.load"
   bind = [ { arg = "path", file = true }, { arg = "start", ask = true } ]
   closes_menu = true
   ask = "Start address"
@@ -856,13 +675,13 @@ ext = ".p00"
   [[filetype.action]]
   label = "Run PRG"
   key = "R"
-  op = "c64.run_prg"
+  op = "prg.run"
   bind = [ { arg = "path", file = true } ]
   closes_menu = true
   [[filetype.action]]
   label = "Load PRG and start from"
   key = "L"
-  op = "c64.load_prg"
+  op = "prg.load"
   bind = [ { arg = "path", file = true }, { arg = "start", ask = true } ]
   closes_menu = true
   ask = "Start address"

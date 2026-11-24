@@ -1,12 +1,13 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Build trx64u's libraries against the pinned TRX64 SDK (U18; sdk.pin, fetch_sdk.sh first).
-#   software/trx64u/build.sh [trx64u] [ring] [monitor]      (default: all three)
-#   software/trx64u/build.sh --check                         (only check the unpacked SDK against sdk.pin)
+# Build trx64u's libraries and sub-apps against the pinned TRX64 SDK (U18; sdk.pin, fetch_sdk.sh first).
+#   software/trx64u/build.sh [trx64u] [ring] [monitor] [trex_crt] [softboot]      (default: all five)
+#   software/trx64u/build.sh --check                                               (only check the unpacked SDK against sdk.pin)
 # The SDK is .sdk/trx64-sdk-<sdk_version>/; its VERSION must name the pinned commit, base API and hashes (a dev build
 # and the release of the same version unpack to the same folder).
 # Each library is built in build/<name>/ from copies of its sources (lib.mk writes its objects next to the sources,
-# and the monitor's engine is trxmon's own folder in the application submodule, D4); the driver table of c64_basic's
+# and the monitor's engine is trxmon's own folder in the application submodule, D4). The sub-apps TREX CRT and Softboot (apps/, MultiCore T239.3
+# P2-5) are built the same way with the SDK's mk/app.mk, their folders copied whole (their C sources are in src/). The driver table of c64_basic's
 # TOML A (gateware/c64_basic.toml) is made there by the SDK's descrec.py (api.md 6.17, SDK 0.4.0 and later). In the build image
 # (riscv32-unknown-elf-g++ on PATH) it runs make directly; elsewhere it runs itself in the u64-build-env container.
 set -eu
@@ -38,17 +39,24 @@ if ! command -v riscv32-unknown-elf-g++ >/dev/null 2>&1; then
 fi
 APP="$ROOT/software/ultimate-app"
 TRXMON="$APP/apps/trxmon/src"
-LIBS="${*:-trx64u ring monitor}"
+LIBS="${*:-trx64u ring monitor trex_crt softboot}"
 rc=0
 for lib in $LIBS; do
     case "$lib" in
         trx64u) src=base ;;
         ring|monitor) src="$lib" ;;
-        *) echo "build.sh: no library $lib" >&2; exit 1 ;;
+        trex_crt|softboot) src="apps/$lib" ;;
+        *) echo "build.sh: no library or sub-app $lib" >&2; exit 1 ;;
     esac
     B="$HERE/build/$lib"
+    # lib.mk's .u2a depends on the .elf and the menu only, not on the Makefile's budget, needs, version or exports: a library is linked and packed again
+    # each time; app.mk tracks no header either (no .d files), so a sub-app is built from a clean copy each time
+    case "$src" in apps/*) rm -rf "$B" ;; *) rm -f "$B/$lib.elf" "$B/$lib.u2a" ;; esac
     mkdir -p "$B"
-    find "$HERE/$src" -maxdepth 1 -type f -exec cp -p {} "$B/" \;
+    case "$src" in
+        apps/*) cp -Rp "$HERE/$src/." "$B/" ;;
+        *) find "$HERE/$src" -maxdepth 1 -type f -exec cp -p {} "$B/" \; ;;
+    esac
     if [ "$lib" = monitor ]; then
         mkdir -p "$B/trxmon"
         for f in "$TRXMON"/*.c "$TRXMON"/*.h "$APP/software/io/c64/trx_lens.c" "$APP/software/io/c64/trx_lens.h"; do

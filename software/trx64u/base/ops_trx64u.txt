@@ -13,6 +13,8 @@ op	sectors.eject	unit:int:0:1:0:
 op	sectors.mount_folder	path:string:0:0:255:	unit:int:0:1:0:
 op	romset.put	data:blob:0:0:0:
 op	led.load	value:enum:0:1:0:On|Off
+op	mouse.sens	value:int:1:16:0:
+op	mouse.accel	value:enum:0:1:0:Off|Adaptive
 op	media.poll
 op	media.flush_for_core
 op	media.persist_apply	value:int:0:1:0:
@@ -89,9 +91,9 @@ op	c64.put_basic	data:blob:0:0:0:
 op	c64.put_kernal	data:blob:0:0:0:
 op	c64.put_char	data:blob:0:0:0:
 op	c64.set_freeze_mode	value:int:0:1:0:
-op	c64.run_prg	path:path:0:0:519:
+op	prg.run	path:path:0:0:519:
 op	files.run_with_app	path:path:0:0:519:
-op	c64.load_prg	path:path:0:0:519:	start:int:0:65535:0:
+op	prg.load	path:path:0:0:519:	start:int:0:65535:0:
 op	c64.run_crt	path:path:0:0:519:
 op	c64.dma_prg	path:path:0:0:519:
 op	dma.write	address:int:0:65535:0:	data:blob:0:0:0:
@@ -151,10 +153,13 @@ op	tw.load	path:path:0:0:519:
 op	ring.start
 op	ring.stop
 op	ring.fx	value:int:-100000:100000:0:
+op	ring.init
+op	ring.poll
+op	ring.unfreeze
 op	mon.run	line:string:0:0:60:
 op	monitor.key	key:int:0:8191:0:
-op	monitor.open
-op	monitor.tick
+op	monitor.serve
+op	monitor.release
 op	online.set	field:string:0:0:12:	text:string:0:0:47:
 op	online.library
 op	online.presets
@@ -183,7 +188,6 @@ op	c64.sid_valid	path:path:0:0:519:	song:int:0:65535:0:
 op	c64.sid_info	path:path:0:0:519:	song:int:0:65535:0:
 op	reu.load	path:path:0:0:519:
 op	reu.preload	path:path:0:0:519:
-op	reu.playmod	path:path:0:0:519:
 op	drive.insert_blank
 op	drive.swap
 op	machine.after_roms
@@ -310,6 +314,7 @@ state	online.v.event
 state	online.loaded
 state	online.unloaded
 state	online.results
+state	online.folder
 state	online.p0.title
 state	online.p0.value
 state	online.p0.hide
@@ -360,14 +365,12 @@ state	diag.board
 state	diag.uptime
 state	host.multicore
 state	diag.log
-state	diag.trace
 state	diag.suggest.log
 state	diag.suggest.edid
 state	reu.mp3.a
 state	reu.mp3.b
 state	reu.mp3.c
 state	reu.mp3.d
-state	reu.sampler
 state	reu.nomp3.a
 state	reu.nomp3.b
 state	reu.nomp3.c

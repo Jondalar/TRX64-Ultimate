@@ -17,3 +17,12 @@ base_api=3.3
 abi_major=3
 api_headers_sha256=d7a12ad85028f666dcd1b25a0e8e4cd55e883faeb4261065045ff3b733a04db1
 base_archive_sha256=c7ad6b29d8d3d3224c389e74a07023a18ade4a14f73984185644765c89248123
+# The online sub-app (MultiCore T239.3 L-3, D12: online search is a shared sub-app): online.u2a of MultiCore's t239.3 8ff28ba9 apps/online, not inside the
+# tarball (their .ci/sdk/ keeps it beside the SDK). Rebuilt here byte for byte (2026-11-24) from those sources with 8ff28ba9's coreapp/src/online_api.h (the
+# SDK does not ship it) and this SDK's mk/app.mk. trx64u.cor carries it in record 7 (pack_cor.sh --lib); it registers the operations and states online.*
+# and its menu record brings the F3 tab Online. fetch_sdk.sh checks it against online_u2a_sha256 and puts it into .sdk/; a copy goes into our registry
+# under online_package (TREX, generic; fetch_sdk.sh --download).
+online_u2a=online.u2a
+online_package=trx64-online/1.0-8ff28ba9
+online_u2a_sha256=970b0c2ce7586f44a46422fbb6214184cff538f7525ca57718374d560216e32b
+online_source_commit=8ff28ba9

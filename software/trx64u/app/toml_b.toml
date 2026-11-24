@@ -22,7 +22,8 @@ base_sources = ["portdiag.cc"]
 #   mouse: the 1351 on the POT lines (desc.toml [mouse]); pad, padkeys: the USB gamepads and the pad as keys (menu.toml's pad rows).
 #   fastseek, ftp: the file browser's fast seek and its FTP folder.
 # Not named: cbmrun (our own c64_go.cc runs programs), newdisk (capabilities floppy and sio, not ours), folderhd (the Amiga's), resample (c64_basic
-# decodes no resampler: its TOML A has no block for one).
+# decodes no resampler: its TOML A has no block for one). Online search is no library of the catalog (MultiCore T239.3 L-3): its sub-app online.u2a
+# rides in record 7 of trx64u.cor (../sdk.pin online_*, ../pack_cor.sh).
 
 [[library]]
 name = "c64cart"

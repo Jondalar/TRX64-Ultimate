@@ -1,8 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from, its tools; from here: c64_basic's
-# TOML A (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our three libraries (build.sh), our two TOMLs (base/menu.toml,
-# base/desc.toml), the icon (base/icon.rgb565), the SID player's files (record 8, built from the submodule's 6502 sources) and a c64_basic bitstream.
+# Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from, its tools, and beside it MultiCore's online
+# sub-app (sdk.pin online_*, .sdk/online.u2a, fetch_sdk.sh); from here: c64_basic's TOML A (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our
+# three libraries and two sub-apps (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565), the SID player's files (built from
+# the submodule's 6502 sources) and a c64_basic bitstream.
+#  - Record 7: our libraries trx64u, ring and monitor, and the online sub-app (a resident image: it registers online.* and brings the F3 tab Online, MultiCore
+#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: the SID player's three programs, and our sub-apps
+#    TREX CRT and Softboot as apps/trex_crt.u2a and apps/softboot.u2a (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h).
 #  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
 #    build/app/ (the driver table and the I/O addresses of the TOML A, the library table of the TOML B, the base archive, the sources that depend on
 #    the core) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is in the app, not in the .cor: the .cor has one
@@ -10,13 +14,17 @@
 #  - The heap (T239.3 P4-1): word 0, the region left after the linked image and the stack reserve; cor_pack.py reports the figures, and this script
 #    checks them against the image: heap = 0xE70000 - align16(E), E the linker's _end of build/app/app.elf, 0xE70000 the end of the application region
 #    (__heap_limit) less the stack reserve, both as the image's heap record carries them.
-#  - Record 6 is checked against base/ops_trx64u.txt, the operations and states the application exports (ours, U18 R6: MultiCore names each op the
-#    base adds or drops in its SDK note).
-#   software/trx64u/pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build]
+#  - The operations (T239.3 D31, P2-5): base/ops_trx64u.txt is what the application exports, the linked app with the libraries and sub-apps of record 7
+#    (ours, U18 R6). Two checks against it: cor_pack.py --ops checks every operation, state and binding record 6 names (always); --emu <ue2emu> runs the
+#    packed .cor in ue2emu and compares what the running app registers (REST /v1/ops and /v1/state) with the list, both ways (tools/emu_ops.py --check).
+#    The SDK's link step makes no operation table: app_build.py generates appsizes.h, the driver table, the library table (libtab_table.cc) and io.ld,
+#    and the operations are registered at run time by the code that table names and by the libraries of record 7, so the app's list is measured by
+#    running it. ue2emu runs on the Mac; CI has no emu stage, so CI runs only the first check (U18 §5).
+#   software/trx64u/pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build] [--emu <ue2emu>]
 # --bit is the c64_basic.bit of our CI package <branch>-<commit8> (.../api/packages/TREX/generic/trx64-ultimate/...);
 # --bit-commit names that commit. --no-build packs the libraries already in build/ (the app is always linked; make redoes only what changed).
 # Default --out: build/cor/trx64u.cor. Needs the SDK unpacked (fetch_sdk.sh). Where riscv32-unknown-elf-g++ is missing it runs itself in
-# u64-build-env, as build.sh does; the bitstream is copied into build/cor/in/ first so that the container sees it.
+# u64-build-env, as build.sh does (the bitstream is copied into build/cor/in/ first so that the container sees it), and the emulator check runs here after it.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -24,7 +32,7 @@ APP="$ROOT/software/ultimate-app"
 pin() { sed -n "s/^$1=//p" "$HERE/sdk.pin"; }
 SDK="$HERE/.sdk/trx64-sdk-$(pin sdk_version)"
 
-BIT= BITC= VER= OUT="$HERE/build/cor/trx64u.cor" BUILD=yes
+BIT= BITC= VER= OUT="$HERE/build/cor/trx64u.cor" BUILD=yes EMU=
 while [ $# -gt 0 ]; do
     case "$1" in
         --bit) BIT="$2"; shift 2 ;;
@@ -32,15 +40,21 @@ while [ $# -gt 0 ]; do
         --version) VER="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --no-build) BUILD=no; shift ;;
+        --emu) EMU="$2"; shift 2 ;;
         *) echo "pack_cor.sh: unknown argument $1" >&2; exit 2 ;;
     esac
 done
 if [ -z "$BIT" ] || [ -z "$BITC" ] || [ -z "$VER" ]; then
-    echo "usage: pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build]" >&2
+    echo "usage: pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build] [--emu <ue2emu>]" >&2
     exit 2
 fi
 [ -f "$BIT" ] || { echo "pack_cor.sh: no bitstream $BIT" >&2; exit 1; }
+[ -z "$EMU" ] || [ -x "$EMU" ] || { echo "pack_cor.sh: no emulator $EMU" >&2; exit 1; }
 sh "$HERE/build.sh" --check
+# the second check of the operations: what the running app registers against the list (tools/emu_ops.py starts and stops ue2emu itself)
+emu_check() {
+    python3 -I "$HERE/tools/emu_ops.py" --ue2emu "$EMU" --cor "$1" --app "$HERE/build/app/app.elf" --check "$HERE/base/ops_trx64u.txt"
+}
 
 if ! command -v riscv32-unknown-elf-g++ >/dev/null 2>&1; then
     mkdir -p "$HERE/build/cor/in" "$(dirname "$OUT")"
@@ -48,9 +62,11 @@ if ! command -v riscv32-unknown-elf-g++ >/dev/null 2>&1; then
     OUTD="$(cd "$(dirname "$OUT")" && pwd)"
     case "$OUTD" in "$ROOT"/*) ;; *) echo "pack_cor.sh: --out must be inside $ROOT for the container" >&2; exit 2 ;; esac
     NB=; [ "$BUILD" = no ] && NB=--no-build
-    exec container run --rm --name "trx64u-pack-$$" --rosetta --arch amd64 -v "$ROOT:/trx" -w /trx u64-build-env \
+    container run --rm --name "trx64u-pack-$$" --rosetta --arch amd64 -v "$ROOT:/trx" -w /trx u64-build-env \
         sh /trx/software/trx64u/pack_cor.sh --bit /trx/software/trx64u/build/cor/in/c64_basic.bit --bit-commit "$BITC" \
         --version "$VER" --out "/trx/${OUTD#"$ROOT"/}/$(basename "$OUT")" $NB
+    [ -z "$EMU" ] || emu_check "$OUTD/$(basename "$OUT")"
+    exit 0
 fi
 
 [ "$BUILD" = no ] || sh "$HERE/build.sh"
@@ -80,16 +96,25 @@ make -s -C "$APP/tools/64tass" >/dev/null
 make -s -C "$APP/software/6502/sidcrt" >/dev/null
 F="$HERE/build/cor/files"
 rm -rf "$F"
-mkdir -p "$F/sidplayer"
+mkdir -p "$F/sidplayer" "$F/apps"
 for f in sidcrt muscrt musplayer; do
     cp "$APP/software/6502/sidcrt/target/$f.bin" "$F/sidplayer/"
 done
+# the sub-apps (build.sh): installed into <core folder>/apps/, where the base's application index finds them
+for f in trex_crt softboot; do
+    cp "$HERE/build/$f/$f.u2a" "$F/apps/"
+done
+# record 7's online sub-app: the pinned file (fetch_sdk.sh put it there), checked again
+ONL="$HERE/.sdk/$(pin online_u2a)"
+[ -f "$ONL" ] || { echo "pack_cor.sh: no $ONL: run fetch_sdk.sh <tarball> <$(pin online_u2a)> or fetch_sdk.sh --download" >&2; exit 1; }
+SUM="$(sha256sum "$ONL" 2>/dev/null || shasum -a 256 "$ONL")"
+[ "${SUM%% *}" = "$(pin online_u2a_sha256)" ] || { echo "pack_cor.sh: $ONL has sha256 ${SUM%% *}, sdk.pin wants $(pin online_u2a_sha256)" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUT")"
 python3 -I "$SDK/tools/cor_pack.py" pack-large -o "$OUT" --id trx64u --name TRX64U --version "$VER" \
     --bit "$BIT" --app "$A/app.bin" --heap 0 --sizes "$TB" --icon "$HERE/base/icon.rgb565" \
     --desc "$HERE/base/menu.toml" --desc "$HERE/base/desc.toml" \
-    --lib "$HERE/build/trx64u/trx64u.u2a" --lib "$HERE/build/ring/ring.u2a" --lib "$HERE/build/monitor/monitor.u2a" \
+    --lib "$HERE/build/trx64u/trx64u.u2a" --lib "$HERE/build/ring/ring.u2a" --lib "$HERE/build/monitor/monitor.u2a" --lib "$ONL" \
     --files "$F" --ops "$HERE/base/ops_trx64u.txt" --bit-commit "$BITC" --app-commit "$(pin source_commit)" > "$A/pack.log" 2>&1 \
     || { cat "$A/pack.log" >&2; exit 1; }
 cat "$A/pack.log"
@@ -112,3 +137,4 @@ print("heap = 0x%X - align16(E) = 0x%X - 0x%X = 0x%X (%d bytes); E = _end = 0x%X
 PY
 SUM="$(sha256sum "$OUT" 2>/dev/null || shasum -a 256 "$OUT")"
 echo "trx64u.cor: $OUT, $(wc -c < "$OUT" | tr -d ' ') bytes, sha256 ${SUM%% *}, checked"
+[ -z "$EMU" ] || emu_check "$OUT"

@@ -841,5 +841,62 @@ Nothing decided yet.
     (api.md 6.14.13, D30 condition 2) does not run for trx64u. MultiCore builds a record type beside the description,
     `cor_pack.py --maps` and the reader as its own package after this push. Waits for it.
   - Open: ue2emu. Our CI has no ue2emu stage and the tree no script for one; the runs of 2026-11-23 were by hand on the
-    Mac (ue2emu 0.7.4). BASIC READY on the app linked here is not shown yet.
+    Mac (ue2emu 0.7.4). BASIC READY on the app linked here is not shown yet. (Shown in step 2b, below; the gap above was
+    taken from the code and is short of what the app exports, 2b has the measured list.)
   - Not done here: a CI run (no push), the registry upload of 0.4.1.
+- **2026-11-24: step 2b of the D28 plan: P2-5 (our libraries register what the base dropped; trex_crt and softboot are
+  our sub-apps), the Online sub-app in record 7, the operations measured on the running app** (Alex's go 2026-11-24).
+  - Operations of `lib_trx64u.cc`: `prg.run` and `prg.load` (R-1: the names the base's REST and RPC call; were
+    `c64.run_prg`, `c64.load_prg`; `menu.toml`, `desc.toml` `run_op` and `dma.*` follow) and `update.run_record`, the
+    `.cfw` run P2-1 took out of the base: `base/cfwrun.cc`, MultiCore `75da955da^` `coreapp/src/update.cc` on the base
+    API (`io.ddr_write`/`ddr_read`, `sys.machine_handover`): pre-header (fingerprint, family, product against the state
+    `diag.board`), every record inside 0x03000000-0x03C00000, read back and compared before the jump; refused where the
+    state `host.multicore` is set. The family is the constant `U64MK2`: the base API gives none (SvcBoard), asked for P2-6.
+    T64: ours (`c64.run_t64`, `c64.dma_t64`) and the base's `menu.t64` (`t64_vlist.cc`), unchanged. The TRX64 runtime:
+    the monitor library's TCP 4312 server; the hooks the base calls by name are our libraries' (`ring.init`, `ring.poll`,
+    `ring.unfreeze`: `ringops.cc:573`; `monitor.serve`, `monitor.release`: `lib_monitor.cc:396`). trx64u: 67
+    operations, 54 states (budget 66 -> 67), image 89,252 B.
+  - Sub-apps `apps/trex_crt`, `apps/softboot`: MultiCore's `t239.3` `8ff28ba9` copies (25 files, equal to their blobs
+    before the change), built against LibApi 3.3 by `build.sh` with the SDK's `mk/app.mk`, from a clean copy each time
+    (app.mk tracks no header). Changed: the Makefiles' include, provenance in both READMEs and two `app.toml` comments,
+    and trex_crt comments the code contradicts (the removed firmware files, f4b2d673; the old frame and 21 x 8 view).
+    `trex_crt.u2a` 88,909 B `4bc89def...`: 19 operations, 39 states `cart.*`, needs `cart_port>=1.0`; `softboot.u2a`
+    10,766 B `cd0bc3c9...`: none, needs `standalone>=1.0`. Both in record 8 under `apps/`. Function table: P2-6.
+    `build.sh` also relinks each library every time (lib.mk does not make the image depend on the Makefile's budget).
+  - Base rows (P2-4): the SDK's base UI TOML routes them to F5 video/audio and F7 settings, tabs `menu.toml` has; no
+    `[[place]]` or `[[group_route]]` needed (`menu.toml` header).
+  - Online: record 7 `--lib online.u2a` (`sdk.pin` `online_*`, sha256 `970b0c2c...`; rebuilt here byte for byte from
+    `8ff28ba9` `apps/online` with its `coreapp/src/online_api.h`, which the SDK does not ship). `fetch_sdk.sh` takes it
+    as its second argument or downloads `trx64-online/1.0-8ff28ba9` (not uploaded). `menu.toml`'s F3 tab `online` and
+    its 20 nodes are gone (the sub-app's own record has them); the TOML B names no online library. This tree has no
+    `menu_rec.inc`: record 6 is compiled at pack time by the pinned `descrec.py` (contributed-tab entry 28 bytes).
+  - The operations check: SDK 0.4.1's link makes no operation table (`app_build.py`: `appsizes.h`, driver table,
+    `libtab_table.cc`, `io.ld`), they are registered at run time. `tools/emu_ops.py` runs the packed `.cor` in ue2emu,
+    waits for READY from the core the app started and reads REST `/v1/ops`, `/v1/state` (MultiCore's `export.py`
+    format); `pack_cor.sh --emu <ue2emu>` compares that both ways with `base/ops_trx64u.txt`. `cor_pack.py --ops` stays:
+    it checks every name and binding of record 6.
+  - `base/ops_trx64u.txt`, each changed line: `c64.run_prg`, `c64.load_prg` -> `prg.run`, `prg.load` (R-1); + `mouse.sens`,
+    `mouse.accel` (the base, `engines.cc:191`, D25); + `ring.init`, `ring.poll`, `ring.unfreeze`, `monitor.serve`,
+    `monitor.release` (ours, above); - `monitor.open`, `monitor.tick` (the monitor registers neither since `8f68476d`);
+    - `reu.playmod`, state `reu.sampler` (MultiCore `1a820f729`, D5); - state `diag.trace` (MultiCore `570331dc3`,
+    P2-1); + state `online.folder` (`online_search.cc:900`). `update.run_record` and `online.*` stay, now registered.
+  - Proof (Mac, ue2emu 0.7.4): `pack_cor.sh --bit c64_basic_54dc9f9e.bit --bit-commit 54dc9f9e --version
+    0.3.1-dev+u18-2b --emu ~/Development/u64-emulator/target/release/ue2emu`: `trx64u.cor` 3,886,419 B `c3c9a481...`
+    (the same bytes twice, the second time on a fresh `fetch_sdk.sh`), records 1 3 4 5 6 7 8; 4 libraries loaded, 0
+    refused, no menu refusal; READY 3.6 s after start ("**** COMMODORE 64 BASIC V2 ****", "38911 BASIC BYTES FREE"),
+    after `[core] TRX64U released`; ping on 4312 answers `trx64-runtime/2`; 204 operations, 188 states, equal to the
+    list (392 lines). A second start on the same stick: `[app] 2 application(s)`, menu nodes 45 -> 48.
+  - Found: the base scans `<core folder>/apps` (`run.cc:730`) before it installs record 8 (`run.cc:749`), so a new or
+    changed sub-app shows from the second start on (MultiCore). Record 8 never writes over a file unless the record
+    names that file as an earlier version (`instfiles.cc`, `cor_pack.py --files-old`): a later trex_crt or softboot has
+    to keep the shipped one as `<stem>.v<N>.u2a`, or the card keeps the old. c64_basic's TOML A has no `icap` block,
+    so the app is standalone by its link (`board.h` `icap_id`): under the MultiCore host it has no Return to host,
+    offers softboot and runs a `.cfw` itself (Alex and MultiCore).
+  - A CI emu stage would need: a Linux ue2emu 0.7.4 or later with its default features (`trx64`, `net`; MultiCore's
+    `ci/emu` image is built without `net`), a libslirp with `slirp_handle_timer` (Ubuntu 22.04's 4.6 lacks it),
+    python3, the four ROMs of 1541ultimate's `roms/` (not in our git), `--net user` with three free local ports; about
+    4 s and 52 MB here. Not built.
+  - Not done here: a CI run (no push), the registry uploads (0.4.1, `trx64-online/1.0-8ff28ba9`), the emu stage, a
+    board test. `8ff28ba9` is no longer on MultiCore's local `t239.3`: it became `2b6d6a56b`, which differs from it only
+    in `tests/loader/test_libload.cc` (the SDK, `apps/` and `online_api.h` are the same). `sdk.pin`, the registry package
+    names and the provenance lines still name `8ff28ba9`; they follow once MultiCore has pushed.

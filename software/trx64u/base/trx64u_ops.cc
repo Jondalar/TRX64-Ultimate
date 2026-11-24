@@ -1629,8 +1629,8 @@ static int dma_call(const char *op, const OpIn *in, int n, OpOut &o)
     return rc ? OPE_FAILED : OPE_OK;
 }
 
-// SOCKET_CMD_DMA / DMARUN / DMAJUMP (FW :134-145: RUNCODE_DMALOAD, _RUN, _JUMP): 0 = into RAM at the load address, nothing started (c64.dma_prg); 1 = and run it (c64.run_prg: the machine
-// is reset and the program started at READY, the menu's Run); 2 = and jump to the load address (c64.load_prg with the file's own first two bytes, FW c64_subsys.cc:1056-1060).
+// SOCKET_CMD_DMA / DMARUN / DMAJUMP (FW :134-145: RUNCODE_DMALOAD, _RUN, _JUMP): 0 = into RAM at the load address, nothing started (c64.dma_prg); 1 = and run it (prg.run: the machine
+// is reset and the program started at READY, the menu's Run); 2 = and jump to the load address (prg.load with the file's own first two bytes, FW c64_subsys.cc:1056-1060).
 int op_dma_prg(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     OpIn p[2] = { in_str("path", a.s(0)), in_int("start", 0) };
@@ -1638,7 +1638,7 @@ int op_dma_prg(CoreCtx *, const OpArgs &a, OpOut &o)
         return dma_call("c64.dma_prg", p, 1, o);
     }
     if (a.i(1) == 1) {
-        return dma_call("c64.run_prg", p, 1, o);
+        return dma_call("prg.run", p, 1, o);
     }
     uint8_t b[2];
     SvcFile *f = g_api->fs->open(a.s(0), false);
@@ -1651,7 +1651,7 @@ int op_dma_prg(CoreCtx *, const OpArgs &a, OpOut &o)
         return OPE_FAILED;
     }
     p[1] = in_int("start", b[0] | (b[1] << 8));
-    return dma_call("c64.load_prg", p, 2, o);
+    return dma_call("prg.load", p, 2, o);
 }
 // SOCKET_CMD_MOUNT_IMG / RUN_IMG (FW :178-196): the image in drive A read-write, and for RUN_IMG the real LOAD"*",8,1 and RUN (RUNCODE_MOUNT_LOAD_RUN: drive.mount_run).
 int op_dma_mount(CoreCtx *, const OpArgs &a, OpOut &o)

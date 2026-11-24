@@ -253,6 +253,8 @@ static const LibOpDecl ops[] = {
     { "machine.save_ram", name_arg, 1, op_save_ram },
     { "machine.save_reu", name_arg, 1, op_save_reu },
     { "machine.save_cart", name_arg, 1, op_save_cart },
+    // cfwrun.cc: the `.cfw` run (MultiCore T239.3 P2-1 took it out of the base, P2-5)
+    { "update.run_record", path_arg, 1, op_run_record },
     // u64cfg.cc
     { "u64.fx_video", value_arg, 1, fx_video },
     { "u64.fx_audio", value_arg, 1, fx_audio },
@@ -278,9 +280,9 @@ static const LibOpDecl ops[] = {
     { "c64.put_kernal", rom_arg, 1, c64_put_kernal },
     { "c64.put_char", rom_arg, 1, c64_put_char },
     { "c64.set_freeze_mode", freeze_arg, 1, c64_freeze_mode },
-    { "c64.run_prg", path_arg, 1, c64_run },
+    { "prg.run", path_arg, 1, c64_run },
     { "files.run_with_app", path_arg, 1, c64_run_with_app },
-    { "c64.load_prg", load_args, 2, c64_load },
+    { "prg.load", load_args, 2, c64_load },
     { "c64.run_crt", path_arg, 1, c64_run_crt },
     { "c64.dma_prg", path_arg, 1, c64_dma },
     { "dma.write", dma_write_args, 2, c64_dma_write },
