@@ -21,8 +21,13 @@
 // B1, the 58 words two per record, B2 when a chip block follows (F1 b1).
 //
 // The app's CPU cannot address the upper DDR2: every read of the areas is an
-// engine COPY into a bounce buffer below 64 MB (the rvlite core has no data
-// cache, so the copy is visible to it as soon as the mover is done).
+// engine COPY into a bounce buffer below 64 MB. The CPU's data cache (U19: 8 KB,
+// write-through, below 0xEA0000: rv_dcache.vhd g_limit) keeps no stale copy of
+// it: every mover write there toggles ext_wr_tgl (ddr2_port.v:213-214); 3-4 CPU
+// clocks later the cache stops hitting (rv_dcache.vhd:206-210) and clears its
+// 512 tags, one per clock (:242-243, :344-351), long before ENG_CMD's busy bit
+// reads 0: that bit crosses from ui_clk into the C64 clock by a toggle
+// handshake (trx_engine.v:616-624), then over the I/O bus to the CPU.
 //
 // Not undone (no hardware for it): the SID (not on the state bus), the VIC's
 // internals and its write-only registers ($D012 compare, $D011 bit 7: the
@@ -159,8 +164,10 @@ static void eng_copy(uint32_t src, void *dst, uint32_t len)
             break;
         }
     }
-    // the copy went through the memory controller behind the CPU's back; a
-    // fence keeps the loads after the poll
+    // the copy went through the memory controller behind the CPU's back (the
+    // data cache dropped its lines, see the head of this file); rvlite decodes
+    // fence as a no-op (decode_comb.vhd:112-113) and runs in order, so this is
+    // a compiler barrier that keeps the loads after the poll
     __asm__ volatile ("fence" ::: "memory");
 }
 
@@ -531,10 +538,10 @@ static void stop_machine(Saved *sv, bool at_line0)
 // and entry hi's start (hi = tl_n: now), the old byte of its earliest write
 // there. collect() walks those records newest first and stores each one's old
 // byte, so the earliest write's is what stays, and marks the address; the
-// caller then writes each marked byte once. The rvlite core reads DDR2
-// without a cache (a load costs about a microsecond) while its stores are
-// posted, so the walk is one load per record and stores only; the marks are
-// bytes, scanned a word at a time afterwards.
+// caller then writes each marked byte once. The rvlite core's data cache
+// (U19: 8 KB, 16-byte lines, write-through) fills a line from DDR2 on a miss
+// and sends every store on to DDR2, so the walk is one load per record and
+// stores only; the marks are bytes, scanned a word at a time afterwards.
 
 struct Coll {
     uint32_t n0, n1, other;

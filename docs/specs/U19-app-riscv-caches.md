@@ -44,7 +44,7 @@ taken in the toggle handshake that already carries `rdata`; the two clocks are a
 
 Path 1 (exact, `cpu_clk`): a write on the arbitrated memory bus of `ultimate_sys` whose tag is not the CPU's
 (0x20, 0x21) clears that line. Path 2 (`ui_clk`): `mig_arb` toggles `ext_wr_tgl` for every write that is not client 0's
-below word address 0x750000 (byte 0xEA0000); the cache then clears all its tags (1,024 clocks) and bypasses meanwhile.
+below word address 0x750000 (byte 0xEA0000); the cache then clears all its tags (512 lines, one per clock) and bypasses meanwhile.
 
 | Writer | Where (byte) | Path |
 |---|---|---|

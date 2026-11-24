@@ -50,8 +50,8 @@
 #define GZ_BLOCK 16384
 #define GZ_HEAD  5          // a stored block's header: final flag, LEN, NLEN
 
-// rvlite has a 2 KB instruction cache and no data cache (fpga/cpu_unit/rvlite: icache.vhd, the data port straight to the memory bus), so every
-// load is a DDR2 access. The hot paths keep their state in registers: per output byte one load (the CRC table), per input byte one load, the
+// c64_basic's rvlite has an 8 KB instruction cache and an 8 KB write-through data cache with 16-byte lines (U19: cache_cfg_pkg.vhd, rv_dcache.vhd),
+// so a load that misses is a DDR2 access and every store goes to DDR2. The hot paths keep their state in registers: per output byte one load (the CRC table), per input byte one load, the
 // stores into the block. The base64 digit is computed, not looked up (a table would be one more load per byte); the decimals are made with
 // multiplies (the build is -mno-div: a division is a library call).
 static inline __attribute__((always_inline)) uint32_t b64c(uint32_t v)

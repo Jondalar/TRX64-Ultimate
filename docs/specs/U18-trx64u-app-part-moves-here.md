@@ -770,3 +770,12 @@ Nothing decided yet.
   - reSID8 (Alex's placement: base, the SID library; MultiCore adds a filter call to that library in a later SDK):
     `u64cfg.cc` keeps its direct write, marked interim. Open: the write moves to the SID library's filter call once the
     SDK has it.
+- **2026-11-24: ring's cache comments follow U19's data cache** (step 2a of the D28 plan).
+  - `ring.cc` said an engine COPY into the bounce buffer is visible to the CPU as soon as the mover is done because the
+    rvlite core has no data cache. c64_basic's rvlite has one since U19 (8 KB, 16-byte lines, write-through, cacheable
+    below 0xEA0000). Checked on the RTL, not a gap: every mover write below 0xEA0000 toggles `ext_wr_tgl`
+    (`ddr2_port.v:213-214`); 3-4 CPU clocks later the cache stops hitting and clears its 512 tags
+    (`rv_dcache.vhd:206-210`, `:242-243`, `:344-351`), long before ENG_CMD's busy bit, which crosses from `ui_clk` into
+    the C64 clock and then over the I/O bus, reads 0. Corrected: the head of `ring.cc`, `collect()`'s cost note, the
+    fence after the COPY poll (rvlite decodes `fence` as a no-op, `decode_comb.vhd:112-113`; it stays as a compiler
+    barrier), `ringfile.cc`'s cache note. U19 §3 gave the tag walk 1,024 clocks; the code walks 512 lines.
