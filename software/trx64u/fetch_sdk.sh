@@ -5,8 +5,8 @@
 #   software/trx64u/fetch_sdk.sh --download      (our registry's copy, sdk.pin's sdk_package; GITEA_URL, default
 #                                                  http://gitea.example, CI passes its server)
 # The tarball is checked against sdk_tarball_sha256 first; a different file is refused. It unpacks to
-# trx64-sdk-<sdk_version>/ whatever the tarball's own name (a dev build's name carries its commit); its VERSION must
-# match the pin.
+# trx64-sdk-<sdk_version>/ whatever the tarball's own name (some dev builds carry their commit in it, 0.3.0, 0.4.0 and
+# 0.4.1 do not); its VERSION must match the pin (build.sh --check).
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 pin() { sed -n "s/^$1=//p" "$HERE/sdk.pin"; }

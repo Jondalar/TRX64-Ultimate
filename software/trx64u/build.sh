@@ -19,9 +19,9 @@ if [ ! -f "$SDK/VERSION" ]; then
     echo "build.sh: no SDK $VER in $HERE/.sdk: run fetch_sdk.sh <tarball> first" >&2
     exit 1
 fi
-# VERSION's keys against the pin's: sdk, base_api, abi_major, api_headers_sha256, commit, coreapp_sha256.
+# VERSION's keys against the pin's: sdk, base_api, abi_major, api_headers_sha256, commit, base_archive_sha256.
 for kv in "sdk sdk_version" "base_api base_api" "abi_major abi_major" "api_headers_sha256 api_headers_sha256" \
-          "commit source_commit" "coreapp_sha256 coreapp_sha256"; do
+          "commit source_commit" "base_archive_sha256 base_archive_sha256"; do
     k="${kv% *}"; p="${kv#* }"
     have="$(sed -n "s/^$k //p" "$SDK/VERSION")"
     if [ "$have" != "$(pin "$p")" ]; then

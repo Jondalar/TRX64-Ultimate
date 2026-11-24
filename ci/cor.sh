@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Stage `cor`: trx64u.cor (U18) from this commit's CI package. Its c64_basic.bit, the pinned TRX64 SDK from our registry
-# (software/trx64u/sdk.pin, fetch_sdk.sh --download) and our libraries, TOMLs, icon and files (software/trx64u/pack_cor.sh)
+# (software/trx64u/sdk.pin, fetch_sdk.sh --download) and our libraries, TOMLs, icon and files (software/trx64u/pack_cor.sh: the app
+# linked from the SDK with c64_basic's TOML A and our TOML B, the SDK's symbol check, the heap of word 0 checked against the image)
 # make trx64u_<commit8>.cor, which goes into the same package version (<branch>-<commit8> and <branch>-latest of
 # trx64-ultimate) with its SHA256SUMS extended. Runs in u64-build-env:ci after `package`, on every branch that has
 # software/trx64u; on any other it prints "cor SKIPPED" and ends green at once (decided here, never by a job-level `if:`,

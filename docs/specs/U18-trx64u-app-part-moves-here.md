@@ -779,3 +779,67 @@ Nothing decided yet.
     the C64 clock and then over the I/O bus, reads 0. Corrected: the head of `ring.cc`, `collect()`'s cost note, the
     fence after the COPY poll (rvlite decodes `fence` as a no-op, `decode_comb.vhd:112-113`; it stays as a compiler
     barrier), `ringfile.cc`'s cache note. U19 §3 gave the tag walk 1,024 clocks; the code walks 512 lines.
+- **2026-11-24: step 2a of the D28 plan: SDK 0.4.1 pinned, trx64u's app linked from the SDK (P3-3), heap word 0 (P4-1)**
+  (Alex's go 2026-11-24; MultiCore advises).
+  - Pin: `sdk.pin` names SDK 0.4.1, MultiCore `t239.3` `8ff28ba9` (tarball sha256 `8b5f2b29...`, headers `d7a12ad8...`,
+    `base_archive_sha256` `c7ad6b29...`; `coreapp_sha256` is gone with the app image); `build.sh` checks the new key.
+    0.4.0 (`b43857a6`, `c5ca4556`) was pinned first; 0.4.1 carries MultiCore's fixes of the two defects below and the
+    new `io.window` rule. Registry package `trx64-sdk/0.4.1-8ff28ba9`: not uploaded by this step; until it is there,
+    `fetch_sdk.sh --download`, and with it the lint and cor stages, cannot fetch the SDK. `build.sh` is green on the pin
+    (images: trx64u 86,260 B, ring 131,404 B, monitor 209,004 B).
+  - TOML B `software/trx64u/app/toml_b.toml` (the SDK example's place, `example/app/`): no descriptor (the core is described
+    by its record, `hooks = "trx64u"`), `base_sources = ["portdiag.cc"]` (run.cc calls `portdiag_attach`), no `[sizes]`
+    key (the headers' defaults, the shared app's), and 14 shared libraries of the package's catalog: c64cart, cbm1541,
+    newfile, uci, sid, tempdisk, cbmprg (our libraries find them by name), dma (runs our `dma.*`), t64 (the `.t64` list),
+    mouse, pad, padkeys, fastseek, ftp. Not linked: cbmrun, newdisk, folderhd, resample. Our three libraries stay `.u2a`
+    in record 7, as the SDK's example keeps its code library; the sub-apps come in step 2b.
+  - `pack_cor.sh`: record 6 compiled against the TOML B's sizes (`descrec.compile_files` from Python: `descrec.py compile`
+    takes one TOML, several come with MultiCore's package 1), `app_build.py build` with the TOML A and B into `build/app/`,
+    the SDK's symbol check (`libtab.py symcheck`), `cor_pack.py pack-large` with the linked app, `--sizes` and `--heap 0`,
+    then the heap figure checked against the image. `ci/cor.sh` runs it unchanged.
+  - SDK defects the link found on `b43857a6`, fixed by MultiCore in `563f708e` (in 0.4.1):
+    `base/inc/coreapp/ffconf/ffconf.h:5` includes `ffconf.h` through MultiCore's symlink
+    `host-app/software/chan_fat`, which the package does not have (`tempdisk.o`, `fastseek.o`, `fastseek_exports.o` do
+    not compile); `tools/libtab.py symcheck` imports `check_d24`, shipped only in `menusim/tools/`. Without those two
+    libraries the app linked as a diagnostic (text 1,197,124, data 258,728, bss 2,513,684 B) and the symbol check
+    passed; nothing else failed.
+  - Result on 0.4.1: the app links with all 14 libraries (`tempdisk` and `fastseek` compile; 123 objects; text
+    1,199,348, data 259,272, bss 2,513,700 B), `tools/libtab.py symcheck` passes, `cor_pack.py pack-large` (with `--ops`)
+    and `cor_pack.py check` pass: `trx64u.cor` 3,757,967 B (bitstream `54dc9f9e`; a local build, not a CI package).
+  - P4-1: heap = 0xE70000 - align16(E) (E = `_end`; `__heap_limit` 0xE90000 less the stack reserve 0x20000, from the
+    image's heap record; `heapcfg.c` and `cor_pack.py` `app_heap` compute the same). On 0.4.1: E = 0x3F9CE4, heap =
+    0xE70000 - 0x3F9CF0 = 0xA76310 (10,969,872 B). That is the region the heap manages, not what is unused: the base's
+    own allocations come out of it, and so do our libraries' declared needs (ring keeps 1,486,893 B, peak 2,931,868 B;
+    trx64u peak 66,044 B; monitor peak 50,240 B); the 14 libraries of the TOML B declare none. About 336 KB of the image is
+    MultiCore's own trx64u monitor (trxmon's `tm_*.o` in `libtrxbase.a`, `monitor.cc`, `monsrv.cc`, `monitor_grid.cc` of
+    `base/SIZED.txt`), which never serves a core with a hooks library (M4); it leaves our app with the first SDK from
+    `t239.3-v` (V-4 drops D12_TRX64U from the package's lists), and P2-6 deletes the code after our P2-5.
+  - Lint: `ci/lint.sh` runs the SDK's `rtl_check.py lint-src` on `base/`, `ring/`, `monitor/` (48 files, none with a
+    literal I/O address). `rtl_check.py check` is not in it: the tool cannot follow 13 of the 33 blocks; MultiCore teaches
+    it the six patterns and trx_sys's held requests in its step V-1d (goal: all 33 agree) and fixes its `cbm1541` and
+    `c64cart_regs` maps there (`_only`); `cart_regs` and `drive_a` keep their own properties until then.
+  - `io.window` on 0.4.1: both readers (`tools/descrec.py`, the base's `descrec.cc`, the same `basereg.def`) refuse a
+    window that leaves its firmware span and compare it with the base's registers after the translation; `window()`
+    (`libsvc.cc`) returns null for a block off the I/O bus. 0.4.1's `descrec.py` (`parse_desc`) on the packed record 6:
+    all four windows pass, as on `b43857a6`: `audio_mixer` 0xA0000500 +0x14 -> 0x10100500, `speaker_mixer` 0xA0000540
+    +0x6 -> 0x10100540, `c64_palette` 0xA0080800 +0x440 -> 0x10180800, `hdmi_palette` 0xA0045000 +0x40 -> 0x10145000;
+    none covers a register of the base (nearest: `master_volume` 0x10100550), all lie on the I/O bus (bit 28).
+    `desc.toml`'s window comment named 0.4.0's `window_to_toml_a`, which 0.4.1 no longer has; fixed.
+  - The `--ops` check of `pack_cor.sh` stays green: it compares record 6 with `base/ops_trx64u.txt`, a fixed list
+    (MultiCore's export at `e4f99648`), not with the app. The golden is unchanged. What the app of SDK 0.4.1 does not
+    export of that list: `update.run_record` (the `.cfw` run, P2-1; `menu.toml:890`), the six `online.*` operations and 48
+    `online.*` states (the Online sub-app, L-3; the F3 Online tab of `menu.toml`), `reu.playmod` (D5), the states
+    `diag.trace` and `reu.sampler`; `prg.run` and `prg.load`, which the base's REST and RPC call (`rest.cc`,
+    `rpccontract.cc`), are registered by nobody in our app (MultiCore's `c64.cc` did, R-1); ours keep `c64.run_prg` and
+    `c64.load_prg`. What it exports beyond the list: `mouse.sens`, `mouse.accel` (D25), our `ring.init`. These come from
+    the code and MultiCore's goldens at both pins; the measured list (REST `/v1/ops`, `/v1/state` of a running app) needs
+    ue2emu. P2-5 and the Online sub-app are step 2b. MultiCore's goldens and ops sources are the same at `8ff28ba9`
+    (0.4.1) as at `c5ca4556`.
+  - Open: a TOML A record in the `.cor`. On SDK 0.4.1 record 6 holds a description (version 6) or a TOML A (version 7),
+    never both (`descrec.py` `compile_desc`, `descrec.cc`), and `cor_pack.py` compiles `--desc` without maps; so
+    `trx64u.cor` carries no TOML A record, `bundle_check_identity` finds no map and the run-time ID and build check
+    (api.md 6.14.13, D30 condition 2) does not run for trx64u. MultiCore builds a record type beside the description,
+    `cor_pack.py --maps` and the reader as its own package after this push. Waits for it.
+  - Open: ue2emu. Our CI has no ue2emu stage and the tree no script for one; the runs of 2026-11-23 were by hand on the
+    Mac (ue2emu 0.7.4). BASIC READY on the app linked here is not shown yet.
+  - Not done here: a CI run (no push), the registry upload of 0.4.1.

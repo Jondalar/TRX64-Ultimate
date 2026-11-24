@@ -1,17 +1,22 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Pack trx64u.cor (U18) and check it: MultiCore's app core image and cor_pack.py from the pinned SDK, our three libraries
-# (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565), the SID player's files
-# (record 8, built from the submodule's 6502 sources) and a c64_basic bitstream. Record 6 is checked against
-# base/ops_trx64u.txt, the operations and states the application exports (ours, U18 R6: MultiCore names each op the base
-# adds or drops in its SDK note). No --heap yet: D15 sizes the heap by trx64u's measured need, kept in the core's TOML (`heap`)
-# and passed on here; it is not measured (U18);
-# until then the image's own 0x7A0000 applies. SDK 0.3.0's image allows at most 0x7B7878 (README, "Packing").
+# Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from, its tools; from here: c64_basic's
+# TOML A (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our three libraries (build.sh), our two TOMLs (base/menu.toml,
+# base/desc.toml), the icon (base/icon.rgb565), the SID player's files (record 8, built from the submodule's 6502 sources) and a c64_basic bitstream.
+#  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
+#    build/app/ (the driver table and the I/O addresses of the TOML A, the library table of the TOML B, the base archive, the sources that depend on
+#    the core) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is in the app, not in the .cor: the .cor has one
+#    record 6, and a TOML A record (version 7) holds nothing but TOML A (api.md 6.14.1), so it cannot ride with our description (U18 §5).
+#  - The heap (T239.3 P4-1): word 0, the region left after the linked image and the stack reserve; cor_pack.py reports the figures, and this script
+#    checks them against the image: heap = 0xE70000 - align16(E), E the linker's _end of build/app/app.elf, 0xE70000 the end of the application region
+#    (__heap_limit) less the stack reserve, both as the image's heap record carries them.
+#  - Record 6 is checked against base/ops_trx64u.txt, the operations and states the application exports (ours, U18 R6: MultiCore names each op the
+#    base adds or drops in its SDK note).
 #   software/trx64u/pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build]
 # --bit is the c64_basic.bit of our CI package <branch>-<commit8> (.../api/packages/TREX/generic/trx64-ultimate/...);
-# --bit-commit names that commit. --no-build packs the libraries already in build/. Default --out: build/cor/trx64u.cor.
-# Needs the SDK unpacked (fetch_sdk.sh). Where riscv32-unknown-elf-g++ is missing it runs itself in u64-build-env, as
-# build.sh does; the bitstream is copied into build/cor/in/ first so that the container sees it.
+# --bit-commit names that commit. --no-build packs the libraries already in build/ (the app is always linked; make redoes only what changed).
+# Default --out: build/cor/trx64u.cor. Needs the SDK unpacked (fetch_sdk.sh). Where riscv32-unknown-elf-g++ is missing it runs itself in
+# u64-build-env, as build.sh does; the bitstream is copied into build/cor/in/ first so that the container sees it.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -50,6 +55,26 @@ fi
 
 [ "$BUILD" = no ] || sh "$HERE/build.sh"
 
+# the app: record 6 against the [sizes] of the TOML B (app_build.py checks it; cor_pack.py compiles the same files the same way below; descrec.py's
+# command line takes one TOML), the link, the symbol check.
+TB="$HERE/app/toml_b.toml"
+A="$HERE/build/app"
+mkdir -p "$A"
+python3 -I - "$SDK/tools" "$TB" "$A/desc.bin" "$HERE/base/menu.toml" "$HERE/base/desc.toml" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import descrec
+try:
+    descrec.apply_sizes(descrec.toml_loads(open(sys.argv[2]).read()).get("sizes", {}))
+    blob = descrec.compile_files([(f, open(f).read()) for f in sys.argv[4:]])
+except descrec.DescError as e:
+    sys.exit("pack_cor.sh: record 6: %s" % e)
+open(sys.argv[3], "wb").write(blob)
+PY
+python3 -I "$SDK/tools/app_build.py" build --sdk "$SDK" --toml-a "$HERE/gateware/c64_basic.toml" --toml-b "$TB" --out "$A" --record "$A/desc.bin"
+NM=riscv32-unknown-elf-nm python3 -I "$SDK/tools/libtab.py" symcheck "$TB" "$A/obj" "$SDK/base/src"
+echo "symcheck: no object of the base uses a symbol of a library of $(basename "$TB")"
+
 # record 8: the SID player, assembled by the submodule's own 64tass (software/6502/sidcrt, target/ is not in git)
 make -s -C "$APP/tools/64tass" >/dev/null
 make -s -C "$APP/software/6502/sidcrt" >/dev/null
@@ -62,10 +87,28 @@ done
 
 mkdir -p "$(dirname "$OUT")"
 python3 -I "$SDK/tools/cor_pack.py" pack-large -o "$OUT" --id trx64u --name TRX64U --version "$VER" \
-    --bit "$BIT" --app "$SDK/image/coreapp.bin" --icon "$HERE/base/icon.rgb565" \
+    --bit "$BIT" --app "$A/app.bin" --heap 0 --sizes "$TB" --icon "$HERE/base/icon.rgb565" \
     --desc "$HERE/base/menu.toml" --desc "$HERE/base/desc.toml" \
     --lib "$HERE/build/trx64u/trx64u.u2a" --lib "$HERE/build/ring/ring.u2a" --lib "$HERE/build/monitor/monitor.u2a" \
-    --files "$F" --ops "$HERE/base/ops_trx64u.txt" --bit-commit "$BITC" --app-commit "$(pin source_commit)"
+    --files "$F" --ops "$HERE/base/ops_trx64u.txt" --bit-commit "$BITC" --app-commit "$(pin source_commit)" > "$A/pack.log" 2>&1 \
+    || { cat "$A/pack.log" >&2; exit 1; }
+cat "$A/pack.log"
 python3 -I "$SDK/tools/cor_pack.py" check "$OUT" > /dev/null
+
+# P4-1: the heap the packer reported is what is left behind the image: the region end and the reserve from the image's heap record, E from the ELF
+E="$(riscv32-unknown-elf-nm "$A/app.elf" | sed -n 's/^\([0-9a-f]*\) [A-Za-z] _end$/\1/p')"
+python3 -I - "$A/app.bin" "$E" "$A/pack.log" <<'PY'
+import re, struct, sys
+img, end, log = open(sys.argv[1], "rb").read(), int(sys.argv[2], 16), open(sys.argv[3]).read()
+o = img.index(b"TRXHEAP:") + 8
+_, image_end, region_end, reserve = struct.unpack_from("<4I", img, o)
+m = re.search(r"; heap 0x([0-9a-f]+) = \d+ bytes \(word 0: the region left\)", log)
+if image_end != end or not m:
+    sys.exit("pack_cor.sh: heap: the image's record says image end 0x%x, the ELF's _end is 0x%x%s" % (image_end, end, "" if m else "; cor_pack.py reported no heap of word 0"))
+heap, top, aligned = int(m.group(1), 16), region_end - reserve, (end + 15) & ~15
+if heap != top - aligned:
+    sys.exit("pack_cor.sh: heap 0x%x reported, 0x%x - align16(0x%x) = 0x%x" % (heap, top, end, top - aligned))
+print("heap = 0x%X - align16(E) = 0x%X - 0x%X = 0x%X (%d bytes); E = _end = 0x%X" % (top, top, aligned, heap, heap, end))
+PY
 SUM="$(sha256sum "$OUT" 2>/dev/null || shasum -a 256 "$OUT")"
 echo "trx64u.cor: $OUT, $(wc -c < "$OUT" | tr -d ' ') bytes, sha256 ${SUM%% *}, checked"
