@@ -2,8 +2,8 @@
 
 Every FPGA building block that the TRX64 Ultimate builds read, where it comes from and
 under which licence. Scope is what the build scripts hand to Vivado
-(`designs/*/build.tcl`, `tools/vivado_lib.tcl`, `tools/gideon_sources.sh`,
-`tools/vendor_gideon.sh`), not everything that lies in the tree. One section more: the files the CI packs
+(`designs/*/build.tcl`, `tools/vivado_lib.tcl`, our copy of Gideon's files in
+`vendor/gideon`), not everything that lies in the tree. One section more: the files the CI packs
 `trx64g.cor` with (`software/trx64g`). Licences of the repository: `LICENSE` and `LICENSING.md`.
 
 Designs: **c64** = `designs/c64_basic`, **ddr2** = `designs/ddr2_test`,
@@ -54,29 +54,39 @@ Own code, every file `SPDX-License-Identifier: GPL-3.0-or-later`; read by every 
 | T25.1 SID engine | `rtl/trx_sid_engine.v`, `mem/*.mem`, `model/*` | c64 only with `TRX_SID=1` | Per the headers of `rtl/trx_sid_engine.v`, `model/sidref.h` and `model/gen_tables.cpp`: the digital voice follows libresidfp/reSIDfp (Antti Lankila, Dag Lem, Leandro Nini; GPL-2.0-or-later), the filter reSID 1.0's linear 8580 path (GPL-2.0-or-later), for a 6581 the mixing node through the op-amp curve libresidfp measured (`model/gen_opamp.py`, U12), the combined-waveform tables are computed with libresidfp; "Written without UltiSID, reDIP or other HDL sources". The filter curve tables come from the app's `software/io/audio/sid_coeff.c` and `u64_config.cc` (GPL-3, header of `model/gen_curves.py`): software data, not UltiSID HDL |
 | Ultimate Audio sampler | `rtl/trx_sampler.v` | c64 (`designs/c64_basic/c64_core.v`) | "Written from the app's side of the interface and the players that drive it (spec 1); no HDL of others" (header; T25.6) |
 
-## Ultimate half: `cores/gideon`
+## Ultimate half: `vendor/gideon`
 
-Parts of Gideon Zweijtzer's 1541ultimate (`fpga/`), taken by `tools/vendor_gideon.sh`
-from the submodule `software/ultimate-app` (Gitea `TREX/1541ultimate`, branch
-`trx64/main` per `.gitmodules`; upstream https://github.com/GideonZ/1541ultimate).
-`cores/gideon` is generated and not in git; `cores/gideon/VENDOR.md` records the commit
-it was made from: the submodule commit pinned on main, **234a0abbd3c59a3002c8202e7f3c749d98811fba**.
-Licence of the repository: GNU GPL version 3, copied as `cores/gideon/LICENSE.txt`.
+Parts of Gideon Zweijtzer's 1541ultimate (upstream https://github.com/GideonZ/1541ultimate),
+our own copy in git (U20 D3, D5, 2026-11-24): the files listed in `tools/vendor_gideon.sh`,
+taken from upstream commit **1ba94abd314186559dfdeee9690e16d5d251f552** (2026-09-20), with
+our patches (below) applied; `vendor/gideon/VENDOR.md` records the commit and the patches,
+`tools/gideon_sources.sh <checkout>` renews the copy. That commit is the merge base of our
+former app submodule (fork `TREX/1541ultimate`, 0103c585) with upstream `master`: every
+listed file and the whole `fpga/` tree are identical in the two (`git diff --quiet`, same
+`fpga/` tree id), and no commit of the fork that is not a merge touches `fpga/`.
+The copy replaces `cores/gideon`, which `tools/gideon_sources.sh` generated from the
+submodule; `diff -r` of the two showed no difference but `VENDOR.md`, the generator's
+`.stamp` and the added `software/io/audio/sid_coeff.c`.
+Licence of the repository: GNU GPL version 3, copied as `vendor/gideon/LICENSE.txt`.
 Most files name Gideon Zweijtzer / Gideon's Logic Architectures / Gideon's Logic B.V. in
-the header (2004-2026); many have no header at all; only
-`fpga/1541/vhdl_source/via6522.vhd` states a licence itself ("License: GPL 3.0").
+the header (2004-2026); many have no header at all; of the files outside
+`software/io/audio`, only `fpga/1541/vhdl_source/via6522.vhd` states a licence itself
+("License: GPL 3.0"). `sid_coeff.c` (the app's SID filter curves, the input of
+`cores/trx_sid/model/gen_curves.py`) was copied by path and not opened; the script's check
+for the restricted clause ran over it and passed.
 
 `tools/vendor_gideon.sh` refuses any file containing "without written permission".
-Clean-room rule: Gideon's UltiSID (`fpga/sid6581`), Copper (`fpga/io/copper`) and
-`lp_filter` (`io/audio/lp_filter*`) are not vendored, not used and must not be opened.
+Clean-room rule: Gideon's UltiSID (`fpga/sid6581`), Copper (`fpga/io/copper`),
+`lp_filter` (`io/audio/lp_filter*`) and `sys_to_aud` are not vendored, not used and must not be opened.
 This document was written without opening them.
 
-All rows: used in c64 only, author Gideon Zweijtzer, commit 2556865, licence GPL-3
-(`cores/gideon/LICENSE.txt`).
+All rows: used in c64 only, author Gideon Zweijtzer, upstream commit 1ba94abd, licence GPL-3
+(`vendor/gideon/LICENSE.txt`). No file carries a header note of ours: the patched files are
+listed in the patch table below (MultiCore's `vendor/gideon` has the same form).
 
-| Block | Path (`cores/gideon/fpga/...`) | Notes |
+| Block | Path (`vendor/gideon/fpga/...`) | Notes |
 |---|---|---|
-| rvlite RISC-V CPU | `cpu_unit/rvlite/vhdl_source/*.vhd` incl. `bootrom_8k.vhd`, `rvlite_wrapper.vhd` | Unmodified; boot ROM content is ours (`bootrom_pkg.vhd`, below) |
+| rvlite RISC-V CPU | `cpu_unit/rvlite/vhdl_source/*.vhd` incl. `bootrom_8k.vhd`, `rvlite_wrapper.vhd` | `core.vhd`, `rvlite_wrapper.vhd` patched (0005), `execute.vhd`, `multiply.vhd` patched (0006); boot ROM content is ours (`bootrom_pkg.vhd`, below) |
 | IO and memory busses | `ip/busses/vhdl_source/io_bus_pkg.vhd`, `mem_bus_pkg.vhd`, `io_bus_splitter.vhd`, `mem_bus_arbiter_pri_32.vhd`, `mem_bus_arbiter_pri.vhd`, `mem_to_mem32.vhd`, `endianness_pkg.vhd` | Unmodified. The DDR2 arbiter `mig_arb` is ours (`designs/c64_basic/ddr2_port.v`) |
 | ITU (interrupts, timers) | `io/itu/vhdl_source/itu.vhd`, `itu_pkg.vhd` | Unmodified |
 | u2p_io | `altera/u2p_io.vhd` | Unmodified |
@@ -84,10 +94,10 @@ All rows: used in c64 only, author Gideon Zweijtzer, commit 2556865, licence GPL
 | SPI (flash) | `io/spi/vhdl_source/spi.vhd`, `spi_peripheral_io.vhd` | Unmodified |
 | Ethernet RMII MAC | `io/rmii/vhdl_source/crc32.vhd`, `rmii_transceiver.vhd`, `eth_filter.vhd`, `eth_transmit.vhd`, `ethernet_interface.vhd`; `ip/free_queue/vhdl_source/*.vhd` | `eth_transmit.vhd` patched (0003). `ethernet_rmii.vhd` is vendored but not read by the build |
 | USB 2 host with nano CPU | `io/usb2/vhdl_source/*.vhd` (20 files), `ip/nano_cpu/vhdl_source/*.vhd`, `altera/distributed_stack.vhd`, `altera/align_read_to_bram.vhd`, `ip/memory/vhdl_source/dpram_8x16.vhd`, `dpram_8x32.vhd` (entities) | Unmodified; the RAM architectures are ours (`usb_dpram.vhd`) |
-| 1541 drive | `1541/vhdl_source/*.vhd` (16 files, incl. `via6522.vhd`); `6502n/vhdl_source/*.vhd` as the drive CPU | `c1541_drive.vhd` patched (0001), `floppy_stream.vhd` patched (0002); the 6502n entities are renamed `drv_*` by `tools/vendor_gideon.sh` (mechanical) |
+| 1541 drive | `1541/vhdl_source/*.vhd` (16 files, incl. `via6522.vhd`); `6502n/vhdl_source/*.vhd` as the drive CPU | `c1541_drive.vhd` patched (0001), `floppy_stream.vhd` patched (0002), `cpu_part_1541.vhd` and `6502n/vhdl_source/cpu6502.vhd` patched (0004); the 6502n entities are renamed `drv_*` by `tools/vendor_gideon.sh` (mechanical) |
 | Infrastructure | `ip/clock/vhdl_source/fractional_div.vhd`, `ip/srl_fifo/vhdl_source/srl_fifo-xilinx.vhd` (uses Xilinx `unisim` SRL16E), `ip/sync_fifo/...`, `ip/async_fifo/...`, `ip/synchroniser/...`, `ip/memory/vhdl_source/spram.vhd`, `pseudo_dpram_8x32.vhd` (entity), `io/sigma_delta_dac/vhdl_source/noise_generator.vhd` (floppy sound) | Unmodified; the pseudo_dpram architecture is ours |
 | Command interface (UCI) | `io/command_interface/vhdl_source/command_if_pkg.vhd`, `command_protocol.vhd`, `command_interface.vhd`; `ip/memory/vhdl_source/dpram.vhd`, `ip/busses/vhdl_source/slot_bus_pkg.vhd`, `io_bus_bridge2.vhd`, `ip/synchroniser/vhdl_source/synchronizer_gzw.vhd` | Unmodified; wrapped by our `designs/c64_basic/uci_unit.vhd` (T28) |
-| Vendored, not synthesized | `ip/video/vhdl_source/char_generator_*.vhd`, `ip/video/vhdl_gen/font_pkg.vhd`, `ethernet_rmii.vhd`, `target/simulation/.../tl_string_util_pkg.vhd`, `software/io/usb/nano_minimal.nan`, `tools/parse_nano.py`, `software/portable/riscv/bootloader_u64ii.c` | References and simulation only; the fonts become BRAM content (below) |
+| Vendored, not synthesized | `ip/video/vhdl_source/char_generator_*.vhd`, `ip/video/vhdl_gen/font_pkg.vhd`, `ethernet_rmii.vhd`, `target/simulation/.../tl_string_util_pkg.vhd`, `software/io/usb/nano_minimal.nan`, `tools/parse_nano.py`, `software/portable/riscv/bootloader_u64ii.c`, `software/io/audio/sid_coeff.c` (the app's SID filter curve arrays, read by `designs/c64_basic/sim/sid/run_m1.sh`) | References and simulation only; the fonts become BRAM content (below) |
 
 ### Our patches on Gideon's code: `tools/patches/gideon`
 
@@ -112,7 +122,7 @@ carry `SPDX-License-Identifier: GPL-3.0-or-later`, except those noted as made fr
 | C64 core wrapper and memory | `designs/c64_basic/c64_core.v`, `c64_mem.v`, `cart_slot.v`, `cart_fill.v`, `slot_port.v` (expansion port, T16), `dma_win.v`, `reu_ddr_map.v` | c64 | Wrap icepi's `c64_top` and `c64_cartridge` |
 | TRX engine, IO, overlay | `designs/c64_basic/trx_io.v`, `trx_sys.v`, `trx_engine.v`, `pix_layer.v`, `c64_text.v`, `overlay.v`; debug: `trx_dbg.v` (6510), `drv_dbg.v` (drive), `rv_dbg.v` (RISC-V) | c64 | `overlay.v` reimplements the register map and drawing of Gideon's char_generator (comment in the file) |
 | Glue for Gideon's blocks | `designs/c64_basic/ultimate_sys.vhd`, `drive_unit.vhd`, `drive_mem.vhd`, `usb_dpram.vhd`, `pseudo_dpram_8x32_x7.vhd`, `uci_unit.vhd`, `flash_gate.vhd` (guard in front of Gideon's `spi_peripheral_io`) | c64 | Own code around Gideon's entities; `usb_dpram.vhd` and `pseudo_dpram_8x32_x7.vhd` are architectures for his entities (written after the UG901 template, per the header) |
-| Boot ROM content | `designs/c64_basic/bootrom_pkg.vhd` (generated by `software/bootrom/mkpkg.py`) | c64 | Built from `software/bootrom/bootrom.c`, which its header says is "made from Gideon's U64-II boot loader" (`bootloader_u64ii.c`, GPL-3 per `cores/gideon/LICENSE.txt`): a derivative of GPL-3 code |
+| Boot ROM content | `designs/c64_basic/bootrom_pkg.vhd` (generated by `software/bootrom/mkpkg.py`) | c64 | Built from `software/bootrom/bootrom.c`, which its header says is "made from Gideon's U64-II boot loader" (`bootloader_u64ii.c`, GPL-3 per `vendor/gideon/LICENSE.txt`): a derivative of GPL-3 code |
 | hdmi_test | `designs/hdmi_test/top.v`, `tmds.v`, `video_720p.v`, `cdce_i2c.v`, `hdmi_gtp.v` | hdmi | |
 | ddr2_test | `designs/ddr2_test/top.v`, `ddr2_tester.v`; `designs/c64_basic/cal_seq.v` (shared with c64) | ddr2, c64 | Own code. `cal_seq.v` follows the search of Gideon's `ddr2_calibrator_u64ii.c` (GPL-3: DQS read as data, tap sweep, longest run, bitslip) with different rules and none of its code |
 | DDR2 controller and PHY | `designs/c64_basic/ddr2_lean.v`, `ddr2_ctrl.v` (lean + `cal_seq.v`), `ddr2_pins.xdc` | ddr2, c64 | Own code (OPT-ddr2). The register block and the free-running read capture follow the idea of Gideon's `mem_io.vhd` / `ddr2_calibrator_u64ii.c` (GPL-3, read for the idea, nothing copied) |
@@ -130,7 +140,7 @@ carry `SPDX-License-Identifier: GPL-3.0-or-later`, except those noted as made fr
 
 | Content | Path | Used in | Origin | Licence |
 |---|---|---|---|---|
-| Overlay fonts | `designs/c64_basic/mem/ovl_font8.mem`, `ovl_font12.mem` (`tools/font2mem.py`) | c64; `ovl_font8.mem` also in trx64u's `ring` library (the Timewarp bar's texts, `software/trx64u/ring/twfont.py` at build time) | Gideon's `char_generator_rom_pkg.vhd` and `font_pkg.vhd` (header of `tools/font2mem.py`) | GPL-3 (`cores/gideon/LICENSE.txt`) |
+| Overlay fonts | `designs/c64_basic/mem/ovl_font8.mem`, `ovl_font12.mem` (`tools/font2mem.py`) | c64; `ovl_font8.mem` also in trx64u's `ring` library (the Timewarp bar's texts, `software/trx64u/ring/twfont.py` at build time) | Gideon's `char_generator_rom_pkg.vhd` and `font_pkg.vhd` (header of `tools/font2mem.py`) | GPL-3 (`vendor/gideon/LICENSE.txt`) |
 | SID tables, kawari colours/luma, USB HID ROM | listed with their blocks above | c64 | as their blocks | as their blocks |
 
 No Commodore ROM is in a bitstream. The C64's Kernal, BASIC and character ROM

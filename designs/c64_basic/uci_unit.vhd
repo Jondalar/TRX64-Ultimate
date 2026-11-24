@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --------------------------------------------------------------------------------
 -- uci_unit: the UCI (Ultimate Command Interface, docs/specs/T28-uci.md) as in
--- Gideon's bitstreams: his command_interface (cores/gideon, unchanged) in the
+-- Gideon's bitstreams: his command_interface (vendor/gideon, unchanged) in the
 -- C64's clock, its 8 KB IO range (0x10044000) from the app's clock through
 -- his io_bus_bridge2, and the slot bus built from our C64 bus.
 --

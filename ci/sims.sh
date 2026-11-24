@@ -104,7 +104,7 @@ declare_specs() {
     printf 'declared\n'; printf '%s\n' $s
   else
     [ $rc -eq 3 ] || echo "ci/sims.deps is wrong for $1: whole tree" >&2
-    printf 'tree\n'; printf '%s\n' designs cores tools roms ci software/ultimate-app
+    printf 'tree\n'; printf '%s\n' designs cores vendor tools roms ci
   fi
 }
 
@@ -115,7 +115,7 @@ bench_key() {
   k="$(files_key "${specs[@]}")" || {
     echo "key of $name: a declared path is missing, whole tree instead" >&2
     kind=tree
-    k="$(files_key designs cores tools roms ci software/ultimate-app)"
+    k="$(files_key designs cores vendor tools roms ci)"
   }
   printf '%s %s\n' "$(printf '%s\n%s\n%s\n%s\n' "$k" "$name" "$cmd" "$versions" | sha256sum | cut -c1-16)" "$kind"
 }
@@ -137,7 +137,7 @@ sandbox() {
   { read -r kind; while IFS= read -r k; do specs+=("${k%%//*}"); done; } < <(declare_specs "$1")
   [ "$kind" = declared ] || { echo "$1 has no declaration to check" >&2; return 1; }
   # <submodule>//<path> narrows the KEY, not the copy: the sandbox links the whole
-  # submodule, because the scripts in it want a git checkout (tools/gideon_sources.sh).
+  # submodule. No bench declares one since U20 A1 (Gideon's files are in vendor/gideon).
   git -C "$ROOT" ls-files -s -z -- "${specs[@]}" | python3 -c '
 import os, shutil, sys
 root, dst = sys.argv[1:3]
@@ -226,11 +226,6 @@ for i in "${!names[@]}"; do
   run_names+=("${tmos[$i]} $name")
 done
 if [ ${#run_names[@]} -gt 0 ]; then
-  # Gideon's VHDL is generated into cores/gideon; once, here, so that no two benches make it at the same time
-  if printf '%s\n' "${names[@]}" | while read -r n; do declare_specs "$n"; done |
-       grep -q '^software/ultimate-app\(//\|$\)'; then
-    "$ROOT/tools/gideon_sources.sh" > "$logdir/gideon_sources.log" 2>&1 || echo "gideon_sources.sh failed, see $logdir/gideon_sources.log"
-  fi
   export ROOT logdir check cache_on ok_dir
   export -f run_one verdict_of declare_specs deps_of sandbox
   solo=() para=()

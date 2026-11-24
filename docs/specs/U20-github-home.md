@@ -162,7 +162,29 @@ In this order; each step is a commit with its docs. A, B and E are ours; C is Mu
 
 ### A1, A4 (Gideon's gateware in `vendor/gideon`, bench inputs)
 
-Not started.
+2026-11-24, built on `u18` d725a710: commits 6893e087 (copy, users, docs) and fbc2c60c (workflows).
+- **Upstream commit** 1ba94abd314186559dfdeee9690e16d5d251f552 (GideonZ/1541ultimate `master`, 2026-09-20): the merge base of the
+  fork 0103c585 with upstream `master` (40188c7d at fetch). Proof: the 128 files of `tools/vendor_gideon.sh` exist in both and
+  `git diff --quiet 1ba94abd 0103c585 -- <list>` exits 0; the `fpga/` tree is the same object (75101867) in both; in
+  1ba94abd..0103c585 no non-merge commit touches `fpga/` (7 upstream merges do, net diff empty).
+- **The copy:** `tools/gideon_sources.sh <checkout at 1ba94abd>` made `vendor/gideon` (128 files, our six patches, `VENDOR.md`) plus
+  `software/io/audio/sid_coeff.c` (A4, copied by path, not opened). `diff -r` against a freshly generated `cores/gideon` (old scripts,
+  fork 0103c585): identical but `VENDOR.md`, `.stamp` and `sid_coeff.c`. No file-header notes: MultiCore's patched VHDL has none
+  (only its software files changed by third-party ports do). `tools/gideon_sources.sh` alone only checks the copy.
+- **Users switched:** `build.tcl`, 16 bench scripts, `font2mem.py` (its output equals the committed `.mem`), `vivado.sh`; `ci/lib.sh`
+  (`gateware_key` over `vendor/gideon` as tracked files, without `VENDOR.md` and `software/io/audio`; `tree_key` no longer finds a
+  generated tree); `ci/sims.deps` (`@gideon` = `vendor/gideon/fpga tools/gideon_sources.sh`; eth adds patch 0003); `ci/sims.sh`
+  (whole-tree key names `vendor`, not the submodule; the generation step gone); `ci/submodule.sh` (no Gideon step); `bitstream.yml`
+  and `sims.yml` no longer fetch the submodule. `cores/gideon`, its `.gitignore` line and `.stamp` are gone.
+- **A4:** eth `orig` reverses patch 0003 on the copy at bench time (result `cmp`-equal to upstream's `eth_transmit.vhd`);
+  `sid/run_m1.sh` reads the copied `sid_coeff.c`.
+- **Checks:** `ci/lint.sh` locally, all ok; SID M1 bench ran (tables equal, the 3 known 8580 OSC3 mismatches); every Gideon path of
+  `build.tcl` (116) and of the benches (76) exists in the copy. Not run here (no ghdl): eth and the other GHDL benches; the next CI run
+  rebuilds the bitstream (new key) and runs them.
+- **Left for A2/A5:** the other submodule users: `ci/app.sh`, `ci/lib.sh` `build_update`, `ci/release.sh`, `ci/submodule.sh` with
+  `app.yml`/`cor.yml`, `tools/make_update.sh`, `gh_export.py`, `release_notes.py`, `trx_pkg.py`, `hdmi_modes.py`
+  (`trx_hdmi_modes.h`), `ef3_image.py`, `tests/bdd` (`tests/e2e/lib`), `tests/t55_board.py`, `tests/cart/*.py`, the app rows of
+  `LICENSING.md`, `BUILD.md`, `CONTRIBUTING.md`.
 
 ### A2, A3 (our fork code in the tree, the SID and music player out)
 

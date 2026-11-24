@@ -3,11 +3,11 @@
 # U19 bench (TRX64U-MultiCore's T133 bench, host/sim/dcache at e4f99648): rv_dcache (designs/c64_basic/rv_dcache.vhd) in
 # front of Gideon's bus_converter, a DMA master on the arbiter, a toggle writer and a memory model (tb_dcache.vhd; MultiCore T133 §2).
 #   directed scenarios S1-S9 and a random run (SEEDS, default "1 2 3"); PASS = no "ERR:" line
-# G = Gideon's fpga directory (default cores/gideon/fpga, made by tools/gideon_sources.sh). Needs ghdl (container trx64-sim-env:4). One process, niced.
+# G = Gideon's fpga directory (default vendor/gideon/fpga, in git). Needs ghdl (container trx64-sim-env:4). One process, niced.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
-G=${G:-$root/cores/gideon/fpga}
+G=${G:-$root/vendor/gideon/fpga}
 [ -d "$G" ] || { "$root/tools/gideon_sources.sh"; }
 SEEDS=${SEEDS:-1 2 3}
 opts="--std=08 -fsynopsys -frelaxed -Wno-hide -Wno-shared -Wno-library"

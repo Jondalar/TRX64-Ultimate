@@ -4,7 +4,7 @@
 -- needs to get through its boot (docs/ultimate-app-hw-spec.md, step A).
 --
 --   - rvlite_wrapper, ITU (timers, IRQs, capabilities, console UART) and
---     u2p_io from cores/gideon, unchanged.
+--     u2p_io from vendor/gideon, unchanged.
 --   - The memory bus leaves this entity flattened (Verilog cannot take VHDL
 --     records); top.v bridges it onto the DDR2 controller (cpu_mem_bridge.v).
 --   - Everything else the app touches is a stub (spec 4.7, 4.9, 6.1): register

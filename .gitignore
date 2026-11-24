@@ -15,7 +15,6 @@ designs/*/sim/*.vvp
 designs/*/sim/*.vcd
 designs/*/ip/
 __pycache__/
-cores/gideon/
 out/
 out-ue2/
 .ci/

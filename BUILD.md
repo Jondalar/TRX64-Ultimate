@@ -71,10 +71,12 @@ Origin, version and licence of every gateware block in the bitstreams: [PROVENAN
   gateware (Alex's fork); origin commits and the former patches are listed in
   `cores/icepi/ORIGIN.md`. Licences: GPL-3 (icepi, kawari), CERN-OHL-S v2
   (reDIP SID/CIA); fine for internal use, to be settled before anything is published.
-- `cores/gideon`: generated, not in git: parts of Gideon Zweijtzer's 1541ultimate
-  (GPL-3) taken from the submodule `software/ultimate-app` with our patches from
-  `tools/patches/gideon` by `tools/gideon_sources.sh` (builds and simulations call it);
-  never the files marked "not to be used in other projects". `software/bootrom`: our rvlite boot ROM from his `bootloader_u64ii.c`,
+- `vendor/gideon`: our copy in git of the parts of Gideon Zweijtzer's 1541ultimate
+  (GPL-3) that the bitstream and the benches read, from his upstream commit in
+  `vendor/gideon/VENDOR.md` with our patches from `tools/patches/gideon` applied;
+  `tools/gideon_sources.sh <1541ultimate checkout>` renews it, without an argument it
+  only checks that the copy is there (builds and simulations call it); never the files
+  marked "not to be used in other projects". `software/bootrom`: our rvlite boot ROM from his `bootloader_u64ii.c`,
   built by `tools/build_bootrom.sh` (1541ultimate build image) into
   `designs/c64_basic/bootrom_pkg.vhd`.
 - `software/ultimate-app`: submodule, the Ultimate app (1541ultimate on Gitea, branch

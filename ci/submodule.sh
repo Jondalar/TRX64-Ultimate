@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Fetch the Ultimate app submodule (Gideon's VHDL and the app come from it) and
-# make cores/gideon from it. Read with APP_TOKEN, a read-only token of a user who
-# can read TREX/1541ultimate; without it the plain submodule URL is used.
+# Fetch the Ultimate app submodule (the app comes from it; Gideon's VHDL for the
+# gateware and the benches is our copy in vendor/gideon since U20 A1). Read with
+# APP_TOKEN, a read-only token of a user who can read TREX/1541ultimate; without
+# it the plain submodule URL is used.
 #
 #   APP_TOKEN=... GITHUB_SERVER_URL=... [NESTED="software/lwip software/httpd"] ci/submodule.sh
 set -eu
@@ -26,4 +27,3 @@ for n in ${NESTED:-}; do
   done
 done
 git -C "$ROOT/software/ultimate-app" log --oneline -1
-"$ROOT/tools/gideon_sources.sh"

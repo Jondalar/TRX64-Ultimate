@@ -19,7 +19,7 @@ opts="--std=08 -fsynopsys -frelaxed -Wno-hide -Wno-shared -Wno-library"
 
 # the VHDL list of build.tcl, in its order
 "$root/tools/gideon_sources.sh"
-python3 - "$design/build.tcl" "$root/cores/gideon/fpga" "$design" > "$out/files.txt" <<'EOF'
+python3 - "$design/build.tcl" "$root/vendor/gideon/fpga" "$design" > "$out/files.txt" <<'EOF'
 import re, sys
 tcl, g, design = sys.argv[1:]
 body = open(tcl).read().split("\nset g ", 1)[1].split("read_vhdl -library work [list", 1)[1].split("]", 1)[0]
@@ -43,7 +43,7 @@ echo "elaborated ultimate_sys"
   $G -m $opts tb_usb && $G -a $opts "$here/rvlite_bfm.vhd" && $G -e $opts tb_usb) > "$out/tb.log" 2>&1 ||
   { tail -20 "$out/tb.log"; exit 1; }
 
-python3 "$root/cores/gideon/tools/parse_nano.py" "$root/cores/gideon/software/io/usb/nano_minimal.nan" \
+python3 "$root/vendor/gideon/tools/parse_nano.py" "$root/vendor/gideon/software/io/usb/nano_minimal.nan" \
   "$out/tb/nano_minimal.b" > "$out/tb/nano_minimal.lst"
 python3 -c "import sys; [print('%02X' % b) for b in open(sys.argv[1], 'rb').read()]" \
   "$out/tb/nano_minimal.b" > "$out/tb/nano_minimal.hex"

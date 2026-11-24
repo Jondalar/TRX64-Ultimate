@@ -16,18 +16,18 @@ mkdir -p "$out"
 cd "$out"
 GH="nice -n 15 ghdl"
 F="--std=08 -frelaxed -fsynopsys"
-$GH -a $F $root/cores/gideon/fpga/ip/busses/vhdl_source/io_bus_pkg.vhd \
-    $root/cores/gideon/fpga/io/spi/vhdl_source/spi.vhd \
-    $root/cores/gideon/fpga/io/spi/vhdl_source/spi_peripheral_io.vhd \
+$GH -a $F $root/vendor/gideon/fpga/ip/busses/vhdl_source/io_bus_pkg.vhd \
+    $root/vendor/gideon/fpga/io/spi/vhdl_source/spi.vhd \
+    $root/vendor/gideon/fpga/io/spi/vhdl_source/spi_peripheral_io.vhd \
     $root/designs/c64_basic/flash_gate.vhd $here/flash_model.vhd $here/tb_flash_gate.vhd
 $GH -e $F tb_flash_gate
 
 # tb_cpu: Gideon's rvlite runs tools/flashgate/mailbox.S, the lists come from
 # tools/flashgate_test.py --sim (the board stages without the board)
-R=$root/cores/gideon/fpga/cpu_unit/rvlite/vhdl_source
+R=$root/vendor/gideon/fpga/cpu_unit/rvlite/vhdl_source
 $GH -a $F $here/../usb/tl_string_util_pkg.vhd \
-    $root/cores/gideon/fpga/ip/busses/vhdl_source/mem_bus_pkg.vhd \
-    $root/cores/gideon/fpga/ip/busses/vhdl_source/mem_bus_arbiter_pri_32.vhd \
+    $root/vendor/gideon/fpga/ip/busses/vhdl_source/mem_bus_pkg.vhd \
+    $root/vendor/gideon/fpga/ip/busses/vhdl_source/mem_bus_arbiter_pri_32.vhd \
     $R/core_pkg.vhd $R/alu_pkg.vhd $R/alu_logical.vhd $R/alu_branch.vhd $R/multiply.vhd \
     $R/dsram.vhd $R/gprf.vhd $R/csr.vhd $R/decode_comb.vhd $R/decode.vhd $R/fetch.vhd \
     $R/execute.vhd $R/writeback.vhd $R/core.vhd $R/icache.vhd $R/bus_converter.vhd \

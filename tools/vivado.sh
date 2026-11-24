@@ -9,9 +9,9 @@
 # vivado/), and build/ comes back next to the sources.
 set -euo pipefail
 
-NAS="${TRX_NAS:-admin@192.168.242.2}"
-BASE=/share/CACHEDEV2_DATA/trx64-build
-DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+NAS="${TRX_NAS:-admin@192.0.2.2}"
+BASE=/srv/trx64-build
+DOCKER=/srv/.qpkg/container-station/bin/docker
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 design="${1:?design directory, e.g. designs/hdmi_test}"
@@ -22,7 +22,7 @@ work="$BASE/work/$name"
 "$ROOT/tools/gideon_sources.sh"
 
 ssh "$NAS" "mkdir -p '$work' && rm -rf '$work/src' && mkdir -p '$work/src'"
-COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --exclude build -czf - "$design" constraints cores tools/vivado_lib.tcl | ssh "$NAS" "tar -C '$work/src' -xzf -"
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --exclude build -czf - "$design" constraints cores vendor tools/vivado_lib.tcl | ssh "$NAS" "tar -C '$work/src' -xzf -"
 ssh "$NAS" "mkdir -p '$BASE/cache' && $DOCKER run --rm --cpus=3 -v '$work:/work' \
     -v '$BASE/cache:/cache' -e TRX_CACHE=/cache -e HOME=/tmp \
     -w '/work/src/$design' vivado-env:2024.1 \

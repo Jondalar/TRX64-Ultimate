@@ -1297,7 +1297,7 @@ address = 0x10050000
 size = 0x10000
 map = "dma"
 
-# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894 region r_gcr, :950-953 its request, :798-803 the instance; cores/gideon/fpga/1541/vhdl_source/
+# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894 region r_gcr, :950-953 its request, :798-803 the instance; vendor/gideon/fpga/1541/vhdl_source/
 # gcr_codec.vhd). Every write shifts its byte into a 40-bit register (:27-29, at any address of the block); a read (:30-52) of +0 .. +3 answers the
 # four bytes decoded from those 40 bits (gcr2bin :70-76), +4 .. +7 the decoder's error bits, +8 .. +C the five bytes encoded from the last 32. The
 # core's (Alex's split, U18 §5 2026-11-24): its one driver is the UCI library's CONTROL target (uci/uci.cc conv_5bytes_gcr2bin: five bytes in, four out;

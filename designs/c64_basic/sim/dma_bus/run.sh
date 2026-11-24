@@ -16,7 +16,7 @@ G="nice -n 15 ghdl"
 opts="--std=08 -fsynopsys -frelaxed -Wno-hide -Wno-shared -Wno-library"
 
 "$root/tools/gideon_sources.sh"
-python3 - "$design/build.tcl" "$root/cores/gideon/fpga" "$design" > "$out/files.txt" <<'PY'
+python3 - "$design/build.tcl" "$root/vendor/gideon/fpga" "$design" > "$out/files.txt" <<'PY'
 import sys
 tcl, g, design = sys.argv[1:]
 body = open(tcl).read().split("\nset g ", 1)[1].split("read_vhdl -library work [list", 1)[1].split("]", 1)[0]

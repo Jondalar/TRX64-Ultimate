@@ -7,16 +7,15 @@
 # tracked file below it), a :(glob) or an :(exclude). Only tracked files count, so
 # build/ directories and generated files never do. <submodule>//<pathspec> reaches
 # INSIDE a submodule and counts the content of those files, not the submodule's
-# commit: software/ultimate-app carries Gideon's VHDL beside the application, and a
-# commit that moves the application alone must not rerun his benches (ci/lib.sh
-# files_key). The sandbox of --check-deps links the submodule whole, so a bench that
-# reads an undeclared file inside it is not caught there. The key also holds the
+# commit (ci/lib.sh files_key); no line uses it since U20 A1 put Gideon's files into
+# vendor/gideon, in git. The sandbox of --check-deps links a submodule whole, so a
+# bench that reads an undeclared file inside one is not caught there. The key also holds the
 # bench's line of ci/sims.txt, the versions of iverilog/ghdl/verilator and KEY_EPOCH of
 # ci/sims.sh. The runner's own content is NOT in it: a comment there used to throw away
 # all 40 markers at once, and then the stage ran every bench.
 #
-# A bench without a line here keeps the key of the whole tree (designs cores tools
-# roms ci): any change in those reruns it, nothing is ever skipped wrongly.
+# A bench without a line here keeps the key of the whole tree (designs cores vendor
+# tools roms ci): any change in those reruns it, nothing is ever skipped wrongly.
 # A spec that matches no tracked file makes the bench fall back the same way.
 #
 # Keep a line COMPLETE: what a bench reads and this list lacks is a change that does
@@ -24,8 +23,9 @@
 # these files, so a missing input fails there; the iverilog benches are also checked
 # on every run (the compiler's own list of files it read, ci/sim_iv.sh).
 
-# Gideon's VHDL: cores/gideon is generated from the submodule (tools/gideon_sources.sh)
-@gideon = software/ultimate-app//fpga tools/gideon_sources.sh tools/vendor_gideon.sh tools/patches/gideon
+# Gideon's VHDL: our copy in vendor/gideon, our patches applied (U20 A1); the benches call
+# tools/gideon_sources.sh, which checks that the copy is there
+@gideon = vendor/gideon/fpga tools/gideon_sources.sh
 # the C64 model of the Verilator benches: the cores, the ROMs and what rom2mem makes of them
 @vcore = cores/icepi cores/trx_sid roms tools/rom2mem.py designs/c64_basic/mem designs/c64_basic/c64_core.v designs/c64_basic/c64_mem.v designs/c64_basic/cart_slot.v designs/c64_basic/slot_port.v designs/c64_basic/trx_dbg.v
 # the app RISC-V's caches (U19): rvlite_wrapper_dc and what it takes
@@ -74,7 +74,7 @@ flash_gate: designs/c64_basic/sim/flash_gate designs/c64_basic/flash_gate.vhd de
   tools/flashgate_test.py tools/flashgate @gideon
 flash_boot: designs/c64_basic/sim/flash_boot designs/c64_basic/bootrom_pkg.vhd designs/c64_basic/sim/usb/tl_string_util_pkg.vhd @cache @gideon
 dcache: designs/c64_basic/sim/dcache designs/c64_basic/rv_dcache.vhd @gideon
-eth: designs/c64_basic/sim/eth @bt_vhdl @gideon
+eth: designs/c64_basic/sim/eth @bt_vhdl @gideon tools/patches/gideon/0003-eth-transmit-store-and-forward.patch
 input: designs/c64_basic/sim/input designs/c64_basic/app_input.v @bt_vhdl @vcore @gideon
 slot: designs/c64_basic/sim/slot designs/c64_basic/dma_win.v @vcore
 

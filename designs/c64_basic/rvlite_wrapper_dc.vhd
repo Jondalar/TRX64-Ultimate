@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- PROVENANCE: TRX64U-MultiCore host/rvlite_wrapper_dc.vhd at e4f99648 (T133, the host RISC-V's caches), taken for U19 unchanged but for comments.
 --------------------------------------------------------------------------------
--- T133: Gideon's rvlite_wrapper (cores/gideon, with its dbg_pc patch) with a
+-- T133: Gideon's rvlite_wrapper (vendor/gideon, with its dbg_pc patch) with a
 -- write-through data cache (rv_dcache.vhd) between the core's data port and the
 -- data-side bus converter. Entity name and the old ports are unchanged, so the
 -- benches whose BFMs bind rvlite_wrapper keep working; the new ports have defaults.

@@ -33,7 +33,7 @@ jobs:
       # which never reaps, and Vivado's helper processes end up as zombies (runs 222, 225)
       options: --init
       volumes:
-        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+        - /srv/trx64-build/cache:/cache
     # The long benches run one at a time (SOLO_TIMEOUT in ci/sims.sh), so a round that
     # has to rebuild all of them is hours, not minutes: slot 2942 s, turbo 2043 s,
     # ddr2_test 1671 s measured on 2026-11-01. A normal round runs a handful and ends
@@ -52,10 +52,6 @@ jobs:
           git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
             "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
           git -C src log --oneline -1
-      - name: Fetch the Ultimate app submodule
-        env:
-          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
-        run: src/ci/submodule.sh
       - name: Run the benches
         env:
           TIER: ${{ inputs.tier }}

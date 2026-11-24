@@ -12,7 +12,7 @@ root=$(cd "$here/../../../.." && pwd)
 # RV_SRC: another rvlite vhdl_source directory (the unpatched core, for a baseline)
 if [ -z "$RV_SRC" ]; then
   "$root/tools/gideon_sources.sh"
-  RV_SRC=$root/cores/gideon/fpga/cpu_unit/rvlite/vhdl_source
+  RV_SRC=$root/vendor/gideon/fpga/cpu_unit/rvlite/vhdl_source
 fi
 R=$RV_SRC
 out=$here/build${RV_TAG:+_$RV_TAG}

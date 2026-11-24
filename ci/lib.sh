@@ -47,19 +47,11 @@ lap() { local d=$((SECONDS - _lap_t)); _lap_t=$SECONDS; printf '%dm%02ds' $((d /
 branch_slug() { printf '%s' "${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}" | tr '/' '_'; }
 
 # tree_key <pathspec...>: 16 hex digits over the content of the tracked files
-# under the pathspecs, plus (when the checkout has it) the generated cores/gideon
-# and the free text in $KEY_EXTRA. Only the content counts, not commits: a push
-# that leaves these files alone gets the same key. cores/gideon/VENDOR.md is left
-# out for that reason: it only records the submodule commit, and hashing it tied
-# the key to the app, so every app bump missed the cache and rebuilt the bitstream
-# (2026-10-30, b151154b -> 11265524; MultiCore does the same since its run 898).
-# The copied files themselves count, so an app change that moves fpga/ still does.
+# under the pathspecs and the free text in $KEY_EXTRA. Only the content counts,
+# not commits: a push that leaves these files alone gets the same key.
 tree_key() {
   {
     git -C "$ROOT" ls-files -s -- "$@"
-    if [ -d "$ROOT/cores/gideon" ]; then
-      (cd "$ROOT" && find cores/gideon -type f ! -name .stamp ! -name VENDOR.md | LC_ALL=C sort | xargs sha256sum)
-    fi
     printf '%s\n' "${KEY_EXTRA:-}"
   } | sha256sum | cut -c1-16
 }
@@ -124,18 +116,22 @@ tool_versions() {
 }
 
 # gateware_key <part>: what decides a bitstream. The RTL and the build scripts
-# (not the benches), the constraints, Gideon's VHDL as generated from the
-# submodule (so an app change that moves fpga/ counts, one that does not does
-# not), the options that change the netlist, the part and the Vivado image.
+# (not the benches), the constraints, our copy of Gideon's files in vendor/gideon
+# (U20 A1: a renewal that moves them counts), the options that change the
+# netlist, the part and the Vivado image. Two files of vendor/gideon are left
+# out: VENDOR.md only records the commit the copy was made from (hashing it tied
+# the key to the app commit, 2026-10-30, b151154b -> 11265524; MultiCore leaves
+# it out too), and software/io/audio holds a bench input only (sid_coeff.c).
 #
-# The two excludes need the '/**': a pathspec without it matches the directory
+# The excludes need the '/**': a pathspec without it matches the directory
 # entry, not what is under it, so ':(exclude)designs/*/sim' excluded nothing and
 # every bench edit rebuilt the bitstream (found 2026-10-30, U5). Check with
 #   git ls-files designs ':(exclude)designs/*/sim/**' | grep -c /sim/   -> 0
 gateware_key() {
   KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key \
-    designs constraints cores tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon \
-    ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**'
+    designs constraints cores vendor/gideon tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon \
+    ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**' \
+    ':(exclude)vendor/gideon/VENDOR.md' ':(exclude)vendor/gideon/software/io/audio/**'
 }
 
 # cache_put <dir> <key-dir>: copy a finished stage directory into the cache
