@@ -188,7 +188,31 @@ In this order; each step is a commit with its docs. A, B and E are ours; C is Mu
 
 ### A2, A3 (our fork code in the tree, the SID and music player out)
 
-Not started.
+- 2026-11-24, A2: what `build.sh` read from the fork (0103c585), measured from the build's `.d` files and its copy loop, is in the tree:
+  `software/trx64u/trxmon/` (29 files of `apps/trxmon/src` without `main.c`, `libc_min.c` and `trxsvc.h`, which the library build never
+  read, plus `software/io/c64/trx_lens.c`/`.h`) and `software/trx64u/fwabi/` (`app_api.h`, `u2p_app.h`, `u2p_app_api.h`; the last
+  now includes `app_api.h` beside it). Every commit of each file in the fork, renames followed, is Alex Damhuis's: no `PROVENANCE.md`
+  entry; none had an SPDX header. Each file's first line names its origin; the comments that named `main.c`, the host tests or "the
+  only copy" say what holds in this tree.
+- `build.sh` passes `FWABI` instead of `APPSDK`/`APPLOADER` and copies `trxmon/`; `$APP` is gone from it. Rebuilt from clean,
+  `monitor.u2a` (211,256 bytes) and `ring.u2a` (137,088) are byte for byte the ones built from the submodule before.
+- `trxmon/` is not in the reverse lint (`ci/lint.sh`: `base ring monitor uci`): `hw_trx.c` names four firmware windows by address
+  (0x10050000, 0x10180003, 0x10188000, 0x1018C000), `ws.c`'s SHA-1 constant 0x10325476 lies in the I/O space. Open, as before the move.
+- 2026-11-24, A3 (D6): gone are `trx64u_ops.cc`'s player (482 lines: `c64.sid_play`, `sid_songs`, `sid_valid`, `sid_info`, `dma.sidcrt`,
+  the handshake in `c64.service`, the BASIC copy of `c64.put_basic`, the init hook's `sid_cancel` and `player_end`), `u64cfg.cc`'s
+  autoconfig (its only caller was the player) with its two settings (group `SID_player_behavior`, read by nothing else), the file
+  types `.sid`, `.mus`, `.str`, `sidplayer/` with 64tass in `pack_cor.sh` (`$APP` is gone from it), and the library `sid` in TOML B.
+  Kept: sockets, reDIP:SIDs, reSID8, their settings, the socket detection, the UCI's SID map.
+- `sid` served only the player: its export holds only `parse`, `info_text`, `plan`, `requests`, `mus_stereo`, `mus_header`; in our tree
+  only `sid_lib()` asked for it (`ring/ringsys.cc` asks for c64cart, cbm1541, uci; monitor, uci, trex_crt nothing); `online.u2a` has no
+  string "sid"; the SDK's base finds no export "sid" and `libtrxbase.a` has no sid or resid8 symbol; the library's `resid8.cc` has no
+  caller (`u64cfg.cc` writes reSID8 through the driver table). The link without it closes and the symbol check passes.
+- Runs, the submodule emptied (`git submodule deinit`), SDK 0.4.6, bitstream 975aa59b: `build.sh` rc 0 (trx64u.u2a image 77,096, budget
+  now 77,096 + 86,664 bss = 163,760, ops 62); `pack_cor.sh --emu` rc 0: app 1,458,896 bytes (2,640 less), heap 10,972,496, record 8 one
+  file (`apps/trex_crt.u2a`), `.cor` 3,948,516 bytes; READY., ping answered, the ops list 388 lines = `base/ops_trx64u.txt` both ways
+  (the five player operations out of the golden). `ci/lint.sh` rc 0.
+- Open for A5: `.gitea/workflows/cor.yml` still fetches the submodule; `ci/cor.sh` and the scripts it runs read nothing of it now
+  (`trx64g.cor` takes `ultimate.app` from the package).
 
 ### A5, A6, A7 (submodule out, the Gideon-app line on Gitea, ROMs, keys)
 

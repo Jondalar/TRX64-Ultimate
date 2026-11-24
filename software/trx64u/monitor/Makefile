@@ -1,6 +1,7 @@
-# The monitor library (U18 D5): trxmon's engine, the same files as the firmware's trxmon (D4, copied into trxmon/ by build.sh), and its platform:
+# The monitor library (U18 D5): trxmon's engine (../trxmon, copied into trxmon/ by build.sh; moved from the firmware fork by U20 A2, the only copy
+# this tree builds, no longer one source with the firmware's), and its platform:
 # lib_monitor.cc (the entry, the operations, the plat_* calls, the export "textgrid" of the F4 screen), monitor.cc (the session, trxmon's trx table, the
-# F4 screen's rows) and monsrv.cc (the srv_* calls, the RPC server on TCP 4312). Built by ../build.sh, which passes SDK, APPSDK and APPLOADER.
+# F4 screen's rows) and monsrv.cc (the srv_* calls, the RPC server on TCP 4312). Built by ../build.sh, which passes SDK and FWABI (../fwabi).
 # `ring>=1` is met by the export "ring" of whichever library provides it (the base resolves a need on export names first); the ring library also exports
 # "ringsteps", which monitor.cc takes when it is there.
 LIB_NAME = monitor
@@ -16,10 +17,11 @@ LIB_EXPORTS = textgrid=1
 LIB_BUDGET = image=682268 heap_keep=0 heap_peak=50240 ops=4 states=1 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
 include $(SDK)/mk/lib.mk
 
-# trxmon is built against the firmware's application ABI (u2p_app.h with the whole ring table), not the SDK's ABI 2 shim: one source for both (D4), and the
-# ring table is the ring library's own export (MultiCore's interim rule while R4 was open, the rule since). TRXMON_BUILD names the build in ping's
-# version, as the firmware's makefile names its own ("in-firmware").
-TRXMON_CFLAGS = -I$(APPSDK) -I$(APPLOADER) $(LIB_CFLAGS) -DTRXMON_BUILD=\"in-trx64u\"
+# trxmon is built against the firmware's application ABI (FWABI: ../fwabi's u2p_app.h with the whole ring table), not the SDK's ABI 2 shim of the same
+# name (FWABI comes first), and the ring table is the ring library's own export (MultiCore's interim rule while R4 was open, the rule since).
+# TRXMON_BUILD names the build in ping's version.
+FWABI ?= $(abspath $(CURDIR)/../../fwabi)
+TRXMON_CFLAGS = -I$(FWABI) $(LIB_CFLAGS) -DTRXMON_BUILD=\"in-trx64u\"
 trxmon/%.o: trxmon/%.c
 	$(CC_RV) $(TRXMON_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -27,6 +29,6 @@ trxmon/%.o: trxmon/%.c
 # It also reads the ring library's ring_steps.h (the table of its export "ringsteps"): build.sh builds each library in build/<name>/, two levels below
 # software/trx64u/, where the ring library's sources are.
 RING_SRC = $(abspath $(CURDIR)/../../ring)
-MONITOR_CXXFLAGS = -I$(APPSDK) -I$(APPLOADER) -I$(RING_SRC) $(LIB_CXXFLAGS)
+MONITOR_CXXFLAGS = -I$(FWABI) -I$(RING_SRC) $(LIB_CXXFLAGS)
 monitor.o: monitor.cc
 	$(CXX_RV) $(MONITOR_CXXFLAGS) -MMD -MP -c $< -o $@

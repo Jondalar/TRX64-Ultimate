@@ -121,13 +121,9 @@ static int put_rom(const OpArgs &a, uint32_t ofs, uint32_t size, const char *rol
     c64_rom_write(ofs, a.p(0), size);
     return OPE_OK;
 }
-int c64_put_basic(CoreCtx *c, const OpArgs &a, OpOut &o)
+int c64_put_basic(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    int rc = put_rom(a, DRV_OFF(c64_roms, basic), DRV_c64_roms_basic_COUNT, "BASIC", o);
-    if (rc == OPE_OK) {
-        trx64u_basic_put(c, a.p(0), a.len(0));                     // the SID player's cartridge carries the BASIC the machine runs with
-    }
-    return rc;
+    return put_rom(a, DRV_OFF(c64_roms, basic), DRV_c64_roms_basic_COUNT, "BASIC", o);
 }
 // also dma.kernal (the DMA service's KERNAL write, FW socket_dma.cc SOCKET_CMD_KERNALWRITE): the 8 KB image and its fast reset patch in place, no reset
 int c64_put_kernal(CoreCtx *c, const OpArgs &a, OpOut &o)
@@ -468,11 +464,10 @@ static void service_job(void)
 }
 
 // c64.service (desc.toml [core] service_op, every 20 ms while the machine runs): the source of the still's colours until the base takes it (u64cfg.h), the
-// SID player's handshake (T228 R21 item 7), the program job, then the drive's write-back on the same task (T104.1 D15).
-int c64_service(CoreCtx *c, const OpArgs &, OpOut &o)
+// program job, then the drive's write-back on the same task (T104.1 D15).
+int c64_service(CoreCtx *, const OpArgs &, OpOut &o)
 {
     u64cfg_still_palette();
-    trx64u_sid_service(c);
     service_job();
     const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, service);
     o.more = d && d->service();
@@ -828,8 +823,7 @@ int c64_hook_slot_eject(int slot, char *msg, int msglen)
 
 // ---- the hooks (core_hooks.h; lib_trx64u.cc exports them) ------------------------------------------------------------------------------------------
 // init: CTRL+P / CTRL+N at power-on (once, before the settings are applied, T228 R21), the machine held in reset (C64_MODE), drive A reset with it when
-// "Resets when C64 resets" is on, and what the reset ends: a program that was still waiting for READY, a SID tune that was waiting for its player
-// cartridge, the SID player's cartridge itself (the one before it comes back: the cartridge slot changes), the program the machine had run (T228 R20 1/7).
+// "Resets when C64 resets" is on, and what the reset ends: a program that was still waiting for READY, the program the machine had run (T228 R20 1/7).
 // The drive reset is cbm1541.reset, which makes no drive (-1: none there); its result is not the reset's (c64.cc ignored it), a failure is logged.
 int c64_hook_init(char *, int)
 {
@@ -845,11 +839,6 @@ int c64_hook_init(char *, int)
         }
     }
     g_st.job = J_NONE;
-    trx64u_sid_cancel();
-    const C64CartApi *k = X_GET(X_CART, C64CartApi, player_end);
-    if (k) {
-        k->player_end();
-    }
     forget_program();
     return 0;
 }

@@ -1,14 +1,15 @@
 # The ring library (U18 D5): the Timewarp ring, its files and its operations, and the picture under the Timewarp page (U18 T-3: twstill.cc, the bar
 # twbar.cc). It exports three tables through SvcLib: "ring", the firmware's u2p_ring_api_t, for the monitor and trex_crt, "ringsteps", the dumps in steps
 # (ring_steps.h), for the monitor (ring_api.cc), and "ringstill", the page's coming and going (ring_still.h), for the trx64u library's core hook menu_video
-# (twstill.cc). Built by ../build.sh, which passes APPLOADER (the firmware's app_loader, for app_api.h).
+# (twstill.cc). Built by ../build.sh, which passes FWABI (../fwabi: the firmware's application ABI, for app_api.h).
 LIB_NAME = ring
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.3 trx64u>=1
 LIB_SRCS = lib_ring.cc ring.cc ringfile.cc trxring.cc trx_c64re_nodes.cc trx_sha256.c trx_inflate.c ringops.cc ring_api.cc ringsys.cc ringmachine.cc \
            twstill.cc twbar.cc
-# APPLOADER: the app loader's headers; ../../uci: our UCI library's export header (trxuci_api.h; build.sh builds in build/ring/, two levels below software/trx64u/)
-LIB_INC = -I$(APPLOADER) -I$(abspath $(CURDIR)/../../uci)
+# FWABI: app_api.h; ../../uci: our UCI library's export header (trxuci_api.h; build.sh builds in build/ring/, two levels below software/trx64u/)
+FWABI ?= $(abspath $(CURDIR)/../../fwabi)
+LIB_INC = -I$(FWABI) -I$(abspath $(CURDIR)/../../uci)
 LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_ring.cc).
 LIB_EXPORTS = ring=1 ringsteps=1 ringstill=1

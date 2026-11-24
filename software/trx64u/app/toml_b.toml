@@ -18,14 +18,15 @@ base_sources = ["portdiag.cc"]
 # ../pack_cor.sh hands to app_build.py as --src (MultiCore's uci.cc, uci_slot.cc, uci_exports.cc as trxuci*.cc; its export is still "uci"), and
 # the command interface server with its NETWORK target, which SDK 0.4.6 handed over (command_intf.cc, network_target.cc; MultiCore T239.3 D48).
 # An app has none of the code of a library this file does not name.
-#   c64cart, cbm1541, uci, sid, tempdisk, cbmprg: our libraries ask for their tables by name (base/lib_trx64u.cc g_x, ring/ringsys.cc rx_name);
+#   c64cart, cbm1541, uci, tempdisk, cbmprg: our libraries ask for their tables by name (base/lib_trx64u.cc g_x, ring/ringsys.cc rx_name);
 #     cbm1541 also registers the drive operations for the capability drive_a, which desc.toml's caps name; newfile is what cbm1541 needs.
 #   dma: the DMA socket service, which runs our dma.* operations (base/lib_trx64u.cc).
 #   t64: the T64 list of the menu's .t64 file type (menu.t64).
 #   mouse: the 1351 on the POT lines (desc.toml [mouse]); pad, padkeys: the USB gamepads and the pad as keys (menu.toml's pad rows).
 #   fastseek, ftp: the file browser's fast seek and its FTP folder.
 # Not named: cbmrun (our own c64_go.cc runs programs), newdisk (capabilities floppy and sio, not ours), folderhd (the Amiga's), resample (c64_basic
-# decodes no resampler: its TOML A has no block for one). Online search is no library of the catalog (MultiCore T239.3 L-3): its sub-app online.u2a
+# decodes no resampler: its TOML A has no block for one), sid (the export "sid" is the SID player's .sid/.mus header code, and the player is gone:
+# U20 D6; its resid8.cc is not ours either, base/u64cfg.cc writes reSID8 through the driver table). Online search is no library of the catalog (MultiCore T239.3 L-3): its sub-app online.u2a
 # rides in record 7 of trx64u.cor (../sdk.pin online_*, ../pack_cor.sh).
 
 [[library]]
@@ -54,12 +55,6 @@ sources = ["trxuci.cc", "trxuci_slot.cc", "trxuci_exports.cc", "command_intf.cc"
 headers = ["trxuci.h", "trxuci_slot.h", "trxuci_api.h", "command_intf.h", "command_target.h", "network_target.h"]
 bind = "uci_bind"
 freeze_request = "uci_take_freeze_request"
-
-[[library]]
-name = "sid"
-sources = ["sidfile.cc", "resid8.cc", "sid_exports.cc"]
-headers = ["sidfile.h", "resid8.h", "sid_api.h"]
-bind = "sid_bind"
 
 [[library]]
 name = "tempdisk"

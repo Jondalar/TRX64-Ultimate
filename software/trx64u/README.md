@@ -8,7 +8,9 @@ library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U
 | `base/` | `trx64u`, the base | the menu (`menu.toml`), its operations (`trx64u_ops`), the C64U settings (`u64cfg`) |
 | `ring/` | `ring` | the Timewarp ring, its files (`.c64re`, `.c64rering`, `.trxring`) and its operations; the picture under the Timewarp page, the frame and the bar (`twstill.cc`, `twbar.cc`) |
 | `uci/` | `uci`, linked into the app | the Ultimate Command Interface ($DF1C): DOS targets 1 and 2, NETWORK 3, CONTROL 4, the slot registers and the export `uci`; MultiCore's `uci.cc`, `uci_slot.cc`, `uci_exports.cc` and headers as `trxuci*` (PROVENANCE in each), ours since the owner split (U18 §5); the command interface server and its NETWORK target from SDK 0.4.6's hand-over (`command_intf.cc`, `network_target.cc`, T239.3 D48), its registers from the TOML A's block `cmd_if`, and six firmware headers the SDK no longer ships |
-| `monitor/` | `monitor`, needs `ring` | the monitor, its RPC server on TCP 4312; the engine is trxmon, `software/ultimate-app/apps/trxmon/src` (D4: one source) |
+| `monitor/` | `monitor`, needs `ring` | the monitor, its RPC server on TCP 4312; the engine is trxmon, `trxmon/` |
+| `trxmon/` | part of `monitor` | trxmon, the monitor's engine (mon, mach, ring, trace, rpc, ui, ...) and `trx_lens.*`: moved from the firmware fork `TREX/1541ultimate` at 0103c585 (U20 A2; `apps/trxmon/src` without `main.c`, `libc_min.c` and `trxsvc.h`, `software/io/c64/trx_lens.*`), Alex's own code; the only copy this tree builds, no longer one source with the firmware's (each file names its origin) |
+| `fwabi/` | - | the firmware's application ABI (major 2: `app_api.h`, `u2p_app.h`, `u2p_app_api.h`), which trxmon, `monitor/monitor.cc` and `ring/ring_api.cc` read: moved from the fork at 0103c585 (U20 A2; `software/app_loader/app_api.h`, `software/appsdk/include/`), Alex's own code |
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the libraries it is linked with: the SDK's shared ones and `uci/` (MultiCore T239.3 D31) |
 | `apps/trex_crt/` | sub-app `trex_crt` | TREX CRT, the cartridge tools (Dump, Inspect, Flash; Write to Cartridge on `.crt`), loaded on demand (D5) |
@@ -35,17 +37,25 @@ bar (the base draws none since 0.4.5); the pin is 0.4.6 (U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
 the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b; on 0.4.6 too, and the UCI answers the DOS target from our own server,
 U18 §5). Earlier runs: ue2emu on MultiCore's shared
-3.3 image and the board (2026-11-23, U18 §5).
+3.3 image and the board (2026-11-23, U18 §5). With the submodule empty and the SID player gone (U20 A2, A3, 2026-11-24) the
+build, the pack and `--emu` pass the same way: 388 lines, none missing either way.
+
+The SID and music player is gone (Alex, U20 D6, A3): no `.sid`, `.mus` or `.str` file types, no operations `c64.sid_play`,
+`c64.sid_songs`, `c64.sid_valid`, `c64.sid_info` and `dma.sidcrt`, no settings group "SID player behavior" (its two settings were read
+only by the player's autoconfig), no `sidplayer/` files in record 8, and the app is linked without the SDK library `sid`. The DMA
+service's SOCKET_CMD_LOADSIDCRT finds no operation and is logged and dropped. The machine's SIDs stay: the sockets, the reDIP:SIDs,
+reSID8, their settings and the socket detection.
 
 The registers (MultiCore T239.3 P1-7, 2026-11-24): `gateware/c64_basic.toml` is c64_basic's TOML A, written from what the
 RTL of `designs/c64_basic` decodes, one block per register range and driver (D34), each with the RTL lines that decode it.
 `base/` and `ring/` take every register address from its driver table, `drvtab.h` (`DRV_<block>_<property>_*`, api.md
 6.17), which the build makes with the SDK's `descrec.py drivers`; `c64u_regs.h` is gone, and `rtl_check.py lint-src` finds
 no literal I/O address in `base/`, `ring/`, `monitor/` or `uci/` (the SHA-256 constant of `ring/trx_sha256.c` allowed); the lint
-stage runs it (`ci/lint.sh`). The owner split (Alex, 2026-11-24, U18 §5): the mixer's and the speaker's gains, both
+stage runs it (`ci/lint.sh`). `trxmon/` is not in it: `hw_trx.c` names the firmware's C64 windows by four literal addresses, and
+`ws.c`'s SHA-1 constant 0x10325476 lies in the I/O space (U20 A2, measured 2026-11-24). The owner split (Alex, 2026-11-24, U18 §5): the mixer's and the speaker's gains, both
 palettes, reSID8, the command interface and the GCR coder are core blocks, their properties read from the RTL, and
 `trx_pixel` is the base's; `base/desc.toml` keeps record 6's data and no register window. A decided gap (Alex): trx64u
-has no Volume and no Tone of the base, because c64_basic has no RTL for them (no block `audio_master`). The monitor's engine (trxmon, submodule) still reaches
+has no Volume and no Tone of the base, because c64_basic has no RTL for them (no block `audio_master`). The monitor's engine (trxmon, `trxmon/`) still reaches
 the TRX block through `api->trx->regs` and its own offsets (U18 §5).
 
 The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
@@ -58,7 +68,7 @@ firmware's copy is frozen, bug fixes only, each also here).
 ## Build
 
 `./build.sh [trx64u] [ring] [monitor] [trex_crt]` builds the libraries and the sub-app in `build/<name>/` (copies of the sources; the monitor
-also gets trxmon's files from the submodule). The driver table of `base/` and `ring/` is made there first from
+also gets `trxmon/`; the monitor and the ring library read `fwabi/`). Nothing of the firmware submodule is read (U20 A2). The driver table of `base/` and `ring/` is made there first from
 `gateware/c64_basic.toml` (their Makefiles: `descrec.py drivers` of the SDK with the SDK's `maps/`; `DRV_TOOLS` and
 `DRV_MAPS` name others). On a Mac it runs in the local `u64-build-env` container. `build.sh --check` only checks that
 the unpacked SDK matches `sdk.pin`. The app is linked by `pack_cor.sh` (below), in `build/app/`. Each build folder
@@ -66,8 +76,8 @@ keeps the sha256 of the SDK tarball it was built with in `.sdk`; a folder of ano
 `.d` files name the old SDK's headers, which stay in `.sdk/`, so make would take them as up to date).
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
-(`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which
-`main.c` gives the firmware's trxmon and `monitor.cc` / `monsrv.cc` give the library.
+(`fwabi/`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which the fork's `main.c` gives
+the firmware's trxmon and `monitor/lib_monitor.cc` / `monitor/monsrv.cc` give the library.
 
 ## SDK
 
@@ -85,8 +95,8 @@ commit (`online_*`: 6e280710, the build of SDK 0.4.6's commit: 0.4.6's base take
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
    `curl -o c64_basic.bit http://gitea.example/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit`.
    It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
-3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version> [--emu <ue2emu>]` builds the three libraries,
-   the sub-app and the SID player's files, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
+3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version> [--emu <ue2emu>]` builds the three libraries
+   and the sub-app, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
    `tools/app_build.py build` with `gateware/c64_basic.toml`, `app/toml_b.toml` and the sources of `uci/`), runs the SDK's symbol check
    (`libtab.py symcheck`: no object of the base uses a symbol of a linked library), packs `build/cor/trx64u.cor` (`--out`
    for another name) with the heap of word 0 and runs `cor_pack.py check` on it; it prints the heap figures, the size and
@@ -107,7 +117,7 @@ What goes in:
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
 | the registers | `gateware/c64_basic.toml`: the app's and the libraries' driver table (`drvtab.h`) and the app's I/O addresses; no TOML A record in the `.cor` (record 6 holds a description or a TOML A, not both; the record type that carries it beside the description comes with a later MultiCore package: U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
-| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass; `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` from the first start: it installs record 8 before it scans the folder (MultiCore's `coreapp/src/run.cc` at SDK 0.4.6's source commit 6e280710, :778 and :786) |
+| record 8 (files the core installs) | `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` from the first start: it installs record 8 before it scans the folder (MultiCore's `coreapp/src/run.cc` at SDK 0.4.6's source commit 6e280710, :778 and :786) |
 | bitstream | `--bit`, with `--bit-commit` |
 | the operations | `base/ops_trx64u.txt`: what the running app exports (REST `/v1/ops`, `/v1/state`), ours (U18 R6), written from `tools/emu_ops.py` (MultiCore's `tests/ui/export.py` format). `cor_pack.py --ops` checks record 6's names and bindings against it at every pack; `--emu` checks the running app against it both ways. The SDK's link step makes no operation table, so the list is measured; CI has no emu stage yet (U18 §5) |
 

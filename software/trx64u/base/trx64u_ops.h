@@ -15,12 +15,7 @@ int op_dma_prg(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_dma_mount(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_dma_crt(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_dma_reu(CoreCtx *c, const OpArgs &a, OpOut &o);
-int op_dma_sidcrt(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_dma_power_off(CoreCtx *c, const OpArgs &a, OpOut &o);
-int op_sid_play(CoreCtx *c, const OpArgs &a, OpOut &o);
-int op_sid_songs(CoreCtx *c, const OpArgs &a, OpOut &o);
-int op_sid_valid(CoreCtx *c, const OpArgs &a, OpOut &o);
-int op_sid_info(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_reu_load(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_reu_preload(CoreCtx *c, const OpArgs &a, OpOut &o);
 int op_insert_blank(CoreCtx *c, const OpArgs &a, OpOut &o);
@@ -66,16 +61,10 @@ const char *state_suggest_ring(CoreCtx *c);
 struct UciHooks;
 const struct UciHooks *trx64u_uci_hooks(void);
 
-// ---- what the C64 descriptor's code (c64core.cc: its program and cartridge runs, its ROM put operations, c64.service, the init hook) calls
+// ---- what the C64 descriptor's code (c64core.cc: its program and cartridge runs, its ROM put operations) calls
 void trx64u_load_assoc_cfg(CoreCtx *c, const char *path, bool usr_too);   // the .cfg (a PRG: or .usr) beside a file, loaded before it runs
 
 // Every KERNAL image c64.put_kernal puts into the aperture (the fast reset patch is made against that copy).
 void trx64u_kernal_put(CoreCtx *c, const uint8_t *data, uint32_t n);
-
-// The SID player (T228 R21 item 7): c64.put_basic hands the BASIC ROM on for the player cartridge's image, c64.service drives the handshake, the init hook
-// (a reset of the application) ends it.
-void trx64u_basic_put(CoreCtx *c, const uint8_t *data, uint32_t n);
-void trx64u_sid_service(CoreCtx *c);
-void trx64u_sid_cancel(void);
 
 #endif

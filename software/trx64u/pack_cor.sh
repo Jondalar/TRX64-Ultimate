@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from, its tools, and beside it MultiCore's online
 # sub-app (sdk.pin online_*, .sdk/online.u2a, fetch_sdk.sh); from here: c64_basic's TOML A (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our
-# three libraries and two sub-apps (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565), the SID player's files (built from
-# the submodule's 6502 sources) and a c64_basic bitstream.
+# three libraries and the sub-app TREX CRT (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565) and a c64_basic bitstream.
+# Nothing of the firmware submodule (U20 A2, A3).
 #  - Record 7: our libraries trx64u, ring and monitor, and the online sub-app (a resident image: it registers online.* and brings the F3 tab Online, MultiCore
-#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: the SID player's three programs, and our sub-app
-#    TREX CRT as apps/trex_crt.u2a (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h). No Softboot (Alex,
-#    2026-11-24: it starts a .cfw's firmware application on the running bitstream, which c64_basic under this app is not; build.sh).
+#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: our sub-app TREX CRT as apps/trex_crt.u2a
+#    (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h). No SID player (U20 D6: it is gone, its sidplayer/ files with
+#    it). No Softboot (Alex, 2026-11-24: it starts a .cfw's firmware application on the running bitstream, which c64_basic under this app is not; build.sh).
 #  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
 #    build/app/ (the driver table and the I/O addresses of the TOML A, the library table of the TOML B, the base archive, the sources that depend on
 #    the core, and our UCI library's sources from uci/, --src) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is
@@ -30,7 +30,6 @@
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-APP="$ROOT/software/ultimate-app"
 pin() { sed -n "s/^$1=//p" "$HERE/sdk.pin"; }
 SDK="$HERE/.sdk/trx64-sdk-$(pin sdk_version)"
 
@@ -104,16 +103,10 @@ done
 NM=riscv32-unknown-elf-nm python3 -I "$SDK/tools/libtab.py" symcheck "$TB" "$A/obj" "$SDK/base/src"
 echo "symcheck: no object of the base uses a symbol of a library of $(basename "$TB")"
 
-# record 8: the SID player, assembled by the submodule's own 64tass (software/6502/sidcrt, target/ is not in git)
-make -s -C "$APP/tools/64tass" >/dev/null
-make -s -C "$APP/software/6502/sidcrt" >/dev/null
+# record 8: the sub-app (build.sh), installed into <core folder>/apps/, where the base's application index finds it
 F="$HERE/build/cor/files"
 rm -rf "$F"
-mkdir -p "$F/sidplayer" "$F/apps"
-for f in sidcrt muscrt musplayer; do
-    cp "$APP/software/6502/sidcrt/target/$f.bin" "$F/sidplayer/"
-done
-# the sub-app (build.sh): installed into <core folder>/apps/, where the base's application index finds it
+mkdir -p "$F/apps"
 for f in trex_crt; do
     cp "$HERE/build/$f/$f.u2a" "$F/apps/"
 done

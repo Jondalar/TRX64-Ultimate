@@ -13,12 +13,12 @@ LIB_EXPORTS = corehooks=1
 # The export header of our UCI library (../uci/trxuci_api.h, the table "uci"): build.sh builds in build/trx64u/, two levels below software/trx64u/.
 LIB_INC = -I$(abspath $(CURDIR)/../../uci)
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as linked against SDK
-# 0.4.5 (base 3.3, e8b76719) with the owner split (U18 §5, 2026-11-24: the mixers' and palettes' registers through the driver table, no window code),
-# 88,924 + 120,672 = 209,596 bytes, the same on 0.4.6 (base 3.4, 6e280710); before the split, with the window code, 89,760 + 120,684, and the ceiling
-# until then was SDK 0.3.0's 92,152 + 120,708. 65,564
+# 0.4.6 (base 3.4, 6e280710) without the SID player (U20 A3, 2026-11-24), 77,096 + 86,664 = 163,760 bytes; with it, after the owner split (U18 §5:
+# the mixers' and palettes' registers through the driver table, no window code), 88,924 + 120,672 on 0.4.5 and 0.4.6; before the split, with the window
+# code, 89,760 + 120,684, and the ceiling until then was SDK 0.3.0's 92,152 + 120,708. 65,564
 # bytes of the bss are c64core.cc's program buffer, which a queued program job holds until the service starts it. heap: no block held while idle, at most
-# 66,044 bytes at once (U18 S13; the `.cfw` run's two 32 KB halves are one block of 65,536); the counts: lib_register's record (ops 67, states 54).
-LIB_BUDGET = image=209596 heap_keep=0 heap_peak=66044 ops=67 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
+# 66,044 bytes at once (U18 S13; the `.cfw` run's two 32 KB halves are one block of 65,536); the counts: lib_register's record (ops 62, states 54).
+LIB_BUDGET = image=163760 heap_keep=0 heap_peak=66044 ops=62 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
 include $(SDK)/mk/lib.mk
 
 # The driver table (api.md 6.17, MultiCore T239.3 D31): DRV_<block>_<property>_* of c64_basic's TOML A, made by the SDK's descrec.py with the shared

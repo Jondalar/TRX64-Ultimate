@@ -72,7 +72,7 @@ static struct {
     const char *name;
     const void *t;
     uint32_t size;
-} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 }, { CBMPRG_API_NAME, 0, 0 },
+} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "tempdisk", 0, 0 }, { CBMPRG_API_NAME, 0, 0 },
                { RING_STILL_EXPORT, 0, 0 } };
 static_assert(RING_STILL_MAJOR == 1, "x_table finds every export at major 1");
 
@@ -169,10 +169,8 @@ static const ArgSpec path_arg[] = { ARG_PATH("path") };
 static const ArgSpec save_mp3_args[] = { ARG_INT("drive", 0, 3), ARG_STRING("name", 63) };
 static const ArgSpec load_mp3_args[] = { ARG_PATH("path"), ARG_INT("drive", 0, 3) };
 static const ArgSpec run_disk_args[] = { ARG_SLOT("slot"), ARG_PATH("path") };
-static const ArgSpec sid_args[] = { ARG_PATH("path"), ARG_INT("song", 0, 65535) };
 static const ArgSpec dma_prg_args[] = { ARG_PATH("path"), ARG_INT("mode", 0, 2) };
 static const ArgSpec dma_mount_args[] = { ARG_PATH("path"), ARG_INT("run", 0, 1) };
-static const ArgSpec dma_sidcrt_args[] = { ARG_BLOB("data") };
 static const ArgSpec dma_reu_args[] = { ARG_INT("offset", 0, 0xFFFFFF), ARG_BLOB("data") };
 static const ArgSpec rom_arg[] = { ARG_BLOB("data") };
 static const ArgSpec freeze_arg[] = { ARG_INT("value", 0, 1) };
@@ -190,17 +188,12 @@ static const LibOpDecl ops[] = {
     { "dma.mount", dma_mount_args, 2, op_dma_mount },
     { "dma.crt", path_arg, 1, op_dma_crt },
     { "dma.reu", dma_reu_args, 2, op_dma_reu },
-    { "dma.sidcrt", dma_sidcrt_args, 1, op_dma_sidcrt },
     { "dma.power_off", 0, 0, op_dma_power_off },
     { "ui.fx", value_arg, 1, fx_ui },
     { "c64.fx_io", value_arg, 1, fx_io },
     { "c64.fx_roms", value_arg, 1, fx_roms },
     { "u64.fx_power", value_arg, 1, fx_power },
     { "drive.fx_misc", value_arg, 1, fx_drive_misc },
-    { "c64.sid_play", sid_args, 2, op_sid_play },
-    { "c64.sid_songs", sid_args, 2, op_sid_songs },
-    { "c64.sid_valid", sid_args, 2, op_sid_valid },
-    { "c64.sid_info", sid_args, 2, op_sid_info },
     { "reu.load", path_arg, 1, op_reu_load },
     { "reu.preload", path_arg, 1, op_reu_preload },
     { "drive.insert_blank", 0, 0, op_insert_blank },

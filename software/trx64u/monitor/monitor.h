@@ -1,5 +1,5 @@
 // The machine code monitor of F4 in the monitor library (U18 D5): trxmon's own engine and screen model (mon.c, mach.c, ring.c, trace.c, rpc.c, ui.c, ...;
-// software/ultimate-app/apps/trxmon/src, one source with the firmware, D4) and the session the menu's monitor tab and the RPC clients share. monitor.cc
+// ../trxmon, moved from the firmware fork by U20 A2: the only copy this tree builds, no longer one source with the firmware's) and the session the menu's monitor tab and the RPC clients share. monitor.cc
 // gives trxmon what the firmware's app loader gave it, the trx table with the frame ring; lib_monitor.cc gives it the platform calls (time, files, settings)
 // and registers the operations below. The verbs, their texts, the keys of the line editor and the rows are trxmon's; nothing of them is written here.
 #ifndef TRX64U_MONITOR_H

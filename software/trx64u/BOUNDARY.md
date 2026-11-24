@@ -5,7 +5,7 @@ commit in `u64-build-env` (`tools/build_coreapp.sh`'s steps, `make -k`), then `r
 files that move (`tools/boundary.py`). A symbol is listed when one of the moving objects uses it and no moving object
 defines it; the `memcpy` ... `__ashrdi3` of the SDK's `sdk/libc.c` are left out. "Provider" is the core application's
 object that defines it; `(libc/lib .a)` is newlib, libgcc or lwIP. The monitor counts MultiCore's `tm_*` copy of trxmon
-(our `apps/trxmon/src` replaces it, D4). The header list comes from the objects' `.d` files.
+(ours replaces it, D4: then the submodule's `apps/trxmon/src`, since U20 A2 `trxmon/` here). The header list comes from the objects' `.d` files.
 
 ## Summary by kind
 
