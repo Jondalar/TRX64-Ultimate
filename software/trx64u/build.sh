@@ -1,13 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build trx64u's libraries and sub-apps against the pinned TRX64 SDK (U18; sdk.pin, fetch_sdk.sh first).
-#   software/trx64u/build.sh [trx64u] [ring] [monitor] [trex_crt] [softboot]      (default: all five)
+#   software/trx64u/build.sh [trx64u] [ring] [monitor] [trex_crt]                 (default: all four)
 #   software/trx64u/build.sh --check                                               (only check the unpacked SDK against sdk.pin)
 # The SDK is .sdk/trx64-sdk-<sdk_version>/; its VERSION must name the pinned commit, base API and hashes (a dev build
 # and the release of the same version unpack to the same folder).
 # Each library is built in build/<name>/ from copies of its sources (lib.mk writes its objects next to the sources,
-# and the monitor's engine is trxmon's own folder in the application submodule, D4). The sub-apps TREX CRT and Softboot (apps/, MultiCore T239.3
-# P2-5) are built the same way with the SDK's mk/app.mk, their folders copied whole (their C sources are in src/). The driver table of c64_basic's
+# and the monitor's engine is trxmon's own folder in the application submodule, D4). The sub-app TREX CRT (apps/trex_crt, MultiCore T239.3
+# P2-5) is built the same way with the SDK's mk/app.mk, its folder copied whole (its C sources are in src/). Softboot is not built here (Alex,
+# 2026-11-24): it starts the firmware application of a .cfw on the running bitstream, and c64_basic under this app is not the bitstream that
+# application needs; it stays in the firmware build (software/ultimate-app/apps/softboot). The driver table of c64_basic's
 # TOML A (gateware/c64_basic.toml) is made there by the SDK's descrec.py (api.md 6.17, SDK 0.4.0 and later). In the build image
 # (riscv32-unknown-elf-g++ on PATH) it runs make directly; elsewhere it runs itself in the u64-build-env container.
 set -eu
@@ -39,13 +41,13 @@ if ! command -v riscv32-unknown-elf-g++ >/dev/null 2>&1; then
 fi
 APP="$ROOT/software/ultimate-app"
 TRXMON="$APP/apps/trxmon/src"
-LIBS="${*:-trx64u ring monitor trex_crt softboot}"
+LIBS="${*:-trx64u ring monitor trex_crt}"
 rc=0
 for lib in $LIBS; do
     case "$lib" in
         trx64u) src=base ;;
         ring|monitor) src="$lib" ;;
-        trex_crt|softboot) src="apps/$lib" ;;
+        trex_crt) src="apps/$lib" ;;
         *) echo "build.sh: no library or sub-app $lib" >&2; exit 1 ;;
     esac
     B="$HERE/build/$lib"

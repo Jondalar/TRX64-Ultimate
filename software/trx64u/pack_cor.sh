@@ -5,8 +5,9 @@
 # three libraries and two sub-apps (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565), the SID player's files (built from
 # the submodule's 6502 sources) and a c64_basic bitstream.
 #  - Record 7: our libraries trx64u, ring and monitor, and the online sub-app (a resident image: it registers online.* and brings the F3 tab Online, MultiCore
-#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: the SID player's three programs, and our sub-apps
-#    TREX CRT and Softboot as apps/trex_crt.u2a and apps/softboot.u2a (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h).
+#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: the SID player's three programs, and our sub-app
+#    TREX CRT as apps/trex_crt.u2a (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h). No Softboot (Alex,
+#    2026-11-24: it starts a .cfw's firmware application on the running bitstream, which c64_basic under this app is not; build.sh).
 #  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
 #    build/app/ (the driver table and the I/O addresses of the TOML A, the library table of the TOML B, the base archive, the sources that depend on
 #    the core) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is in the app, not in the .cor: the .cor has one
@@ -100,8 +101,8 @@ mkdir -p "$F/sidplayer" "$F/apps"
 for f in sidcrt muscrt musplayer; do
     cp "$APP/software/6502/sidcrt/target/$f.bin" "$F/sidplayer/"
 done
-# the sub-apps (build.sh): installed into <core folder>/apps/, where the base's application index finds them
-for f in trex_crt softboot; do
+# the sub-app (build.sh): installed into <core folder>/apps/, where the base's application index finds it
+for f in trex_crt; do
     cp "$HERE/build/$f/$f.u2a" "$F/apps/"
 done
 # record 7's online sub-app: the pinned file (fetch_sdk.sh put it there), checked again

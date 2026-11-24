@@ -6,7 +6,7 @@
 # area (R1). R2: no "Reboot, clear memory" (F8's generic "Restart core"), no "Pause / resume"; R3: no "Save C64 memory" and no "Save REU memory". R9: F5 has
 # the core's tabs C64, TRX and Expansion with headings, then Video, Audio (R5: "SID sockets" and "Emulated SIDs" are two rows under the heading reDIP:SID at its
 # end, each opens a page), Input. F7 is one tab of sections (T212 D12); the sub-apps' rows are not here: each brings them in its own menu record (TREX CRT's
-# Dump, Inspect and Flash on F7, Softboot only a file action, offered off the MultiCore host: its need `standalone`, T228 DC1), and the F3 tab Online
+# Dump, Inspect and Flash on F7; no Softboot in trx64u, Alex 2026-11-24: it runs a .cfw's firmware application, not on this bitstream), and the F3 tab Online
 # comes with the online sub-app (record 7, MultiCore T239.3 L-3). R6: F8 is the one generic System tab; under its Network heading
 # three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs) are in no tab
 # (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).

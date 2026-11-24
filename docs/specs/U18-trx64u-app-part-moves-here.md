@@ -949,3 +949,15 @@ Nothing decided yet.
     leaves with P2-6 (MultiCore recommends A: D3 as decided); B) the base keeps its bar and its still, and a new call
     makes it take the still again after a scrub step. The `menu_video` text of `core_hooks.h` and api.md 9.7.13 is
     stale (the code is right: the PAUSED tag is an element) and is rewritten with A or B.
+- **2026-11-24: no Softboot in trx64u (Alex: "softboot ist eine App um aus einer .cfw die Ultimate-Gideon-App ins sram
+  zu laden und starten ... für unser UI nutzlos weil unser bitstream doch gar nicht passt. Softboot muss also raus für den
+  SDK Build. Es bleibt für den G Build").** `apps/softboot/` (step 2b's copy of MultiCore's ABI-3 port) is deleted;
+  `build.sh` builds trex_crt as the only sub-app, `pack_cor.sh` installs only `apps/trex_crt.u2a` in record 8. Softboot
+  registered no operation or state, so the golden is unchanged. It stays in the firmware build
+  (`software/ultimate-app/apps/softboot`). The `.cfw` run (`update.run_record`, `base/cfwrun.cc`) stays: it loads a
+  `.cfw`'s records into the updaters' window and starts the updater, the "Run Update" of Gideon's file browser. This
+  supersedes step 2b's "trex_crt and softboot are sub-apps" and its note that trx64u "offers softboot" off the host.
+  Proof: `pack_cor.sh --emu` on SDK 0.4.1 (bitstream `54dc9f9e`, version `0.3.1-dev+u18-nosb`): rc 0, `trx64u.cor`
+  3,875,625 B (`f9868d5b...`), READY. from the core 3.5 s after ue2emu's start, 204 operations and 188 states, missing
+  from the app 0, not in the golden 0; the first start lists 0 applications (the base scans `apps/` before it installs
+  record 8, MultiCore's fix in SDK 0.4.2).

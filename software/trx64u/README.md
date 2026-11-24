@@ -11,12 +11,13 @@ against the TRX64 SDK (docs/specs/U18-trx64u-app-part-moves-here.md, D1-D5).
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the shared libraries of the SDK it is linked with (MultiCore T239.3 D31) |
 | `apps/trex_crt/` | sub-app `trex_crt` | TREX CRT, the cartridge tools (Dump, Inspect, Flash; Write to Cartridge on `.crt`), loaded on demand (D5) |
-| `apps/softboot/` | sub-app `softboot` | Run as Softboot on `.cfw`, `.ue2`, `.u64`; offered only off the MultiCore host (need `standalone`) |
 | `tools/` | - | `emu_ops.py`: runs `trx64u.cor` in ue2emu and exports what the running app registers; `boundary.py` |
 
-The two sub-apps are MultiCore's ports onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt` and `apps/softboot`)
-of our firmware's tools at submodule `aa2ef5dc` (each README lists what the port changed), moved here by MultiCore T239.3
-P2-5 and built against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with MultiCore's P2-6. Online search
+The sub-app is MultiCore's port onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt`) of our firmware's
+tool at submodule `aa2ef5dc` (its README lists what the port changed), moved here by MultiCore T239.3 P2-5 and built
+against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with MultiCore's P2-6. Softboot is not part of
+trx64u (Alex, 2026-11-24): it starts the firmware application inside a `.cfw` on the running bitstream, and c64_basic
+under this app is not the bitstream that application needs. It stays in the firmware build (`software/ultimate-app/apps/softboot`). Online search
 is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
 
 ## State
@@ -50,7 +51,7 @@ firmware's copy is frozen, bug fixes only, each also here).
 
 ## Build
 
-`./build.sh [trx64u] [ring] [monitor] [trex_crt] [softboot]` builds the libraries and the sub-apps in `build/<name>/` (copies of the sources; the monitor
+`./build.sh [trx64u] [ring] [monitor] [trex_crt]` builds the libraries and the sub-app in `build/<name>/` (copies of the sources; the monitor
 also gets trxmon's files from the submodule). The driver table of `base/` and `ring/` is made there first from
 `gateware/c64_basic.toml` (their Makefiles: `descrec.py drivers` of the SDK with the SDK's `maps/`; `DRV_TOOLS` and
 `DRV_MAPS` name others). On a Mac it runs in the local `u64-build-env` container. `build.sh --check` only checks that
@@ -98,7 +99,7 @@ What goes in:
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
 | the registers | `gateware/c64_basic.toml`: the app's and the libraries' driver table (`drvtab.h`) and the app's I/O addresses; no TOML A record in the `.cor` (record 6 holds a description or a TOML A, not both; the record type that carries it beside the description comes with a later MultiCore package: U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
-| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass; `apps/trex_crt.u2a`, `apps/softboot.u2a` (`build.sh`), which the base finds in the core's folder `apps/` (from the start after they are written: the base scans the folder before it installs record 8, U18 §5) |
+| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass; `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` (from the start after they are written: the base scans the folder before it installs record 8, U18 §5) |
 | bitstream | `--bit`, with `--bit-commit` |
 | the operations | `base/ops_trx64u.txt`: what the running app exports (REST `/v1/ops`, `/v1/state`), ours (U18 R6), written from `tools/emu_ops.py` (MultiCore's `tests/ui/export.py` format). `cor_pack.py --ops` checks record 6's names and bindings against it at every pack; `--emu` checks the running app against it both ways. The SDK's link step makes no operation table, so the list is measured; CI has no emu stage yet (U18 §5) |
 
