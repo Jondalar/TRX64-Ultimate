@@ -13,7 +13,7 @@ LIB_LIBC = 1
 LIB_EXPORTS = corehooks=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: the ceiling of payload and bss as linked
 # against SDK 0.3.0 (base 3.3, e4f99648) on 2026-11-23, 92,152 + 120,708 bytes; on SDK 0.4.1 with the `.cfw` run (2026-11-24) 89,252 + 120,676; on SDK
-# 0.4.3 and 0.4.4 with the Timewarp still's hook and palette source (U18 T-3, 2026-11-24) 89,760 + 120,684. 65,564 bytes of
+# 0.4.3 to 0.4.5 with the Timewarp still's hook and palette source (U18 T-3, 2026-11-24) 89,760 + 120,684. 65,564 bytes of
 # the bss are c64core.cc's program buffer, which a queued program job holds until the service starts it. heap: no block held while idle, at most 66,044 bytes
 # at once (U18 S13; the `.cfw` run's two 32 KB halves are one block of 65,536); the counts: lib_register's record (ops 67, states 54).
 LIB_BUDGET = image=212860 heap_keep=0 heap_peak=66044 ops=67 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0

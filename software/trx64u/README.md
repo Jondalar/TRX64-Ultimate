@@ -22,14 +22,15 @@ is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
 
 ## State
 
-The three libraries and the sub-app build on MultiCore's dev SDK 0.4.4 (base 3.3, not released yet): every link
+The three libraries and the sub-app build on MultiCore's dev SDK 0.4.5 (base 3.3, not released yet): every link
 closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (the sub-app declares
 none). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
 `pack_cor.sh` links trx64u's app from the SDK's base archive with `gateware/c64_basic.toml` (TOML A) and
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
 has the figures and what is open). The ring library's Timewarp picture (U18 T-3) needs SDK 0.4.3 or later
-(`api->overlay->frame`, `still_palette`); with it the pin goes to 0.4.4 (U18 §5).
+(`api->overlay->frame`, `still_palette`), and 0.4.5 for its bar on the smaller canvases (`canvas()`) and as the only
+bar (the base draws none since 0.4.5); the pin is 0.4.5 (U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
 the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5).

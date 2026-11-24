@@ -1081,3 +1081,26 @@ Nothing decided yet.
     trx_lv_port.cc as 0.4.3 has them.
   - Fixed with it (the two traps above): a build folder keeps the sha256 of its SDK tarball in `.sdk` and starts clean
     under another (`build.sh`, `pack_cor.sh`); `fetch_sdk.sh` given `.sdk/online.u2a` by a relative path keeps it.
+- **2026-11-24: SDK 0.4.5 pinned; the bar on the canvas of the mode, and the only one.**
+  - 0.4.5 (t239.3 e8b76719; tarball `e87e2039...`, headers `00b60e80`, base archive `1cd49804`) is MultiCore's answer to
+    our three findings (T256). It brings `canvas()` (api.md 4.17.16) and the grab's column table, and the closing menu no
+    longer grabs when a library's still goes. D12: the base draws no Timewarp bar. D14 (Alex's suggestion): the base frees
+    its own still while a library's still shows. In our registry as `trx64-sdk/0.4.5-e8b76719` (201, download checked).
+  - `twstill.cc`: the bar lies at the bottom of the part of the still the canvas shows, asked at every paint. That part
+    is the canvas cut to 960 x 540: the still is the base's element "still", 960 x 540 at the top left (base_ui.toml),
+    and an element keeps its size while the canvas cuts it (overlay.cc `ovl_place_on`). A changed canvas clears the
+    surface first.
+  - Host check (`twbar_host` on `twbar.cc`): on 640 x 480, 720 x 540 (576p), 800 x 540 (800 x 600) and 960 x 540, every
+    changed pixel lies inside the bar and inside the shown part, the whole bar is mixed, and info and hint stay apart.
+    The test used the longer info text "the ring holds no frame yet"; at 480p the gap is 32 pixels.
+  - On the narrower canvases the bar keeps the 1080p scale (48 rows, the position at 2x). Below 720 wide, the firmware's
+    layer used its small scale (32 rows).
+  - The ring's image is 136,352 + 16,860 = 153,212 B (+200 for the canvas), and its budget follows. trx64u and the
+    monitor are unchanged.
+  - `pack_cor.sh --emu`: rc 0. `trx64u.cor` 3,985,875 B (`ec30395d...`), READY 3.6 s, 4 libraries loaded, operations
+    and states equal to the golden. The build folders of 0.4.4 started clean by their stamp.
+  - The ue2emu check passes as before, and our bar is now the only one (glyph, position, frame n / m, hint, track).
+    frame() takes 217-220 ms (0.4.4: 1,193-1,206), the bar 45 ms. The close from the page takes 48-63 ms (0.4.4:
+    1,249-1,252).
+  - Open: the ring's heap_peak (Alex: as it is, or the still taken away for a save, with a progress element), and the
+    board.

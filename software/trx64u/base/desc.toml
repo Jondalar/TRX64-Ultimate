@@ -136,7 +136,7 @@ put_op = "drive.put_rom"
 # four whose blocks lie in ranges MultiCore's host TOML A gives the base. Alex decided 2026-11-24 (U18 §5): they become core blocks of our TOML A; until
 # that change they stay as they were, and
 # `io.window(name, &size)` hands them out (lib_trx64u.cc c64u_win; the offsets are u64cfg.cc's). The addresses are the firmware's (U2P_IO_BASE 0xA0000000):
-# the base (SDK 0.4.0 and later) translates them to the I/O bus of the TOML A the app is linked with (0.4.4: libsvc.cc window() with descrec.cc
+# the base (SDK 0.4.0 and later) translates them to the I/O bus of the TOML A the app is linked with (0.4.4, 0.4.5: libsvc.cc window() with descrec.cc
 # descrec_fw_to_board, 0xA0000000 + n to DRV_U2P_IO_BASE 0x10100000 + n; null with *size 0 for a window not wholly inside the board's I/O span
 # [0x10000000, 0x11000000)), and both readers of the record (descrec.py, descrec.cc) refuse a window that leaves its firmware span, lies outside that
 # span or covers an entry of basereg.def after that translation. A base before 0.4.0 handed them
