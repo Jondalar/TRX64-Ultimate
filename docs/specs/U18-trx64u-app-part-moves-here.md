@@ -1239,8 +1239,12 @@ Nothing decided yet.
     - `module.bin`.
     There is no files record.
   - Not exercised: a CI run and a real upload (nothing is pushed or uploaded), and the board.
+  - The contract's §1, §2 and §5 for D46 (both sides on Alex's decision): MultiCore's 8ca00d17d (integration), taken byte for
+    byte (sha256 `021ea3ff...`): `trx64u.cor` and `trx64g.cor` are built, tested and delivered here as files of one version of
+    `trx64-ultimate`; MultiCore's package takes each by its SHA-256.
+  - `default_chars.bin` is the part of the character ROM that Gideon's application holds, which MultiCore's licence rule for
+    `trx64g.cor` allows (the BASIC ROM, that part of the character ROM, `module.bin`).
   - Open:
-    - the contract's §1, §2 and §5 for D46 (both sides, with Alex);
     - MultiCore's pin moving to the COR form after our first CI file;
     - a release reuses its branch package, so its `trx64g.cor` shows `x.y.z-dev+<commit8>`, not the `x.y.z` that §2 gives a
       release;
