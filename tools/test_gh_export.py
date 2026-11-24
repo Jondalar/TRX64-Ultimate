@@ -32,38 +32,31 @@ class StageTree(unittest.TestCase):
     def test_excluded_paths_and_directories_go(self):
         write(self.d, "TODO.md", "the task list\n")
         write(self.d, "roms/kernal.901227-03.bin", "rom bytes")
+        write(self.d, "roms/README.md", "where they come from\n")
         write(self.d, "docs/contracts/handover.md", "the two projects\n")
         write(self.d, "README.md", "stays\n")
         write(self.d, "docs/.DS_Store", "junk")
-        write(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin", "chars")
         dropped = gx.drop_excluded(self.d)
 
         # since 2026-11-13 the task list and the working documents go out (Alex)
         self.assertTrue(os.path.exists(os.path.join(self.d, "TODO.md")))
         self.assertTrue(os.path.isdir(os.path.join(self.d, "docs/contracts")))
-        self.assertFalse(os.path.isdir(os.path.join(self.d, "roms")))
+        # since U20 A6 the ROM images stay out and the tree's roms/README.md goes out
+        self.assertFalse(os.path.exists(os.path.join(self.d, "roms/kernal.901227-03.bin")))
+        self.assertTrue(os.path.exists(os.path.join(self.d, "roms/README.md")))
         self.assertFalse(os.path.exists(os.path.join(self.d, "docs/.DS_Store")))
-        self.assertFalse(os.path.exists(
-            os.path.join(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin")))
         self.assertTrue(os.path.exists(os.path.join(self.d, "README.md")))
-        self.assertIn("roms/", dropped)
+        self.assertIn("roms/kernal.901227-03.bin", dropped)
 
-    def test_placeholders_replace_what_was_dropped(self):
-        write(self.d, "roms/kernal.901227-03.bin", "rom bytes")
+    def test_the_pin_constraints_go_out_as_they_are(self):
+        # U20 D14: constraints/c64u.xdc is public, no link stands in its place
         write(self.d, "constraints/c64u.xdc", "pins")
         gx.drop_excluded(self.d)
         gx.write_placeholders(self.d)
 
-        with open(os.path.join(self.d, "roms/README.md")) as fh:
-            roms = fh.read()
-        self.assertIn("No ROMs are in this repository", roms)
-        self.assertIn("vice-emu.sourceforge.io", roms)
-        self.assertTrue(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc.md")))
-        self.assertFalse(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc")))
-
-        name = gx.APP_PREFIX + "/software/ModPlayer_16k/module.bin.md"
-        with open(os.path.join(self.d, name)) as fh:
-            self.assertIn("software/ModPlayer_16k/module.bin", fh.read())
+        with open(os.path.join(self.d, "constraints/c64u.xdc")) as fh:
+            self.assertEqual("pins", fh.read())
+        self.assertFalse(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc.md")))
 
     def test_a_rewrite_applies_once(self):
         write(self.d, "BUILD.md",
@@ -104,8 +97,8 @@ class StageTree(unittest.TestCase):
             gx.REWRITES = keep
 
 
-class SubmoduleNotes(unittest.TestCase):
-    """write_submodule_notes reads git; the fake answers the two commands it runs."""
+class Submodule(unittest.TestCase):
+    """Since U20 A5 a ref with a submodule is refused; the fake answers git ls-tree."""
 
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="gh-export-test-")
@@ -115,41 +108,29 @@ class SubmoduleNotes(unittest.TestCase):
         gx.run = self.real_run
         shutil.rmtree(self.d, ignore_errors=True)
 
-    def test_an_empty_submodule_folder_gets_its_repository_and_commit(self):
-        cfg = ('[submodule "software/lwip"]\n\tpath = software/lwip\n'
-               '\turl = http://github.com/GideonZ/lwip\n')
-        sha = "26a22151f4b7ebb2925523192edc83fa7f31cba9"
+    def test_a_ref_with_a_gitlink_is_refused(self):
+        gx.run = lambda args, **kw: ("100644 blob 1111111111111111111111111111111111111111\tREADME.md\n"
+                                     "160000 commit 0103c58581ae900c9b97ea739a2140a52adfb010\tsoftware/x")
+        with self.assertRaises(gx.Fail) as cm:
+            gx.stage("old", self.d)
+        self.assertIn("software/x", str(cm.exception))
+        self.assertIn("92645aeb", str(cm.exception))
 
-        def fake_run(args, **kw):
-            if args[-1].endswith(":.gitmodules"):
-                return cfg
-            return "160000 commit %s\tsoftware/lwip" % sha
-
-        gx.run = fake_run
-        written = gx.write_submodule_notes(self.d, "d36dcf78")
-
-        self.assertEqual([gx.APP_PREFIX + "/software/lwip/README.md"], written)
-        with open(os.path.join(self.d, written[0])) as fh:
-            note = fh.read()
-        self.assertIn(sha, note)
-        self.assertIn("https://github.com/GideonZ/lwip", note)
-        self.assertNotIn("http://github.com", note)
-
-    def test_a_path_that_is_not_a_gitlink_gets_nothing(self):
-        def fake_run(args, **kw):
-            if args[-1].endswith(":.gitmodules"):
-                return '[submodule "x"]\n\tpath = x\n\turl = https://example.invalid/x\n'
-            return "100644 blob 0000000000000000000000000000000000000000\tx"
-
-        gx.run = fake_run
-        self.assertEqual([], gx.write_submodule_notes(self.d, "d36dcf78"))
+    def test_gitlinks_lists_only_gitlinks(self):
+        gx.run = lambda args, **kw: "100644 blob 1111111111111111111111111111111111111111\tREADME.md"
+        self.assertEqual([], gx.gitlinks("HEAD"))
 
 
 class Checks(unittest.TestCase):
+    """The link rules against a table of our own (EXCLUDE as it was: roms and the pin file)."""
+
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="gh-export-test-")
+        self.real_exclude = gx.EXCLUDE
+        gx.EXCLUDE = ["roms", "constraints/c64u.xdc"]
 
     def tearDown(self):
+        gx.EXCLUDE = self.real_exclude
         shutil.rmtree(self.d, ignore_errors=True)
 
     def test_a_link_to_an_excluded_file_loses_its_link_and_keeps_its_text(self):
@@ -241,24 +222,25 @@ class Tables(unittest.TestCase):
             self.assertEqual(rule.get("count", 1), s.count(rule["old"]),
                              "%s: %r" % (rule["path"], rule["old"][:60]))
 
-    def test_only_roms_third_party_files_and_the_submodule_wiring_stay_out(self):
-        # Alex, 2026-11-13: specs, ADRs, the task list and the other project's name go out
+    def test_only_third_party_binaries_stay_out(self):
+        # Alex, 2026-11-13: specs, ADRs, the task list and the other project's name go out; U20 D14: the pin file too
+        self.assertNotIn("constraints/c64u.xdc", gx.EXCLUDE)
+        self.assertNotIn("constraints/c64u.xdc.md", gx.PLACEHOLDERS)
         for rel in gx.EXCLUDE:
-            self.assertTrue(rel == ".gitmodules" or rel.endswith("roms") or rel.endswith(".xdc")
-                            or os.path.splitext(rel)[1].lower() in gx.BINARY_SUFFIXES, rel)
+            self.assertIn(os.path.splitext(rel)[1].lower(), gx.BINARY_SUFFIXES, rel)
 
-    def test_the_dropped_rom_directories_get_a_readme(self):
-        self.assertIn("roms", gx.EXCLUDE)
-        self.assertIn("roms/README.md", gx.PLACEHOLDERS)
-        self.assertIn(gx.APP_PREFIX + "/roms", gx.EXCLUDE)
-        self.assertIn(gx.APP_PREFIX + "/roms/README.md", gx.PLACEHOLDERS)
+    def test_no_rom_image_goes_out_and_the_trees_rom_readme_does(self):
+        self.assertIn("roms/*.bin", gx.EXCLUDE_GLOBS)
+        self.assertNotIn("roms", gx.EXCLUDE)
+        self.assertNotIn("roms/README.md", gx.PLACEHOLDERS)
+        self.assertTrue(os.path.exists(os.path.join(gx.HOST_REPO, "roms/README.md")))
 
     def test_the_placeholder_table_covers_every_dropped_single_file(self):
         for rel in gx.EXCLUDE:
             full = os.path.join(gx.HOST_REPO, rel)
             if not os.path.isfile(full):
                 continue
-            if rel.endswith(".md") or rel in ("TODO.md", ".gitmodules"):
+            if rel.endswith(".md") or rel == "TODO.md":
                 continue
             if os.path.splitext(rel)[1].lower() in gx.BINARY_SUFFIXES or rel.endswith(".xdc"):
                 self.assertIn(rel + ".md", gx.PLACEHOLDERS, rel)
@@ -266,18 +248,17 @@ class Tables(unittest.TestCase):
 
 class Replay(unittest.TestCase):
     def test_the_export_line_follows_the_first_subject(self):
-        m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"], "f3c8e991aa")
-        self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6 (application f3c8e991)."
-                            "\n\nThe body.\n")
+        m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"])
+        self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6.\n\nThe body.\n")
 
     def test_folded_messages_follow_each_other(self):
-        m = gx.export_message(["T46: out\n\nwhy", "T46: the comments"], ["7a9c5bb", "8f4761e"], "fb3a7821")
+        m = gx.export_message(["T46: out\n\nwhy", "T46: the comments"], ["7a9c5bb", "8f4761e"])
         self.assertTrue(m.startswith("T46: out\n\nExport of TRX64 Ultimate 7a9c5bb, 8f4761e"))
         self.assertTrue(m.endswith("why\n\nT46: the comments\n"))
 
     def test_no_message_at_all_is_an_error(self):
         with self.assertRaises(gx.Fail):
-            gx.export_message(["", "  "], ["8f4761e"], "fb3a7821")
+            gx.export_message(["", "  "], ["8f4761e"])
 
 
 class PublicAddress(unittest.TestCase):

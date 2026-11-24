@@ -67,8 +67,8 @@ class Ef3Image(unittest.TestCase):
         self.assertTrue(all(x == 0xFF for x in img[E.BANKS_PER_SLOT * 0x4000:]))
         self.assertEqual(E.slot_names(img)[3], "Slot 3")
 
-    @unittest.skipUnless(EAPI_SRC or any(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), r)) for r in (
-        "../../TRX64-Ultimate-app-wt-t51/apps/trex_crt/src/eapi_drivers.c",)), "the app's eapi_drivers.c is not next to this repo")
+    @unittest.skipUnless(EAPI_SRC or os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "../software/trx64u/apps/trex_crt/src/eapi_drivers.c")), "no eapi_drivers.c in software/trx64u/apps/trex_crt")
     def test_insert_extract(self):
         self.system()
         E.main(["new", "-o", self.p("ef3.crt"), "--system", self.p("sys.crt")])

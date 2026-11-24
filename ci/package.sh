@@ -4,8 +4,10 @@
 # trx64-ultimate in the Gitea registry, version <branch>-<8 digit commit> and
 # <branch>-latest (the same versions and file names as the single job used:
 # <design>.bit, <design>.timing.rpt, <design>.utilization*.rpt; tools/load.sh
-# reads <design>.bit). New: the app (ultimate.app, ultimate.elf), manifest.json
-# and SHA256SUMS over all of it.
+# reads <design>.bit), manifest.json and SHA256SUMS over all of it. Stage `cor`
+# adds trx64u_<commit8>.cor to the same versions. The Gideon app (ultimate.app,
+# ultimate.elf, the manifest's "version" and "app_commit") left with the
+# submodule (U20 A5, D13): the Gitea branch gideon-app packs them.
 #
 # The 100T bitstream is not part of this: stage bit-ue2 added its own files (_100t)
 # to the same package versions; that stage is commented out since 2026-10-16.
@@ -13,21 +15,18 @@
 #   PACKAGE_TOKEN=... ci/package.sh
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-release_reuse_skip package
 
 out="$ROOT/out"
 rm -rf "$out"; mkdir -p "$out"
 
 c64u="$(need_stage bit-c64u)"
-app="$(need_stage app)"
 cp "$c64u"/*.bit "$c64u"/*.rpt "$c64u"/*.gz "$c64u"/*.steps.txt "$out/"
 cp "$c64u/wns.txt" "$out/wns.c64u.txt"
-cp "$app/ultimate.app" "$app/ultimate.elf" "$app"/space_*.txt "$out/"
 
 sha="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
-BITDIR="$c64u" python3 - "$out" "$sha" "$(git -C "$ROOT" rev-parse HEAD)" "$(cat "$app/app_commit")" "$(branch_slug)" "$(cat "$app/app_version")" <<'PY'
+BITDIR="$c64u" python3 - "$out" "$sha" "$(git -C "$ROOT" rev-parse HEAD)" "$(branch_slug)" <<'PY'
 import hashlib, json, os, sys
-out, short, full, app, branch, version = sys.argv[1:]
+out, short, full, branch = sys.argv[1:]
 def wns(name):
     p = os.path.join(out, name)
     return dict(l.split() for l in open(p)) if os.path.exists(p) else {}
@@ -37,7 +36,7 @@ for f in sorted(os.listdir(out)):
         continue
     data = open(os.path.join(out, f), "rb").read()
     files[f] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
-json.dump({"version": version, "trx64_commit": full, "app_commit": app, "branch": branch,
+json.dump({"trx64_commit": full, "branch": branch,
            "gateware_key": open(os.path.join(os.environ["BITDIR"], "key")).read().strip(),
            "bitstream_from": open(os.path.join(os.environ["BITDIR"], "from")).read().strip(),
            "wns_ns": wns("wns.c64u.txt"),

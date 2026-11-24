@@ -28,7 +28,7 @@ Checked per chip, on three consecutive loads of the same file:
 
 TRX64 Ultimate port: the board harness is easyflash_eapi_test.Board (REST,
 FTP, JTAG). Three differences from the icepi build of the CRTs, all from how
-the Ultimate app keeps a cartridge (software/ultimate-app, io/c64/c64_crt.cc):
+the Ultimate app keeps a cartridge (fork TREX/1541ultimate, software/io/c64/c64_crt.cc):
 
 - The image holds every bank at 16 KiB, also for the one-chip cartridges
   (chip address {bank, offset} at bank * 16 KiB + offset, trx_cart.cc).

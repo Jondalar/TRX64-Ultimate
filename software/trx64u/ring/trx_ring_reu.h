@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring_reu.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_ring_reu.h, copied for the ring library (U18 D6: this copy is the master).
 // A08 (TRX64-Ultimate docs/specs/T20-delta-ring.md, "REU means no Timewarp"): the ring does not
 // record REU contents, so while the REU is enabled there is no ring. This is the decision of when
 // the ring stops and when it starts again, with no hardware in it (tests/trx_ring_reu_test.cc);

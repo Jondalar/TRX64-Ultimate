@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_inflate.c, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_inflate.c, copied for the ring library (U18 D6: this copy is the master).
 // See trx_inflate.h. A canonical-Huffman inflate: counts per code length and
 // the symbols sorted by code, decoded by walking the lengths (RFC 1951 §3.2.2,
 // the shape of zlib's own puff.c), streamed: a match reads the caller's 32 KB

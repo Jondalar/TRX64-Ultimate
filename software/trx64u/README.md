@@ -17,10 +17,10 @@ library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U
 | `tools/` | - | `emu_ops.py`: runs `trx64u.cor` in ue2emu and exports what the running app registers; `boundary.py` |
 
 The sub-app is MultiCore's port onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt`) of our firmware's
-tool at submodule `aa2ef5dc` (its README lists what the port changed), moved here by MultiCore T239.3 P2-5 and built
+tool at fork commit `aa2ef5dc` (its README lists what the port changed), moved here by MultiCore T239.3 P2-5 and built
 against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with MultiCore's P2-6. Softboot is not part of
 trx64u (Alex, 2026-11-24): it starts the firmware application inside a `.cfw` on the running bitstream, and c64_basic
-under this app is not the bitstream that application needs. It stays in the firmware build (`software/ultimate-app/apps/softboot`). Online search
+under this app is not the bitstream that application needs. It stays in the firmware build (`TREX/1541ultimate:apps/softboot`). Online search
 is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
 
 ## State

@@ -1,5 +1,5 @@
 // trx64u's UCI library (uci/, U18): a header of the firmware that the command interface server includes; no SDK ships it (MultiCore T239.3 D48).
-// PROVENANCE: software/ultimate-app/software/system/dump_hex.h (1541ultimate, Gideon Zweijtzer, GPL-3.0; our submodule at 0103c585), byte for byte the
+// PROVENANCE: TREX/1541ultimate:software/system/dump_hex.h (1541ultimate, Gideon Zweijtzer, GPL-3.0; our fork at 0103c585), byte for byte the
 // header TRX64U-MultiCore's host-app carries at t239.3 6e280710 (no SDK shipped it). Changes here: this header only.
 /*
  *   1541 Ultimate - The Storage Solution for your Commodore computer.

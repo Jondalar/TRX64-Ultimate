@@ -3,8 +3,7 @@
 Every FPGA building block that the TRX64 Ultimate builds read, where it comes from and
 under which licence. Scope is what the build scripts hand to Vivado
 (`designs/*/build.tcl`, `tools/vivado_lib.tcl`, our copy of Gideon's files in
-`vendor/gideon`), not everything that lies in the tree. One section more: the files the CI packs
-`trx64g.cor` with (`software/trx64g`). Licences of the repository: `LICENSE` and `LICENSING.md`.
+`vendor/gideon`), not everything that lies in the tree. Licences of the repository: `LICENSE` and `LICENSING.md`.
 
 Designs: **c64** = `designs/c64_basic`, **ddr2** = `designs/ddr2_test`,
 **hdmi** = `designs/hdmi_test`.
@@ -152,45 +151,22 @@ block (`c64_mem.v`) starts blank; the Ultimate app writes what it loads from `/r
 
 | Content | Path | Used by | Origin | Licence |
 |---|---|---|---|---|
-| C64 Kernal, BASIC, character ROM | `roms/basic.901226-01.bin`, `kernal.901227-03.bin`, `characters.901225-01.bin` -> `c64_rom.mem` in each bench's run directory (`tools/rom2mem.py`) | `designs/c64_basic/sim/*` (preload with `TRX_SIM_ROMS`; the statebus bench writes them through the app's window) | Commodore (Cloanto) | README.md: "private use only"; no licence file |
-| 1541-II ROM | `roms/1541-ii.bin` | `sim/drive`, `sim/pause` (written into the drive's image by the bench, as the app does) | Commodore (Cloanto) | as above |
+| C64 Kernal, BASIC, character ROM | `roms/basic.901226-01.bin`, `kernal.901227-03.bin`, `characters.901225-01.bin`, not tracked: fetched by `ci/roms.py` from the pins of `ci/roms.txt` (VICE's `vice/data/C64` at svn-mirror 4d283a2e, size and SHA-256 checked) -> `c64_rom.mem` in each bench's run directory (`tools/rom2mem.py`) | `designs/c64_basic/sim/*` (preload with `TRX_SIM_ROMS`; the statebus bench writes them through the app's window) | Commodore (Cloanto) | no licence file; not in this repository (U20 D14, `roms/README.md`) |
+| 1541-II ROM | `roms/1541-ii.bin`, not tracked: `ci/roms.py` from `ci/roms.txt` (VICE's `vice/data/DRIVES/dos1541ii-251968-03.bin`) | `sim/drive`, `sim/pause` (written into the drive's image by the bench, as the app does) | Commodore (Cloanto) | as above |
 
 `constraints/c64u.xdc` (pin constraints, not gateware) is copied verbatim from Gideon's
-[issue #615](https://github.com/GideonZ/1541ultimate/issues/615); no licence is stated for it.
+[issue #615](https://github.com/GideonZ/1541ultimate/issues/615); no licence is stated for it. It goes into the
+public tree as it is (U20 D14); only `tools/pincheck` reads it.
 Our own boundary-scan pin map (1541ultimate-tools, `docs/c64u-pinmap.md`) checked it. The build
 reads `designs/*/pins.xdc`: ours, but they take ball, standard and drive per port from `c64u.xdc`
 (they say so in their first line). Gideon published it for his GPL-3 project, so they are treated
 as GPL-3.
 
-## The core bundle `trx64g.cor`: `software/trx64g`
+## The core bundle `trx64g.cor`
 
-`ci/cor.sh` packs `trx64g.cor` (MultiCore T239.3 D46) from two files of our CI package and the files below. The bundle
-has four records: the manifest, `ultimate.app` without its 12-byte header, the icon, and `c64_basic.bit` as it is. Each
-file below is a copy from TRX64U-MultiCore, branch `t239.3`, commit `cfa7872a`; `pack_import_cor.sh` is from `0242d0ca5`,
-which changed only that file's header comment (who packs `trx64g.cor` since D46). MultiCore's `LICENSING.md` puts its
-tools, CI and logos under GPL-3.0-or-later. What a copy changed is in its PROVENANCE header, and only the paths, the
-SDK's `cor_pack.py` and the pin values changed.
-
-| Content | Path | Origin (TRX64U-MultiCore file) | Licence | Notes |
-|---|---|---|---|---|
-| Packer | `software/trx64g/pack_import_cor.sh` | `tools/pack_import_cor.sh` | GPL-3.0-or-later | Changed: the usage line's paths; `ROOT` is this folder, so `pkg.env` and `version.sh` are read from it |
-| Packer, second half | `software/trx64g/pack_large_cor.sh` | `tools/pack_large_cor.sh` | GPL-3.0-or-later | Changed: the usage line's path; `cor_pack.py` is the pinned SDK's (`software/trx64u/sdk.pin`) |
-| Descriptor reader | `software/trx64g/core_toml.py` | `tools/core_toml.py` | GPL-3.0-or-later | Unchanged |
-| Version form | `software/trx64g/version.sh` | `ci/version.sh` | GPL-3.0-or-later | Unchanged |
-| Package name | `software/trx64g/pkg.env` | `ci/pkg.env` | GPL-3.0-or-later | Unchanged |
-| Pin | `software/trx64g/trx64g.pin` | `release/imports/trx64g.pin` | GPL-3.0-or-later | Changed: the package values come from each run (`ci/cor.sh`); `ICON` names the copy below |
-| Icon (record 4) | `software/trx64g/icon.rgb565` | `tools/core_logos/trx64/icon.rgb565`, drawn by MultiCore's `tools/core_logos/build.py` | GPL-3.0-or-later (MultiCore's `PROVENANCE.md` §8: their own "TRX64 UI adaptations") | sha256 `d521f548...`, the same bytes as `software/trx64u/base/icon.rgb565` |
-
-Of the Commodore ROMs, `trx64g.cor` holds what `ultimate.app` holds and nothing more: no files record, no library, no
-description. The application's build links these files (`SRCS_BIN` of the submodule's
-`target/u64ii/riscv/ultimate/Makefile`), measured on 2026-11-24 against 901226-01 and 901225-01:
-
-- `roms/basic.bin`: the BASIC ROM 901226-01, whole;
-- `roms/chars.bin`: 2 KiB, and 225 of its 256 glyphs are glyphs of the character ROM 901225-01;
-- `software/u64/default_chars.bin`: 4 KiB, and 252 of its 512 glyphs are glyphs of 901225-01;
-- `software/ModPlayer_16k/module.bin`: the 16 KiB "MOD Player Cartridge".
-
-The app's start code in place of a KERNAL is Gideon's own (`software/u64/default_kernal.tas`).
+`trx64g.cor` (MultiCore T239.3 D46: `c64_basic.bit` with Gideon's `ultimate.app`), its packer copied from TRX64U-MultiCore
+(`software/trx64g`) and the account of the Commodore ROM content `ultimate.app` links left this tree with the firmware
+submodule (U20 A5, D13). The Gitea branch `gideon-app` keeps them, with their section in its `PROVENANCE.md`.
 
 ## Licence summary
 

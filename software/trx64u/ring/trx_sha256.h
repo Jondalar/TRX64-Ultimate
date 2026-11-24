@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_sha256.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_sha256.h, copied for the ring library (U18 D6: this copy is the master).
 // SHA-256 (FIPS 180-4), for the containers that carry one: the .c64re's hash
 // over its gzip body (T20 §9.1) and the .trxring's over its parts (§10.2).
 // Plain C so the host test bank and the firmware use the same code.

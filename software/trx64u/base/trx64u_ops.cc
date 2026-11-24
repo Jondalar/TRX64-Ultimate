@@ -117,7 +117,7 @@ static void fast_reset(void)
 static int reu_load(const char *path, char *msg, int msglen, bool at_zero = true);
 static void mp3_forget(void);
 // The slot's status (trx_slot, gateware/c64_basic.toml): `block` the slot block is in the bitstream, `armed` the port is armed for a cartridge. `block` is the
-// bitstream's and is read once (the firmware's trx_slot_present keeps it the same way, software/ultimate-app/software/io/c64/trx_cart.cc); `armed` each time.
+// bitstream's and is read once (the firmware's trx_slot_present keeps it the same way, TREX/1541ultimate:software/io/c64/trx_cart.cc); `armed` each time.
 // The register is 32 bit: one read latches it at byte 0 (trx_sys.v), which byte reads of +6 and +7 alone never did.
 static bool slot_armed(void)
 {

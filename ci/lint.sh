@@ -12,6 +12,7 @@
 #  - the workflows: parse, every `needs:` names a job, every `uses:` a file
 #  - ci/select.sh: its answers for the cases the workflows rely on
 #  - ci/sims.txt: every bench's script exists
+#  - ci/roms.py: its unit test (no network) and the pins of ci/roms.txt
 #  - software/trx64u (U18): the pinned SDK's reverse lint (rtl_check.py lint-src) on our libraries' sources and uci/
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -46,11 +47,6 @@ check "select.sh" bash -c '
   EXPECT=no  t ue2 GITHUB_REF_NAME=main GITHUB_EVENT_NAME=workflow_call UE2_INPUT= &&
   EXPECT=yes t ue2 GITHUB_REF_NAME=v1.0 GITHUB_REF_TYPE=tag GITHUB_EVENT_NAME=push &&
   EXPECT=yes t ue2 GITHUB_REF_NAME=release/1 GITHUB_EVENT_NAME=push &&
-  EXPECT=yes t update GITHUB_REF_NAME=integ-m1 &&
-  EXPECT=yes t update GITHUB_REF_NAME=main &&
-  EXPECT=yes t update GITHUB_REF_NAME=v1.0 GITHUB_REF_TYPE=tag &&
-  EXPECT=no  t update GITHUB_REF_NAME=t40 &&
-  EXPECT=yes t update GITHUB_REF_NAME=t40 UPDATE_FORCE=true &&
   EXPECT=1   t sims-tier GITHUB_REF_NAME=t40 GITHUB_EVENT_NAME=push &&
   EXPECT=2   t sims-tier GITHUB_REF_NAME=main GITHUB_EVENT_NAME=push &&
   EXPECT=2   t sims-tier GITHUB_REF_NAME=integ-m1 GITHUB_EVENT_NAME=push &&
@@ -69,6 +65,7 @@ for p in glob.glob(".gitea/workflows/*.yml"):
             print(f"{p}: job {name} uses {j['uses']}, which does not exist"); ok = False
 sys.exit(0 if ok else 1)
 PY
+check "bench ROMs fetch test (U20 A6)" python3 -I ci/test_roms.py
 check "sims.txt" python3 - <<'PY'
 import os, re, sys
 ok = True

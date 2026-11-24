@@ -20,7 +20,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 import trxdbg  # noqa: E402  (the JTAG debug port: C64 RAM reads without side effects)
 
-IP = sys.argv[1] if len(sys.argv) > 1 else "192.168.242.189"
+IP = sys.argv[1] if len(sys.argv) > 1 else "192.0.2.189"
 PAIRS = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 12
 H = "http://" + IP
 

@@ -221,7 +221,42 @@ In this order; each step is a commit with its docs. A, B and E are ours; C is Mu
 
 ### A5, A6, A7 (submodule out, the Gideon-app line on Gitea, ROMs, keys)
 
-Not started.
+- 2026-11-24, A5 on the Gitea branch `gideon-app` (from origin 083a631f): 0aaf70d7, `pipeline.yml` and `release.yml` keep only
+  `workflow_dispatch` (MultiCore T239.1 D45's form), the README says what the branch is; nothing else changed.
+- A5 on `u18` (from 92645aeb): 3e8e5b09 (CI), 7e3d4efe (readers, docs), 184c26d7 (fonts). Gone: `.gitmodules`, the gitlink,
+  `ci/submodule.sh`; the stages app, update (`build_update`, `select.sh update`) and the Gitea release (`ci/release.sh`,
+  `release.yml`, `release_reuse_skip`); `software/trx64g` and cor's trx64g half; `tools/make_update.sh`, `trx_pkg.py`,
+  `trx_pkg_check.py`, `release_notes.py` and their tests; `tests/bdd` (both features run Gideon's `ultimate.app` in ue2emu through the
+  fork's `tests/e2e/lib`: its Cartridge Preference and its monitor service, no gateware of ours; nothing of `tests/e2e/lib` is copied,
+  nothing here uses it); the two `LiberationSans-Regular.ttf` symlinks into the submodule under `docs/lvgl_ui_*/fonts` (they dangled
+  and stopped the export's digest).
+- Pipeline: lint -> bit-c64u -> package -> sims, cor (`trx64u.cor` only). The package holds the bitstream, its reports,
+  `manifest.json` (without `"version"` and `"app_commit"`, which came from the app) and `SHA256SUMS`. `files_key` lost the
+  `<submodule>//` form; the keys of other spec lists are unchanged (checked before and after: turbo's f4649a8d, `gateware_key 50t`
+  a4de1cda).
+- Rewired: `hdmi_modes.py` checks and writes `hdmi_modes.vh` only (the app header `trx_hdmi_modes.h` went; check PASS, selftest 17/17,
+  `gen` writes the same file); `ef3_image.py` reads the EAPI driver from `software/trx64u/apps/trex_crt` (its insert test runs now);
+  `gh_export.py` exports the tree alone and refuses a ref with a gitlink (step E: replay the commits before A5 with the tool of
+  92645aeb, the rest with this one); `t55_board.py --app` has no default, `t16_session.py` takes `trex_crt.u2a` from `--app-u2a` or
+  `TREX_CRT_U2A`; origin notes in `software/trx64u` and `tests/cart` name `TREX/1541ultimate:<path>`.
+- A6, 05e327b7: `ci/roms.txt` pins the four ROMs at VICE's svn-mirror 4d283a2e (`vice/data/C64`, `vice/data/DRIVES`); downloaded,
+  each equals the removed file (89878cea basic, 83c60d47 kernal, fd0d53b8 characters, 326c289c 1541-II) and Gideon's
+  `roms/` at 1ba94abd (the same blob ids). `ci/roms.py`, `ci/test_roms.py`: MultiCore's (42e38499b, d17f3eb70), store
+  `ROMS_STORE` (empty: none) or `/cache/roms`; lint runs the test. `ci/sims.sh` fetches what a bench names before it runs
+  (unreachable: SKIPPED, not red; wrong hash: FAIL); `rom2mem.py` fetches a missing C64 ROM itself; `@vcore` and ultsys's
+  boot-state key name `ci/roms.txt`. `roms/*.bin` left the tree (`.gitignore`), `roms/README.md` says from where.
+- A6, e2803130: `constraints/c64u.xdc` goes out as it is; `gh_export.py`'s `EXCLUDE` and `PLACEHOLDERS` are empty.
+- Checks: `ci/lint.sh` rc 0; `sims.sh -f keyboard` PASS; the ROM gate alone (a ROM bench fetched, a bench without ROMs, an
+  unreachable pin SKIPPED, a wrong hash FAIL); `c64_rom.mem` from the fetched ROMs = from the old files (81b834ce);
+  `test_gh_export.py` 27 OK and `gh_export.py --check` passes (1486 files); `test_ef3_image.py` OK; `build.sh` rc 0 (`trx64u.u2a`
+  image 77,096, `ring.u2a` 137,088 and `monitor.u2a` 211,256 bytes, as in A2/A3); `pack_cor.sh --no-build --emu` with run 480's
+  bitstream (975aa59b, sha256 4d2a74f6) rc 0: heap 10,972,496, `.cor` 3,948,515 bytes, READY., ping answered, the ops list 388
+  lines = `base/ops_trx64u.txt` both ways. Not run here (no ghdl): every ROM bench.
+- Open: the manifest's `"version"` is gone, so a MultiCore pin of a new `u18` package takes its version by hand (contract §2
+  allows it; D12 changes the contract anyway). Board tests that boot `ultimate.app` from a package (`t55`/`t62`/`t67`
+  `--package`, `t16_session` boot, `ue2_session`) need a package of the `gideon-app` line. `docs/` still names the submodule in
+  44 files: specs, ADRs and dated notes (history, left), `gideon-menu-tree.md` (fork paths as text now).
+- A7 (keys) is left for later: it waits for MultiCore's builder table (D9).
 
 ### A8 (public-tree check)
 

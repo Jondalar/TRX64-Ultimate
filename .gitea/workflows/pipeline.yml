@@ -9,21 +9,20 @@ on:
       - 'docs/**'
       - 'tests/**'  # board tests (Python), not part of the build
   workflow_dispatch:
-    inputs:
-      # 100T stage off (Alex 2026-10-16) until we have a U64 Elite II at home; bit-ue2 below.
-      # ue2:
-      #   description: 'Also build the Ultimate 64 Elite II (XC7A100T) bitstream, after the package'
-      #   type: boolean
-      #   default: false
-      update:
-        description: 'Build the .cfw/.ue2 update files on this branch too (always built on integ-m1, main, v* tags)'
-        type: boolean
-        default: false
+    # 100T stage off (Alex 2026-10-16) until we have a U64 Elite II at home; bit-ue2 below. To bring it back,
+    # this input goes under `inputs:` again:
+    # ue2:
+    #   description: 'Also build the Ultimate 64 Elite II (XC7A100T) bitstream, after the package'
+    #   type: boolean
+    #   default: false
 
 # The chain (docs/specs/T31-ci-pipeline.md), each stage its own workflow file that
 # also runs alone:
-#   lint -> app -> bitstream 50t -> package -> update and cor (trx64u.cor, trx64g.cor), and sims behind the package
+#   lint -> bitstream 50t -> package -> cor (trx64u.cor), and sims behind the package
 #   (bitstream 100t commented out 2026-10-16, see bit-ue2 at the end)
+# The Gideon-app line (the firmware submodule, ultimate.app, the .cfw/.ue2 update files, trx64g.cor and
+# the Gitea release that packed them) left this tree with U20 A5 (D13): it lives on the Gitea branch
+# gideon-app, whose pipeline runs only by hand.
 # Nothing here decides anything: what a stage skips (benches that already passed,
 # a bitstream whose sources did not change) it decides
 # itself from the content of the checkout (ci/select.sh, gateware_key in ci/lib.sh).
@@ -40,53 +39,40 @@ jobs:
   lint:
     uses: ./.gitea/workflows/lint.yml
     secrets: inherit
-  app:
-    needs: lint
-    uses: ./.gitea/workflows/app.yml
-    secrets: inherit
   bit-c64u:
-    needs: app
+    needs: lint
     uses: ./.gitea/workflows/bitstream.yml
     with:
       part: 50t
     secrets: inherit
   # The benches run after the package, not in front of it (T31 decision 15, 2026-10-30; taken from
   # MultiCore T100 D7). They produce nothing the package contains - ci/sims.sh calls neither
-  # stage_dir nor need_stage - and in front of it they decided whether the testers get an update
+  # stage_dir nor need_stage - and in front of it they decided whether the testers got an update
   # file at all: runs 1064 and 1066 spent 44 and 40 minutes in bench timeouts and ended with no
   # artefact, over flash_gate and turbo, which the package does not touch. Behind the package the
   # benches still run on every push and a failing one still makes the run red; the difference is
   # that the files exist by then.
   package:
-    needs: [app, bit-c64u]
+    needs: bit-c64u
     uses: ./.gitea/workflows/package.yml
     # with:
     #   ue2: ${{ github.event.inputs.ue2 }}   # 100T stage off, see bit-ue2
     secrets: inherit
-  # The tester update files (.cfw/.ue2) of the package, only on integ-m1, main and v* tags (or
-  # dispatch with update): elsewhere the stage prints "update SKIPPED" and is green in seconds.
   sims:
     needs: package
     uses: ./.gitea/workflows/sims.yml
     secrets: inherit
-  update:
-    name: update (.cfw/.ue2)
-    needs: package
-    uses: ./.gitea/workflows/update.yml
-    with:
-      force: ${{ github.event.inputs.update }}
-    secrets: inherit
-  # trx64u.cor (U18) from the package's bitstream and software/trx64u, and trx64g.cor (MultiCore T239.3 D46) from its
-  # bitstream and ultimate.app; a branch without software/trx64u prints "cor SKIPPED" and is green in seconds.
+  # trx64u.cor (U18) from the package's bitstream and software/trx64u; a branch without software/trx64u prints
+  # "cor SKIPPED" and is green in seconds.
   cor:
-    name: cor (trx64u.cor, trx64g.cor)
+    name: cor (trx64u.cor)
     needs: package
     uses: ./.gitea/workflows/cor.yml
     secrets: inherit
   # bit-ue2, the Ultimate 64 Elite II (XC7A100T) bitstream: off (Alex 2026-10-16: "take the 100T
   # out, comment it out; we look at it again when the machine exists and we have one at home").
-  # Even skipped it queued for the builder after the update and held the run open. To bring it
-  # back: uncomment this job, the ue2 input above and package's `with: ue2`.
+  # Even skipped it queued for the builder after the update stage (gone since U20 A5) and held the run
+  # open. To bring it back: uncomment this job, the ue2 input above and package's `with: ue2`.
   # # The 50T result is out before this starts and never depends on it.
   # bit-ue2:
   #   # Builds only when requested (dispatch with ue2, tag, release/*). When it is not, the
@@ -94,7 +80,7 @@ jobs:
   #   # a job name cannot say it: the name of a job that calls a workflow is not evaluated
   #   # (checked in a probe repo, 2026-10-04), and the stage may not carry an `if:`.
   #   name: bit-ue2 (100T, optional)
-  #   needs: update
+  #   needs: package
   #   uses: ./.gitea/workflows/bitstream.yml
   #   with:
   #     part: 100t

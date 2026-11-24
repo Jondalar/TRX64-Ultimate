@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_json.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_json.h, copied for the ring library (U18 D6: this copy is the master).
 // The jsmn walk the .c64re reader and the node builder share (T66 part 4):
 // token compare, a key's value token, an integer, and a TRX64 typed-array node
 // {"$ta":"Uint8Array","b64":"..."}. Header-only so the host test bank

@@ -2,7 +2,7 @@
 // hardware. Pure data and one function, so that the menu has one path to the registers and so that it runs
 // in a host test (software/test/resid8) without menu code.
 // TRX64-Ultimate docs/specs/T25.5-resid8-menus.md section 3.
-// A copy of software/ultimate-app/software/u64/resid8_filter.h for the trx64u library (built against the SDK alone); keep the two equal.
+// A copy of TREX/1541ultimate:software/u64/resid8_filter.h for the trx64u library (built against the SDK alone); keep the two equal.
 #ifndef RESID8_FILTER_H
 #define RESID8_FILTER_H
 

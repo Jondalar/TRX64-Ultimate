@@ -1,5 +1,5 @@
 // trx64u's UCI library (uci/, U18): a header of the firmware that the UCI sources include and SDK 0.4.6 no longer ships (MultiCore T239.3 D48).
-// PROVENANCE: software/ultimate-app/software/httpd/c-version/lib/http_codes.h (1541ultimate, Gideon Zweijtzer, GPL-3.0; our submodule at 0103c585), byte for byte the
+// PROVENANCE: TREX/1541ultimate:software/httpd/c-version/lib/http_codes.h (1541ultimate, Gideon Zweijtzer, GPL-3.0; our fork at 0103c585), byte for byte the
 // header TRX64U-MultiCore carries in vendor/gideon at t239.3 6e280710 and SDK 0.4.5 shipped in base/inc. Changes here: this header only.
 #ifndef HTTP_CODES
 #define HTTP_CODES

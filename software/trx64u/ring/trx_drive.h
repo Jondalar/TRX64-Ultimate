@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_drive.h, copied for the ring library (U18 D6: this copy is the master); the
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_drive.h, copied for the ring library (U18 D6: this copy is the master); the
 // functions are in ringfile.cc (FW trx_drive.cc), the branch for products without the debug page is gone.
 // Drive A's own state: its RAM, its 6502's registers and both 6522s
 // (TRX64-Ultimate docs/specs/T20-delta-ring.md §9.3 "drive1541", T66 part 8).

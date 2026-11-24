@@ -5,17 +5,13 @@
 #
 # A spec is a git pathspec from the repository root: a file, a directory (every
 # tracked file below it), a :(glob) or an :(exclude). Only tracked files count, so
-# build/ directories and generated files never do. <submodule>//<pathspec> reaches
-# INSIDE a submodule and counts the content of those files, not the submodule's
-# commit (ci/lib.sh files_key); no line uses it since U20 A1 put Gideon's files into
-# vendor/gideon, in git. The sandbox of --check-deps links a submodule whole, so a
-# bench that reads an undeclared file inside one is not caught there. The key also holds the
+# build/ directories and generated files never do. The key also holds the
 # bench's line of ci/sims.txt, the versions of iverilog/ghdl/verilator and KEY_EPOCH of
 # ci/sims.sh. The runner's own content is NOT in it: a comment there used to throw away
 # all 40 markers at once, and then the stage ran every bench.
 #
 # A bench without a line here keeps the key of the whole tree (designs cores vendor
-# tools roms ci): any change in those reruns it, nothing is ever skipped wrongly.
+# tools ci): any change in those reruns it, nothing is ever skipped wrongly.
 # A spec that matches no tracked file makes the bench fall back the same way.
 #
 # Keep a line COMPLETE: what a bench reads and this list lacks is a change that does
@@ -26,8 +22,9 @@
 # Gideon's VHDL: our copy in vendor/gideon, our patches applied (U20 A1); the benches call
 # tools/gideon_sources.sh, which checks that the copy is there
 @gideon = vendor/gideon/fpga tools/gideon_sources.sh
-# the C64 model of the Verilator benches: the cores, the ROMs and what rom2mem makes of them
-@vcore = cores/icepi cores/trx_sid roms tools/rom2mem.py designs/c64_basic/mem designs/c64_basic/c64_core.v designs/c64_basic/c64_mem.v designs/c64_basic/cart_slot.v designs/c64_basic/slot_port.v designs/c64_basic/trx_dbg.v
+# the C64 model of the Verilator benches: the cores, the ROMs (their pins, U20 A6; ci/sims.sh fetches them) and what rom2mem
+# makes of them
+@vcore = cores/icepi cores/trx_sid ci/roms.txt tools/rom2mem.py designs/c64_basic/mem designs/c64_basic/c64_core.v designs/c64_basic/c64_mem.v designs/c64_basic/cart_slot.v designs/c64_basic/slot_port.v designs/c64_basic/trx_dbg.v
 # the app RISC-V's caches (U19): rvlite_wrapper_dc and what it takes
 @cache = designs/c64_basic/cache_cfg_pkg.vhd designs/c64_basic/rv_dcache.vhd designs/c64_basic/rv_icache.vhd designs/c64_basic/rvlite_wrapper_dc.vhd
 # build.tcl's VHDL list is what eth and input compile besides Gideon's files

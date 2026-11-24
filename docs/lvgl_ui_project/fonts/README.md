@@ -1,11 +1,10 @@
 # Fonts
 
-`LiberationSans-Regular.ttf` is a repository-relative symlink to the copy already
-vendored with `software/ultimate-app`. The prototype therefore adds no second
-font binary. `globals.xml` compiles its ASCII range into five sizes with `<bin>`
-and `as_file="false"`.
-
-Keep the symlink relative so the project remains portable inside this repository.
-If the upstream LVGL asset moves, update the link and reopen the Editor project.
+`globals.xml` compiles the ASCII range of `LiberationSans-Regular.ttf` into five sizes with `<bin>` and
+`as_file="false"`. The font is not in this repository: until U20 A5 (2026-11-24) this folder held a symlink
+to the copy vendored with the firmware submodule (`software/lvgl/src/libs/freetype/LiberationSans-Regular.ttf`
+of the fork `TREX/1541ultimate`, which the Gitea branch `gideon-app` still pins; `LiberationSans-LICENSE.txt`
+lies beside it). The submodule left this tree, so put a copy or a link of that file here before opening the
+project in the LVGL Editor; do not commit it.
 
 LVGL Pro font syntax: https://lvgl.io/docs/pro/syntax/fonts

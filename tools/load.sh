@@ -8,7 +8,7 @@
 #
 # Back to the flashed image: unplug the Blaster's USB, power off, power on.
 set -euo pipefail
-GITEA="${GITEA_URL:-http://gitea.fritz.box}"
+GITEA="${GITEA_URL:-http://gitea.example}"
 TEA_CONFIG="${TEA_CONFIG:-$HOME/Library/Application Support/tea/config.yml}"
 TOKEN="${GITEA_TOKEN:-$(awk '/token:/{print $2; exit}' "$TEA_CONFIG" 2>/dev/null || true)}"
 

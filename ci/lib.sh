@@ -14,16 +14,6 @@ else
   HANDOFF="$ROOT/.ci/runs/$RUN_ID"
 fi
 
-# release_reuse_skip <stage>: the release workflow (release.yml, ci/release.sh resolve) found the CI
-# package of the commit it releases and left $HANDOFF/release-reuse; the stages it calls then build
-# nothing and publish nothing. A normal pipeline never has that file.
-release_reuse_skip() {
-  if [ -f "$HANDOFF/release-reuse" ]; then
-    echo "=== $1 skipped: the release reuses the CI package $(cat "$HANDOFF/release-reuse")"
-    exit 0
-  fi
-}
-
 # stage_dir <stage>: the stage's hand-over directory, emptied.
 stage_dir() {
   rm -rf "${HANDOFF:?}/$1"
@@ -58,27 +48,16 @@ tree_key() {
 
 # files_key <pathspec...>: 16 hex digits over the CONTENT (working tree, so an
 # edited checkout counts as well as a clean clone) of the tracked files under the
-# pathspecs, plus the commit of every submodule among them. Returns 1, printing
+# pathspecs, plus the commit of any gitlink among them. Returns 1, printing
 # nothing, when a plain pathspec matches no tracked file: a typo in a dependency
 # list must never turn into "depends on nothing". A pathspec that starts with
-# ':(exclude)' only narrows the others.
-#
-# A pathspec of the form <submodule>//<pathspec inside it> counts the CONTENT of
-# those files instead of the submodule's commit: the app submodule carries
-# Gideon's VHDL beside the application, and a commit that touches the
-# application alone must not rerun a bench that reads only his VHDL.
+# ':(exclude)' only narrows the others. (The form <submodule>//<pathspec>, the
+# content of files inside a submodule, went with the app submodule, U20 A5; the
+# key of every other spec list is what it was.)
 files_key() {
-  local spec list names subnames sub inner outer=() subspecs=()
+  local spec list names outer=()
   for spec in "$@"; do
     case "$spec" in
-      *//*)
-        sub="${spec%%//*}"; inner="${spec#*//}"
-        if [ -z "$(git -C "$ROOT/$sub" ls-files -- "$inner" 2>/dev/null | head -1)" ]; then
-          echo "files_key: '$spec' matches no tracked file in the submodule" >&2
-          return 1
-        fi
-        subspecs+=("$spec")
-        continue ;;
       ':(exclude)'*) outer+=("$spec"); continue ;;
     esac
     if [ -z "$(git -C "$ROOT" ls-files -- "$spec" | head -1)" ]; then
@@ -97,15 +76,6 @@ files_key() {
   {
     awk -F'\t' '{ split($1, a, " "); if (a[1] == "160000") print "submodule", a[2], $2 }' "$list"
     (cd "$ROOT" && git hash-object --stdin-paths < "$names") | paste -d' ' - "$names"
-    for spec in "${subspecs[@]:-}"; do
-      [ -n "$spec" ] || continue
-      sub="${spec%%//*}"; inner="${spec#*//}"
-      subnames="$(mktemp)"
-      git -C "$ROOT/$sub" ls-files -- "$inner" | LC_ALL=C sort > "$subnames"
-      (cd "$ROOT/$sub" && git hash-object --stdin-paths < "$subnames") |
-        paste -d' ' - "$subnames" | sed "s|^\([0-9a-f]\{40\}\) |\1 $sub/|"
-      rm -f "$subnames"
-    done
   } | sha256sum | cut -c1-16
   rm -f "$list" "$names"
 }
@@ -184,25 +154,4 @@ heavy_lock() {
     flock 9
   fi
   echo "heavy lock held"
-}
-
-# build_update <manifest.json> <c64_basic.bit> <ultimate.app> <outdir>: the tester update files
-# (tools/make_update.sh --native -> <outdir>/trx64-<id>/trx64_update_*.cfw/.ue2) from the inputs of
-# one CI package. Shared by the stage `update` (ci/update.sh) and the release (ci/release.sh).
-# Needs the u64-build-env:ci image. Fetches the app submodule (and its nested ones) when the
-# checkout has none, and refuses a submodule whose commit is not the app commit of the manifest.
-# The file name part comes from tools/make_update.sh (TRX_UPDATE_NAME replaces it, the hook for
-# the release tag); the caller exports it.
-build_update() {
-  local manifest="$1" bit="$2" app="$3" out="$4" appdir="$ROOT/software/ultimate-app"
-  if [ ! -e "$appdir/.git" ]; then
-    NESTED="software/lwip software/httpd" "$ROOT/ci/submodule.sh"
-  fi
-  [ "$(git -C "$appdir" rev-parse HEAD)" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app_commit"])' "$manifest")" ] \
-    || { echo "the submodule commit is not the app commit of the package" >&2; return 1; }
-  # ESP-IDF's environment brings the `python` the app's makefiles call (as in ci/app.sh)
-  if [ -f /opt/esp/esp-idf/export.sh ]; then
-    set +u; . /opt/esp/esp-idf/export.sh >/dev/null; set -u
-  fi
-  "$ROOT/tools/make_update.sh" --native --manifest-json "$manifest" --out "$out" "$bit" "$app"
 }

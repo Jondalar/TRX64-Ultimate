@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ea.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_ea.h, copied for the ring library (U18 D6: this copy is the master).
 /*
  * trx_ea.h - what an instruction of the trace writes, from the trace record alone (T21 4.11).
  *

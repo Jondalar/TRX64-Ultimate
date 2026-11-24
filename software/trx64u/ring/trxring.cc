@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_trxring.cc, ported for the ring library (U18 D6: this copy is the master). Changes:
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_trxring.cc, ported for the ring library (U18 D6: this copy is the master). Changes:
 // files through api->fs (RFile), memory through api->mem, text through r_snprintf, the media from the source of the call (trx_c64re_source_begin,
 // ringmachine.cc: the descriptor's slots; the firmware asks drive A and the cartridge itself).
 // See trx_trxring.h. The file:

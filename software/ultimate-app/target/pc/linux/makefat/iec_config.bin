@@ -1,9 +1,0 @@
-{
-    "partitions": [
-        {
-            "name": "RAM DISK",
-            "path": "/temp",
-            "number": 1
-        }
-    ]
-}

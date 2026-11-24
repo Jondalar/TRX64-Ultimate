@@ -268,7 +268,7 @@ static int load_palette(const char *name, char *msg, int msglen)
 
 // The colour timing of each system mode (the position of "System Mode"): the video format, the phase increment, and the audio divider Gideon's resampler
 // filter is picked by (no resampler in c64_basic: audio_div is kept with its row, unused). PROVENANCE:
-// software/ultimate-app/software/u64/color_timings.cc (Gideon Zweijtzer, GPL-3.0), color_timings[] in its order: c_pal_50_283_5, c_ntsc_60_227_5,
+// TREX/1541ultimate:software/u64/color_timings.cc (Gideon Zweijtzer, GPL-3.0), color_timings[] in its order: c_pal_50_283_5, c_ntsc_60_227_5,
 // c_pal_60_free, c_ntsc_50_free, c_pal_60_281_5, c_ntsc_50_228_5. mode_bits are its VIDEO_FMT_* (u64.h: NTSC_ENCODING 0x01, 60_HZ 0x02, NTSC_FREQ 0x08,
 // CYCLES_63 0x00, CYCLES_65 0x20), phase_inc includes its TABLE_520 bit 0x80. MultiCore keeps no copy for libraries (svc_board.h: this library keeps its own).
 static const struct {
@@ -1266,7 +1266,7 @@ static void write_sid_sockets(void)
     HW_WR(c64_sid_sock_socket2_en, V(K_S2_EN) ? 1 : 0);
 }
 
-// The reSID8 filter (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the TOML A's block resid8, a core block (Alex's
+// The reSID8 filter (TREX/1541ultimate:software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the TOML A's block resid8, a core block (Alex's
 // split, U18 §5 2026-11-24: the SID settings are this library's, so no filter call of the SID library is needed), written only when ident's caps3 says
 // the SID is the 8-SID reDIP.
 static bool trx_resid8(void)

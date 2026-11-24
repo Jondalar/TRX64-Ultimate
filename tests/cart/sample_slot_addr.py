@@ -7,7 +7,7 @@ each ball reads 0 and how often A12-A15 differ from 1111.
     ~/.cache/1541ultimate-tools/jtag-venv/bin/python tests/cart/sample_slot_addr.py N out.json
 """
 import sys, json, time
-sys.path.insert(0, "/Users/alex/Development/1541ultimate-tools/tooling")
+sys.path.insert(0, "~/Development/1541ultimate-tools/tooling")
 import u64ii_bscan as bs
 
 BALLS = {"V19": "A12", "U20": "A13", "U17": "A14", "T18": "A15",

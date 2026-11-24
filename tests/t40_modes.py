@@ -13,7 +13,7 @@ For every mode, while a probe at $C000 runs (started once, with SYS 49152):
   - SID voice 1 (triangle, frequency register 0x1CD6 = 440 Hz at PAL's phi2)
     in the UDP audio stream: the pitch follows phi2 (x 1.038 at 60 Hz modes);
   - one UDP video frame: its height (272 at 50 Hz, 240 at 60 Hz).
-Needs the board on TRX64_HOST (default 192.168.242.189) with a test
+Needs the board on TRX64_HOST (default 192.0.2.189) with a test
 bitstream and the app; numpy for the pitch.
 """
 import json
@@ -25,7 +25,7 @@ import time
 import urllib.parse
 import urllib.request
 
-HOST = os.environ.get("TRX64_HOST", "192.168.242.189")
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FS = 48003.07                       # our audio frame rate (T25.3, mode independent)
 PHI2 = {"PAL": 50e6 * 56.75 / 90 / 32, "NTSC": 50e6 * 47.125 / 72 / 32,

@@ -10,7 +10,7 @@ label = "Write to Cartridge"
 app = "trex_crt"
 action = "write"
 
-# T228 R21: the tasks of FW's manifest (software/ultimate-app/apps/trex_crt/manifest.json: category "C64 Machine", "Dump Cartridge", "Cart Inspector", "Flash Cartridge"), shown as FW shows
+# T228 R21: the tasks of FW's manifest (TREX/1541ultimate:apps/trex_crt/manifest.json: category "C64 Machine", "Dump Cartridge", "Cart Inspector", "Flash Cartridge"), shown as FW shows
 # them: when trex_crt.u2a is in the apps folder. The apps' place of the core's menu is F7 (the tab "settings"), last, under no heading of their own (T212 D12).
 [[node]]
 anchor = "F7/settings"

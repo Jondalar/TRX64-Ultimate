@@ -3,9 +3,14 @@
 """Builds the flattened GitHub export of TRX64 Ultimate (docs/todo/T68.md).
 
 The GitHub repository Jondalar/TRX64-Ultimate holds exports of the tree, never
-the host repository's own history (that carries the ROMs): the submodule
-software/ultimate-app as a plain folder at its pinned commit, without
-Commodore's ROMs and the third-party test files. Up to 0.2.0 it was one commit
+the host repository's own history (that carries the ROMs up to U20 A6), without
+Commodore's ROMs (since A6 the tree has none: ci/roms.py fetches the bench ROMs,
+roms/README.md says from where). Gideon's pin constraints constraints/c64u.xdc
+go out as they are since A6 (D14); before, a link stood in their place. Up to U20 A5 (2026-11-24) the export also flattened the firmware
+submodule (Gideon's application, our fork) into a plain folder at its pinned
+commit and kept the third-party test files it carried back; since A5 the tree has no
+submodule, and a ref that still has one is refused: export it with this tool as
+of the last commit before A5 (u18 92645aeb). Up to 0.2.0 it was one commit
 and also kept back the working documents and the other project's name; since
 then (Alex, 2026-11-13) everything else goes out and each host commit is an
 export commit of its own (--replay). This script does that, checks the result
@@ -39,74 +44,26 @@ import tarfile
 import tempfile
 
 HOST_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP_PREFIX = "software/ultimate-app"
 DEFAULT_CLONE = os.path.expanduser("~/Development/TRX64-Ultimate-gh")
 GH_REPO = "Jondalar/TRX64-Ultimate"
 
 # ---------------------------------------------------------------- what stays out
 
-# Paths (file or directory) that never go into the export, host paths and app
-# paths alike. docs/todo/T68.md says why each one is here.
-EXCLUDE = [
-    # the submodule wiring: the application is a plain folder here
-    ".gitmodules",
-    # ROMs: Commodore content, replaced by a README that says where they are
-    "roms",
-    f"{APP_PREFIX}/roms",
-    # Gideon's C64U constraints, replaced by a link
-    "constraints/c64u.xdc",
-    # third-party test content the app carries at Gideon's paths
-    f"{APP_PREFIX}/tests/e2e/io/c64/jupiter_lander.crt",
-    f"{APP_PREFIX}/software/u64/default_chars.bin",
-    f"{APP_PREFIX}/software/ModPlayer_16k/module.bin",
-    f"{APP_PREFIX}/target/pc/linux/iecdrive/_261763_8_gc.d64",
-]
+# Paths (file or directory) that never go into the export. docs/todo/T68.md says
+# why each one is here. Empty since U20 A6: the ROMs are not tracked any more and
+# constraints/c64u.xdc goes out (D14: Gideon posted it in his GPL-3 project's
+# issue #615, its header names that source).
+EXCLUDE = []
 
 EXCLUDE_GLOBS = [
     "**/.DS_Store",
+    # ROMs: Commodore content. The tree tracks none since U20 A6 (.gitignore); a ROM image never goes out.
+    "roms/*.bin",
 ]
 
 # ------------------------------------------------------------- what takes its place
 
-_GIDEON_SAME_PATH = """# {name}
-
-Not in this repository (Commodore or third-party content). Gideon Zweijtzer's 1541ultimate
-repository carries it at the same path:
-https://github.com/GideonZ/1541ultimate/blob/master/{app_path}
-"""
-
-PLACEHOLDERS = {
-    "roms/README.md": """# ROMs
-
-No ROMs are in this repository. The simulations expect the stock C64 and 1541-II ROMs here
-(`basic.901226-01.bin`, `kernal.901227-03.bin`, `characters.901225-01.bin`, `1541-ii.bin`).
-They come with VICE (https://vice-emu.sourceforge.io/, its `data/C64` and `data/DRIVES`) and are in
-Gideon Zweijtzer's 1541ultimate repository: https://github.com/GideonZ/1541ultimate/tree/master/roms
-""",
-    "constraints/c64u.xdc.md": """# c64u.xdc
-
-Gideon Zweijtzer's pin constraints for the C64 Ultimate / Ultimate 64 Elite II, not in this repository.
-He published them in https://github.com/GideonZ/1541ultimate/issues/615#issuecomment-3853426291 .
-The builds read `designs/*/pins.xdc`, not this file.
-""",
-    f"{APP_PREFIX}/roms/README.md": """# ROMs
-
-No ROMs are in this repository. The application's ROM files (Commodore and cartridge ROMs) are in
-Gideon Zweijtzer's 1541ultimate repository, at the same path:
-https://github.com/GideonZ/1541ultimate/tree/master/roms
-The Commodore ROMs also come with VICE (https://vice-emu.sourceforge.io/).
-""",
-}
-
-for _p in (
-    "tests/e2e/io/c64/jupiter_lander.crt",
-    "software/u64/default_chars.bin",
-    "software/ModPlayer_16k/module.bin",
-    "target/pc/linux/iecdrive/_261763_8_gc.d64",
-):
-    PLACEHOLDERS[f"{APP_PREFIX}/{_p}.md"] = _GIDEON_SAME_PATH.format(
-        name=os.path.basename(_p), app_path=_p
-    )
+PLACEHOLDERS = {}
 
 # ------------------------------------------------------------------- the rewrites
 
@@ -175,24 +132,29 @@ def public_env():
 
 # ----------------------------------------------------------------------- staging
 
+def gitlinks(ref):
+    """The submodule paths (gitlinks) of the tree at `ref`."""
+    out = run(["git", "-C", HOST_REPO, "ls-tree", "-r", ref])
+    return [line.split("\t", 1)[1] for line in out.splitlines() if line.startswith("160000 ")]
+
+
 def stage(ref, stage_dir):
-    """The export tree as it should be, before the checks: both repositories'
-    tracked files at `ref` and at the commit `ref` pins the submodule to."""
-    app_commit = run(["git", "-C", HOST_REPO, "rev-parse", "%s:%s" % (ref, APP_PREFIX)])
-    app_repo = os.path.join(HOST_REPO, APP_PREFIX)
+    """The export tree as it should be, before the checks: the tracked files at `ref`.
+    A ref with a submodule is refused (see the top of this file)."""
+    subs = gitlinks(ref)
+    if subs:
+        raise Fail("%s has the submodule %s: export it with this tool as of u18 92645aeb, the last "
+                   "commit before U20 A5, which flattens it" % (ref, ", ".join(subs)))
     with tempfile.TemporaryDirectory() as tmp:
-        for repo, rev, dest in ((HOST_REPO, ref, stage_dir),
-                                (app_repo, app_commit, os.path.join(stage_dir, APP_PREFIX))):
-            tar = os.path.join(tmp, "x.tar")
-            with open(tar, "wb") as fh:
-                r = subprocess.run(["git", "-C", repo, "archive", "--format=tar", rev],
-                                   stdout=fh, stderr=subprocess.PIPE, text=True, check=False)
-            if r.returncode != 0:
-                raise Fail("git archive %s failed: %s" % (rev, (r.stderr or "").strip()))
-            os.makedirs(dest, exist_ok=True)
-            with tarfile.open(tar) as tf:
-                tf.extractall(dest)
-    return app_commit
+        tar = os.path.join(tmp, "x.tar")
+        with open(tar, "wb") as fh:
+            r = subprocess.run(["git", "-C", HOST_REPO, "archive", "--format=tar", ref],
+                               stdout=fh, stderr=subprocess.PIPE, text=True, check=False)
+        if r.returncode != 0:
+            raise Fail("git archive %s failed: %s" % (ref, (r.stderr or "").strip()))
+        os.makedirs(stage_dir, exist_ok=True)
+        with tarfile.open(tar) as tf:
+            tf.extractall(stage_dir)
 
 
 def drop_excluded(stage_dir):
@@ -220,61 +182,6 @@ def write_placeholders(stage_dir):
         with open(p, "w") as fh:
             fh.write(text)
     return sorted(PLACEHOLDERS)
-
-
-_SUBMODULE_NOTE = """# {name}
-
-This folder is empty in this repository. The export is a flat tree: it carries the files of the
-application, not the submodules the application pins, and not their history. What belongs here is one
-commit of someone else's repository:
-
-| | |
-|---|---|
-| Repository | {url} |
-| Commit | `{sha}` |
-
-To build the application, put that commit in place. From the root of this repository:
-
-```sh
-git clone {url} {path}
-git -C {path} checkout {sha}
-```
-"""
-
-
-def write_submodule_notes(stage_dir, app_commit):
-    """A README.md in every empty submodule folder of the application, naming the
-    repository and the commit it pins. Without it the export says where lwIP comes
-    from (the application's .gitmodules is exported) but not which state, and a
-    reader has nothing but the other repository's master to guess with."""
-    app_repo = os.path.join(HOST_REPO, APP_PREFIX)
-    try:
-        cfg = run(["git", "-C", app_repo, "show", "%s:.gitmodules" % app_commit])
-    except Fail:
-        return []
-    subs, path = [], None
-    for line in cfg.splitlines():
-        line = line.strip()
-        if line.startswith("path ="):
-            path = line.split("=", 1)[1].strip()
-        elif line.startswith("url =") and path:
-            url = line.split("=", 1)[1].strip()
-            subs.append((path, url.replace("http://github.com", "https://github.com")))
-            path = None
-    written = []
-    for sub, url in subs:
-        entry = run(["git", "-C", app_repo, "ls-tree", app_commit, sub])
-        if not entry.startswith("160000"):
-            continue
-        sha = entry.split()[2]
-        rel = "%s/%s/README.md" % (APP_PREFIX, sub)
-        full = os.path.join(stage_dir, rel)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w") as fh:
-            fh.write(_SUBMODULE_NOTE.format(name=os.path.basename(sub), url=url, sha=sha,
-                                            path="%s/%s" % (APP_PREFIX, sub)))
-        written.append(rel)
-    return sorted(written)
 
 
 def apply_rewrites(stage_dir):
@@ -416,24 +323,22 @@ def digest(stage_dir):
 
 
 def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes_out=None):
-    """Stage the export of `ref` into stage_dir and run the checks. Returns (app commit, the
-    report lines of every check that failed); an empty list means the tree may go out. With
+    """Stage the export of `ref` into stage_dir and run the checks. Returns the report lines
+    of every check that failed; an empty list means the tree may go out. With
     notes_out (a list), dead links are collected there instead of failing the export: a replay
     passes it for the commits before the last, whose history may link ahead to a file a later
     commit adds."""
     host_rev = run(["git", "-C", HOST_REPO, "rev-parse", "--short", ref])
-    app_commit = stage(ref, stage_dir)
+    stage(ref, stage_dir)
     dropped = drop_excluded(stage_dir)
     write_placeholders(stage_dir)
-    notes = write_submodule_notes(stage_dir, app_commit)
     errors = apply_rewrites(stage_dir)
     stripped = strip_links_to_excluded(stage_dir)
 
     files = sum(1 for _ in walk(stage_dir))
-    out("export of host %s, app %s: %d files, %d paths left out, %d placeholders, "
-        "%d submodule notes, %d rewrites, %d links stripped"
-        % (host_rev, app_commit[:8], files, len(dropped), len(PLACEHOLDERS),
-           len(notes), len(REWRITES), len(stripped)))
+    out("export of host %s: %d files, %d paths left out, %d placeholders, "
+        "%d rewrites, %d links stripped"
+        % (host_rev, files, len(dropped), len(PLACEHOLDERS), len(REWRITES), len(stripped)))
 
     problems = []
     if errors:
@@ -452,7 +357,7 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes
     if bins:
         problems.append("binary files the last export did not have (%d):" % len(bins))
         problems += ["  " + b for b in bins[:40]]
-    return app_commit, problems
+    return problems
 
 
 # ------------------------------------------------------------------- the replay
@@ -471,7 +376,7 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes
 
 BASE_MESSAGE = """Specs, ADRs, the task list and the notes, as of {host}
 
-Export of TRX64 Ultimate {host} (application {app}).
+Export of TRX64 Ultimate {host}.
 
 Until 0.2.0 the export kept the working documents back (docs/specs,
 docs/adr, docs/todo, TODO.md, the maintainer's notes) and anything that
@@ -482,14 +387,14 @@ commits after it are the host commits one by one.
 """
 
 
-def export_message(parts, hosts, app_commit):
+def export_message(parts, hosts):
     """The message of one export commit: the messages of the host commits it carries (oldest first),
     with the line that names them after the first subject."""
     msgs = [m.strip() for m in parts if m.strip()]
     if not msgs:
         raise Fail("no message for the export of %s" % ", ".join(hosts))
     first = msgs[0].split("\n", 1)
-    line = "Export of TRX64 Ultimate %s (application %s)." % (", ".join(hosts), app_commit[:8])
+    line = "Export of TRX64 Ultimate %s." % ", ".join(hosts)
     head = first[0] + "\n\n" + line
     rest = [first[1].strip()] if len(first) > 1 and first[1].strip() else []
     return "\n\n".join([head] + rest + msgs[1:]) + "\n"
@@ -522,8 +427,8 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
     made = []
     stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
     try:
-        app_commit, problems = build_export(since, stage_dir, clone_dir, allow_new_binaries,
-                                            out=lambda *_: None)
+        problems = build_export(since, stage_dir, clone_dir, allow_new_binaries,
+                                out=lambda *_: None)
         if problems:
             raise Fail("the export of %s does not pass the checks:\n%s" % (since, "\n".join(problems)))
         sync(stage_dir, clone_dir)
@@ -531,7 +436,7 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
         shutil.rmtree(stage_dir, ignore_errors=True)
     if run(["git", "-C", clone_dir, "status", "--short"]):
         host = run(["git", "-C", HOST_REPO, "rev-parse", "--short=7", since])
-        commit_export(clone_dir, BASE_MESSAGE.format(host=host, app=app_commit[:8]), since)
+        commit_export(clone_dir, BASE_MESSAGE.format(host=host), since)
         made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
         print("  %s  -> %s" % (host, made[-1]))
     pending, skipped, folded = [], [], []
@@ -541,9 +446,9 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
         stage_dir = tempfile.mkdtemp(prefix="trx64-gh-replay-")
         dead = []
         try:
-            app_commit, problems = build_export(sha, stage_dir, clone_dir, allow_new_binaries,
-                                                out=lambda *_: None,
-                                                notes_out=dead if i < len(commits) - 1 else None)
+            problems = build_export(sha, stage_dir, clone_dir, allow_new_binaries,
+                                    out=lambda *_: None,
+                                    notes_out=dead if i < len(commits) - 1 else None)
             for d in dead:
                 print("  %s  note: %s (as in the host commit itself)" % (short, d))
             if problems:
@@ -562,7 +467,7 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
             pending = []
             continue
         hosts = [h for h, _ in pending] + [short]
-        commit_export(clone_dir, export_message([m for _, m in pending] + [msg], hosts, app_commit), sha)
+        commit_export(clone_dir, export_message([m for _, m in pending] + [msg], hosts), sha)
         made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
         print("  %s  -> %s" % (short, made[-1]))
         pending = []
@@ -612,7 +517,7 @@ def main():
     try:
         if not args.check:
             ensure_clone(clone_dir)
-        app_commit, problems = build_export(args.ref, stage_dir, clone_dir, args.allow_new_binaries)
+        problems = build_export(args.ref, stage_dir, clone_dir, args.allow_new_binaries)
         if problems:
             print("\n" + "\n".join(problems))
             print("\nnothing was changed. Fix the report above (a rewrite rule in %s, or a path "
@@ -632,8 +537,7 @@ def main():
             return 0
         print("\n" + status)
         run(["git", "-C", clone_dir, "add", "-A"])
-        body = "%s\n\nExport of TRX64 Ultimate %s (application %s).\n" % (
-            args.message, host_rev, app_commit[:8])
+        body = "%s\n\nExport of TRX64 Ultimate %s.\n" % (args.message, host_rev)
         run(["git", "-C", clone_dir, "commit", "-q", "-m", body], env=public_env())
         print("\ncommitted in %s: %s" % (clone_dir,
                                          run(["git", "-C", clone_dir, "log", "--oneline", "-1"])))

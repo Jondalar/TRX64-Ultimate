@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.h, T104.2 UI; the branch for products without the ring is gone (U18).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_c64re.h, T104.2 UI; the branch for products without the ring is gone (U18).
 // .c64re and .c64rering files from the TRX64 Ultimate frame ring
 // (TRX64-Ultimate docs/specs/T20-delta-ring.md §9, §10; the container and node
 // shapes are TRX64's: crates/trx64-core/src/native_snapshot.rs,

@@ -1,4 +1,4 @@
-// The two tables the library exports (LibRecord::export_list, lib_ring.cc). "ring", major 1: the firmware's u2p_ring_api_t (software/ultimate-app/software/
+// The two tables the library exports (LibRecord::export_list, lib_ring.cc). "ring", major 1: the firmware's u2p_ring_api_t (TREX/1541ultimate:software/
 // app_loader/app_api.h) as the firmware lays it out and fills it (app_api_net.cc s_ring), nothing behind it; the monitor and trex_crt get it with
 // api->lib->find("ring", U2A3_VERSION(1, 0), &size). "ringsteps", major 1: the dumps in steps (ring_steps.h RingSteps), which the monitor gets with
 // api->lib->find("ringsteps", U2A3_VERSION(1, 0), &size). Each table has its size first and is only appended to within its major.

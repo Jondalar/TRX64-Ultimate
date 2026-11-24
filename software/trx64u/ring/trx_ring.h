@@ -17,7 +17,7 @@
 // (CAPS b2) every call refuses and nothing touches the hardware.
 #ifndef TRX_RING_H
 #define TRX_RING_H
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring.h, plus trx_ring_engine_init(), ring_autostart (T104.2 UI)
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_ring.h, plus trx_ring_engine_init(), ring_autostart (T104.2 UI)
 // and trx_ring_engine_poll() (U18: the library's poll); the branch for products without the ring is gone.
 
 #include <stdint.h>

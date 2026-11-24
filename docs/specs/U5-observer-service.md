@@ -240,7 +240,7 @@ Milestone M2, status 🔨. Open (one line, as in the TODO table): built; board t
   it describes (`main` after U5, host `5021852`, app `8b915e6f`, package `main-50218525`) and says the
   screenshots come from the `b151154b` package, the REST row names the one app action that is left
   (`softboot` `run`), the discovery row drops "while it serves", and the differences chapter says the
-  monitor sits in the firmware. The architecture page (`https://claude.ai/artifact/367eAB5hipPpN4u2fVj4Vj`,
+  monitor sits in the firmware. The architecture page (`(a private page)`,
   version 18) carries the same in its tester overview, three applications instead of four, and the final
   sheet now shows the service and its 2 MB DDR2 window. Four spots in the code that still belonged to the
   app were found while reading; they are the next bullet.

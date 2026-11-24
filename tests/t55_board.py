@@ -12,7 +12,8 @@ shows cannot be read back, so its keys are checked by what they do to the machin
   --package VER  load the bitstream (tools/load.sh c64_basic VER) and boot that package's ultimate.app
                  (tools/trxdbg.sh boot staged), then wait for REST. Needs the USB-Blaster. After an app
                  crash or hang this is the only way back (never power-cycle).
-  --app FILE     (default: software/ultimate-app/apps/trxmon/trxmon.u2a, the container build) upload FILE to /USB1/trxmon_t55.u2a (FTP) and start it headless over REST
+  --app FILE     a trxmon.u2a (the Gideon-app line builds it: fork TREX/1541ultimate apps/trxmon; no default since the
+                 firmware submodule left this tree, U20 A5) upload FILE to /USB1/trxmon_t55.u2a (FTP) and start it headless over REST
                  (PUT /v1/apps:run_file?app=/Usb1/trxmon_t55.u2a&action=serve): nothing is registered,
                  nothing is written to the flash. Without it a running trxmon is used, else the
                  registered one is started.
@@ -42,7 +43,7 @@ sys.path.insert(0, HERE)
 from trxmon_client import Client, TrxmonError  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
-HOST = "192.168.242.189"
+HOST = "192.0.2.189"
 USB_APP = "/Usb1/trxmon_t55.u2a"
 REU_PATH = "/v1/configs/C64%20and%20Cartridge%20Settings/RAM%20Expansion%20Unit"
 
@@ -124,7 +125,7 @@ def tea_token():
 def load_package(version):
     """Bitstream into SRAM, then the package's firmware staged in DDR2 (the boot ROM starts it)."""
     tmp = "/tmp/t55_board_%s.app" % version
-    url = "http://gitea.fritz.box/api/packages/TREX/generic/trx64-ultimate/%s/ultimate.app" % version
+    url = "http://gitea.example/api/packages/TREX/generic/trx64-ultimate/%s/ultimate.app" % version
     req = urllib.request.Request(url, headers={"Authorization": "token " + tea_token()})
     open(tmp, "wb").write(urllib.request.urlopen(req, timeout=120).read())
     for cmd in (["tools/load.sh", "c64_basic", version], ["tools/trxdbg.sh", "boot", "staged", tmp]):
@@ -1038,14 +1039,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("host", nargs="?", default=HOST)
     ap.add_argument("--package")
-    ap.add_argument("--app", default=os.path.join(ROOT, "software/ultimate-app/apps/trxmon/trxmon.u2a"))
+    ap.add_argument("--app")
     ap.add_argument("--demo", action="store_true", help="live-log demo for the HDMI screen, then leave the screen up (no checks)")
     ap.add_argument("--only")
     ap.add_argument("--skip")
     args = ap.parse_args()
     HOST = args.host
     if args.app and not os.path.exists(args.app):
-        args.app = None  # no build here: the registered trxmon is used
+        ap.error("--app %s: no such file" % args.app)
     only = set(args.only.split(",")) if args.only else None
     skip = set(args.skip.split(",")) if args.skip else set()
     if args.demo:

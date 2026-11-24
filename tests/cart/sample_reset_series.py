@@ -6,7 +6,7 @@ Gideon's core (read-only boundary scan; the reset goes through REST).
     ~/.cache/1541ultimate-tools/jtag-venv/bin/python tests/cart/sample_reset_series.py SECONDS out.json [host]
 """
 import sys, json, time, threading, urllib.request
-sys.path.insert(0, "/Users/alex/Development/1541ultimate-tools/tooling")
+sys.path.insert(0, "~/Development/1541ultimate-tools/tooling")
 import u64ii_bscan as bs
 
 BALLS = {"V17": "GAMEn", "W17": "EXROMn", "W9": "ROMLn", "Y8": "ROMHn",
@@ -14,7 +14,7 @@ BALLS = {"V17": "GAMEn", "W17": "EXROMn", "W9": "ROMLn", "Y8": "ROMHn",
          "P20": "RST_I", "D16": "ADDROEn"}
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 6
 out = sys.argv[2] if len(sys.argv) > 2 else "reset_series.json"
-host = sys.argv[3] if len(sys.argv) > 3 else "192.168.242.189"
+host = sys.argv[3] if len(sys.argv) > 3 else "192.0.2.189"
 bsdl = bs.load_bsdl(bs.DEFAULT_BSDL)
 cable = bs.Blaster.open()
 rows = []

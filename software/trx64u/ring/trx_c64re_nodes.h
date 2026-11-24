@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re_nodes.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_c64re_nodes.h, copied for the ring library (U18 D6: this copy is the master).
 // A chip block built from a .c64re's own nodes, for a file this board did not
 // write (TRX64-Ultimate docs/specs/T20-delta-ring.md §9.4 second case, T66
 // part 4). The exact case - a file with a "trx64Hw" node - does not come

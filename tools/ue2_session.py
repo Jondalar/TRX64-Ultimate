@@ -57,7 +57,7 @@ APP_AT = 0x3C0000                   # app slot of the 100T (boot ROM type 3, T15
 APP_LIMIT = 0x580000                # 0x3C0000 + 0x1C0000; the FAT flash drive starts here
 FORBIDDEN = {"--unprotect-flash", "--protect-flash", "--bulk-erase", "--enable-quad", "--disable-quad",
              "--target-flash", "--external-flash", "--flash-sector", "--misc-device"}
-GITEA_URLS = [os.environ.get("GITEA_URL", "http://gitea.fritz.box"), "http://192.168.242.50"]
+GITEA_URLS = [os.environ.get("GITEA_URL", "http://gitea.example"), "http://192.0.2.50"]
 PKG_PATH = "/api/packages/TREX/generic/trx64-ultimate"
 PKG_FILES = ["c64_basic_100t.bit", "ultimate.app", "manifest.json", "manifest_100t.json", "SHA256SUMS"]
 NICE = ["nice", "-n", "15"]

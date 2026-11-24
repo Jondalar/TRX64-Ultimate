@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_inflate.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_inflate.h, copied for the ring library (U18 D6: this copy is the master).
 // DEFLATE (RFC 1951) and gzip (RFC 1952) for the RISC-V: the board writes
 // .c64re files with stored blocks only (no compressor), but TRX64 writes them
 // with flate2, so loading a file from the emulator needs a real inflate

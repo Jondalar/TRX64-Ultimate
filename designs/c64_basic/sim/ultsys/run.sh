@@ -10,6 +10,6 @@ nice -n 15 sh "$here/build.sh"
 cd "$here/build/run"
 # the boot (cold start to READY, ~90 s) comes from the CI's boot-state cache when the model binary and what
 # the boot reads are unchanged (ci/bootstate.sh); without /cache it boots every time
-nice -n 15 "$root/ci/bootstate.sh" -b ../tb_ultsys -k cores -k roms -k designs/c64_basic/mem -k tools/rom2mem.py \
+nice -n 15 "$root/ci/bootstate.sh" -b ../tb_ultsys -k cores -k ci/roms.txt -k designs/c64_basic/mem -k tools/rom2mem.py \
     -s ../tb.state ultsys -- ../tb_ultsys boot ../tb.state
 nice -n 15 ../tb_ultsys run ../tb.state

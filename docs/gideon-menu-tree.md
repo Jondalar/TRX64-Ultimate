@@ -683,26 +683,29 @@ Diese Fragen sollten vor dem visuellen Design entschieden werden:
 
 ## 12. Quellen im aktuellen Quellstand
 
+Seit U20 A5 (2026-11-24) liegt `software/ultimate-app` nicht mehr in diesem Baum, sondern auf dem Gitea-Zweig
+`gideon-app`; die Pfade unten gelten dort (Fork `TREX/1541ultimate`), darum sind es keine Links mehr.
+
 - M2-Aufgaben: [`../TODO.md`](../TODO.md)
 - T24-Spezifikation: [`specs/T24-lvgl-ui.md`](specs/T24-lvgl-ui.md)
 - Auswahl Ultimate-/Commodore-Startoberfläche:
-  [`../software/ultimate-app/software/application/ultimate/ultimate.cc`](../software/ultimate-app/software/application/ultimate/ultimate.cc)
+  `../software/ultimate-app/software/application/ultimate/ultimate.cc`
 - Commodore-Hauptmenü:
-  [`../software/ultimate-app/software/userinterface/commodore_menu.cc`](../software/ultimate-app/software/userinterface/commodore_menu.cc)
+  `../software/ultimate-app/software/userinterface/commodore_menu.cc`
 - Dateibrowser und Tastenbelegung:
-  [`../software/ultimate-app/software/userinterface/tree_browser.cc`](../software/ultimate-app/software/userinterface/tree_browser.cc)
+  `../software/ultimate-app/software/userinterface/tree_browser.cc`
 - Datei-Kontextaktionen:
-  [`../software/ultimate-app/software/userinterface/user_file_interaction.cc`](../software/ultimate-app/software/userinterface/user_file_interaction.cc)
+  `../software/ultimate-app/software/userinterface/user_file_interaction.cc`
 - Globales Aktionsmenü:
-  [`../software/ultimate-app/software/userinterface/task_menu.cc`](../software/ultimate-app/software/userinterface/task_menu.cc)
+  `../software/ultimate-app/software/userinterface/task_menu.cc`
 - Settings-Baum:
-  [`../software/ultimate-app/software/userinterface/config_menu.h`](../software/ultimate-app/software/userinterface/config_menu.h)
+  `../software/ultimate-app/software/userinterface/config_menu.h`
 - C64-Aktionen:
-  [`../software/ultimate-app/software/io/c64/c64_subsys.cc`](../software/ultimate-app/software/io/c64/c64_subsys.cc)
+  `../software/ultimate-app/software/io/c64/c64_subsys.cc`
 - Laufwerksaktionen:
-  [`../software/ultimate-app/software/drive/c1541.cc`](../software/ultimate-app/software/drive/c1541.cc)
+  `../software/ultimate-app/software/drive/c1541.cc`
 - Dateityp-Aktionen:
-  [`../software/ultimate-app/software/filetypes/`](../software/ultimate-app/software/filetypes/)
+  `../software/ultimate-app/software/filetypes/`
 
 
 ---

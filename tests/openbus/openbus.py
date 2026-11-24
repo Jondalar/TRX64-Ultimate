@@ -17,7 +17,7 @@ C64 returns the VIC's byte of the phi1 before the read (one of the three bytes);
 returns $A5. Prints one histogram and a verdict per case."""
 import os, sys, time, json, urllib.parse, urllib.request
 
-IP = os.environ.get("TM_IP", "192.168.242.189")
+IP = os.environ.get("TM_IP", "192.0.2.189")
 BASE = f"http://{IP}/v1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRG = os.path.join(HERE, "openbus.prg")

@@ -26,7 +26,7 @@ output, the UI, ABI and REST stay as specified here. Parts that are gone are mar
 
 Marks used below:
 
-- **[TRX64 …]**: copied or adapted from our emulator, `/Users/alex/Development/C64/Tools/TRX64`.
+- **[TRX64 …]**: copied or adapted from our emulator, `~/Development/C64/Tools/TRX64`.
   The verb set, its syntax and its output are TRX64's; this spec changes what implements them,
   not what they mean.
 - **[new]**: specific to the FPGA, nothing to copy.
@@ -1036,7 +1036,7 @@ Plus the field and bit names. A thin layer on top of it is the `MonitorHost` of 
 
 Decision (Alex, 2026-10-02): the monitor is reached from outside through **the same
 contract C64RE uses against the TRX64 emulator**, 1:1, so C64RE drives the C64U without
-code changes in its core. Contract source (TRX64 v0.12.1, `/Users/alex/Development/C64/Tools/TRX64`):
+code changes in its core. Contract source (TRX64 v0.12.1, `~/Development/C64/Tools/TRX64`):
 WebSocket JSON-RPC 2.0 on `ws://host:4312`, dispatch in
 `crates/trx64-daemon/src/main.rs:6501ff`, reference `docs/wl-trx64-play-api.md`, monitor
 verbs `crates/trx64-monitor/src/verbs.rs` and `MONITOR.md`; C64RE's client is

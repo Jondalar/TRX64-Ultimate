@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_ring_recs.h, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_ring_recs.h, copied for the ring library (U18 D6: this copy is the master).
 // Moving a run of log records between a file and one of the engine's DDR2
 // areas (T20 §10.2, T66 part 6). Two things make this more than a memcpy:
 //

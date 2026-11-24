@@ -51,7 +51,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-HOST = os.environ.get("TRX64_HOST", "192.168.242.189")
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 VICE = Path(os.environ.get("VICE_TESTPROGS", Path.home() / "Development/C64/Tools/vice/testprogs"))
 CACHE = ROOT / ".cache" / "vice_testprogs"
 

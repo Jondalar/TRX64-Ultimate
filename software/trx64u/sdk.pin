@@ -2,7 +2,6 @@
 # unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore's branch t239.3 (their D26: we take
 # it from there); their builds are in that repository's .ci/sdk/ and in their pipeline's artifacts, which expire.
 # A copy of the pinned tarball is in our registry under sdk_package (TREX, generic); fetch_sdk.sh --download takes it there.
-# trx64g.cor is packed with this SDK's tools/cor_pack.py too (software/trx64g/pack_large_cor.sh, MultiCore T239.3 D46).
 # DEV BUILD: 0.4.6 (base 3.4) from MultiCore's branch t239.3, commit 6e280710 (on their remote), not a release: what 0.4.5 had (D11's frame()
 # and still_palette, D37's icap and partition, D36's audio_master, T256's canvas()), and T239.3 D48-D50: the UCI server left the base (its sources
 # came over once in handover/uci/, now our uci/), the shared c64cart driver drops the cartridge's cached lines after each ram_write and image_write,

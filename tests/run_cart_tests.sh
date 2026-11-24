@@ -3,7 +3,7 @@
 # tests/cart (cartridge flash and EEPROM write-back) with the JTAG venv (pyftdi),
 # see tools/trxdbg.sh. Puts the test CRTs on the board over FTP, then runs them.
 #   tests/run_cart_tests.sh [easyflash_eapi] [flash_amd] [gmod2_eeprom]   (default: all)
-# TRX64_HOST (default 192.168.242.189) and TRX64_CART_DIR (default trx64-cart on the first USB drive)
+# TRX64_HOST (default 192.0.2.189) and TRX64_CART_DIR (default trx64-cart on the first USB drive)
 # pick the board and the directory on its storage.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

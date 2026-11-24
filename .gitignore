@@ -19,3 +19,5 @@ out/
 out-ue2/
 .ci/
 build_100t/
+# the bench ROMs, fetched by ci/roms.py from the pins of ci/roms.txt (U20 A6); never tracked
+/roms/*.bin

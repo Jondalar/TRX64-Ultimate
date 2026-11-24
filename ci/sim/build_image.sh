@@ -8,11 +8,11 @@
 # the workflow when the Dockerfile changes. Nothing is installed on the NAS file
 # system: the build context is a temporary directory that is removed again.
 set -euo pipefail
-NAS="${TRX_NAS:-admin@192.168.242.2}"
-DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+NAS="${TRX_NAS:-admin@192.0.2.2}"
+DOCKER=/srv/.qpkg/container-station/bin/docker
 TAG="${1:-4}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TMP=/share/CACHEDEV2_DATA/sim-image-build
+TMP=/srv/sim-image-build
 
 ssh "$NAS" "rm -rf '$TMP' && mkdir -p '$TMP'"
 scp -q "$HERE/Dockerfile" "$NAS:$TMP/Dockerfile"

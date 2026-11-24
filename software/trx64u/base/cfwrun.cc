@@ -23,9 +23,9 @@
 #define UPD_RECORDS_MAX 8
 #define UPD_CHUNK 32768u
 // The product family of the board this library runs on. trx64u runs only on c64_basic, the bitstream of the C64 Ultimate board; the `.cfw` files that
-// update that board name this family in their pre-header and no product (tools/trx_pkg_check.py checks exactly that), and Gideon's update check on the
-// board compares the field with getProductFamily(). The base API gives no product family (SvcBoard has none); the product name is the base's state
-// "diag.board" (getProductString).
+// update that board name this family in their pre-header and no product (the update line's trx_pkg_check.py checks exactly that; it is on the Gitea
+// branch gideon-app since U20 A5), and Gideon's update check on the board compares the field with getProductFamily(). The base API gives no product
+// family (SvcBoard has none); the product name is the base's state "diag.board" (getProductString).
 #define UPD_BOARD_FAMILY "U64MK2"
 
 namespace {

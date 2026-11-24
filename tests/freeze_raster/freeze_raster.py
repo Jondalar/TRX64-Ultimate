@@ -226,7 +226,7 @@ def splits(w, h, px):
 
 
 def main(argv):
-    host = os.environ.get("TRX64_HOST", "192.168.242.189")
+    host = os.environ.get("TRX64_HOST", "192.0.2.189")
     freezes, hold, video_on = 10, 2.0, True
     i = 0
     while i < len(argv):

@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_trxring.h, ported for the ring library (U18 D6: this copy is the master); the
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_trxring.h, ported for the ring library (U18 D6: this copy is the master); the
 // branch for products without the ring is gone. The code is trxring.cc.
 // .trxring - the frame ring itself in a file, this board only
 // (TRX64-Ultimate docs/specs/T20-delta-ring.md §10.2, T66 part 6). A .c64re

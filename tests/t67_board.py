@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """T67 board test: the app registry follows the files (app doc/AppLoader_Spec.md section 3.5).
 
-    python3 tests/t67_board.py [--host 192.168.242.189] [--no-boot]
+    python3 tests/t67_board.py [--host 192.0.2.189] [--no-boot]
 
 Needs the board booted with an app that has the T67 fix, ethernet REST + FTP, and tools/trxdbg.sh
 (JTAG, to restart the app: "boot staged" of --app). Only /Flash/apps, /Flash/config/apps.json and
@@ -126,7 +126,7 @@ def alive(host):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="192.168.242.189")
+    ap.add_argument("--host", default="192.0.2.189")
     ap.add_argument("--app", default="/tmp/b/ultimate.app")
     ap.add_argument("--backup", default=os.path.expanduser("~/.claude/jobs/259f244b/tmp/t67-backup"))
     ap.add_argument("--bit", default=BITSTREAM)

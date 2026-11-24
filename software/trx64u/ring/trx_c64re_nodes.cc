@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re_nodes.cc, copied for the ring library (U18 D6: this copy is the master).
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_c64re_nodes.cc, copied for the ring library (U18 D6: this copy is the master).
 // See trx_c64re_nodes.h.
 //
 // Every bit position below is read off the gateware, not off a comment:

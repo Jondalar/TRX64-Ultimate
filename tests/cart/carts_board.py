@@ -8,7 +8,7 @@ $AA) read with REST readmem and compared with what the simulation expects.
     carts.py --emit DIR [name ...]          (once, in designs/c64_basic/sim/cart)
     carts_board.py DIR [name ...]
 
-TRX64_HOST (default 192.168.242.189), TRX64_CART_DIR (default /USB1/t33). Uploads
+TRX64_HOST (default 192.0.2.189), TRX64_CART_DIR (default /USB1/t33). Uploads
 before every run: a flash test changes its image, and the app writes it back.
 Needs no JTAG.
 """
@@ -20,7 +20,7 @@ import time
 import urllib.parse
 import urllib.request
 
-HOST = os.environ.get("TRX64_HOST", "192.168.242.189")
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 BOARD_DIR = os.environ.get("TRX64_CART_DIR", "/USB1/t33")
 
 

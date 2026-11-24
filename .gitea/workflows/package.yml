@@ -33,7 +33,7 @@ jobs:
       # which never reaps, and Vivado's helper processes end up as zombies (runs 222, 225)
       options: --init
       volumes:
-        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+        - /srv/trx64-build/cache:/cache
     timeout-minutes: 10
     defaults:
       run:

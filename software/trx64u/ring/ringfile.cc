@@ -1,4 +1,4 @@
-// PROVENANCE: TRX64-Ultimate software/ultimate-app/software/io/c64/trx_c64re.cc and trx_drive.cc (.c64re and .c64rering from the frame ring, drive A's
+// PROVENANCE: the firmware fork TREX/1541ultimate:software/io/c64/trx_c64re.cc and trx_drive.cc (.c64re and .c64rering from the frame ring, drive A's
 // own state; GPL-3.0), ported for the ring library (U18 D6: this copy is the master). Changes: files through api->fs (RFile), memory through api->mem,
 // text through r_snprintf; what the firmware asks the machine (System Mode, cartridge, drive A, their files) comes from the source each entry builds
 // (ringmachine.cc, trx_c64re_source_begin), and a load builds the machine through that source's hooks; drive A's memory through the export "cbm1541";

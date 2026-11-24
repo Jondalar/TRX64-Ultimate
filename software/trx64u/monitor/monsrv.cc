@@ -1,4 +1,4 @@
-// The RPC server of the monitor library (monsrv.h). PROVENANCE: the network half of trxmon's main.c (software/ultimate-app/apps/trxmon/src; Gideon
+// The RPC server of the monitor library (monsrv.h). PROVENANCE: the network half of trxmon's main.c (TREX/1541ultimate:apps/trxmon/src; Gideon
 // Zweijtzer's firmware with the TRX64 line's additions, GPL-3.0) as MultiCore's core application had it in monsrv.cc (TRX64U-MultiCore 3b8e2955), here over
 // the base's net table (api->net) as main.c is over the firmware's. Changed against main.c: no blocking wait (the library's poll calls monsrv_poll), the
 // holder's buffers come from api->mem while it is connected, the confirmation gate (gate_refused); the dispatch is trxmon's rpc.c unchanged (srv_send,

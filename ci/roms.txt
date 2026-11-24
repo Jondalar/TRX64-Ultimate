@@ -1,0 +1,9 @@
+# ROM images the benches read (U20 D14, MultiCore T239.1 D12's form): public upstream files at a pinned commit, fetched by ci/roms.py, never
+# tracked here. The same bytes are in Gideon's 1541ultimate at 1ba94abd (roms/<the same name as here>), the commit vendor/gideon is copied from.
+# <sha256> <bytes> <path the bench reads> <benches, comma separated> <url at the pinned commit>
+# A line is changed only with its hash; this file is in the key of every bench that reads a ROM (ci/sims.deps @vcore; the others have the
+# whole tree's key, ci included). The C64 ROMs go through tools/rom2mem.py; drive and pause (not in ci/sims.txt) take the 1541-II ROM by hand.
+89878cea0a268734696de11c4bae593eaaa506465d2029d619c0e0cbccdfa62d 8192 roms/basic.901226-01.bin dbgsess,input,reu,ring_core,slot,statebus,steal,turbo,uci_core,ultsys https://raw.githubusercontent.com/VICE-Team/svn-mirror/4d283a2e7dd59b7e378524878e81ecc7826b700c/vice/data/C64/basic-901226-01.bin
+83c60d47047d7beab8e5b7bf6f67f80daa088b7a6a27de0d7e016f6484042721 8192 roms/kernal.901227-03.bin dbgsess,input,reu,ring_core,slot,statebus,steal,turbo,uci_core,ultsys https://raw.githubusercontent.com/VICE-Team/svn-mirror/4d283a2e7dd59b7e378524878e81ecc7826b700c/vice/data/C64/kernal-901227-03.bin
+fd0d53b8480e86163ac98998976c72cc58d5dd8eb824ed7b829774e74213b420 4096 roms/characters.901225-01.bin dbgsess,input,reu,ring_core,slot,statebus,steal,turbo,uci_core,ultsys https://raw.githubusercontent.com/VICE-Team/svn-mirror/4d283a2e7dd59b7e378524878e81ecc7826b700c/vice/data/C64/chargen-901225-01.bin
+326c289c38753323d7e8167897447cf61ef35189d82eb8d75210ece949adda7c 16384 roms/1541-ii.bin drive,pause https://raw.githubusercontent.com/VICE-Team/svn-mirror/4d283a2e7dd59b7e378524878e81ecc7826b700c/vice/data/DRIVES/dos1541ii-251968-03.bin

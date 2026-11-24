@@ -9,9 +9,6 @@
 #                            release/* branch; else no. Alex, 2026-10-03:
 #                            the 100T (UE2) is built "at the end, when the thing is
 #                            round", never on a normal push.
-#   ci/select.sh update      yes on integ-m1, main and tags v* (the tester update files are built for
-#                            every commit there), or when UPDATE_FORCE=true (dispatch input `update`, for
-#                            any other branch); else no.
 #
 # Read from GITHUB_REF_NAME, GITHUB_REF_TYPE, GITHUB_EVENT_NAME, UE2_INPUT (the
 # dispatch input; a called workflow does not see the caller's event inputs, so the
@@ -25,14 +22,12 @@ event="${GITHUB_EVENT_NAME:-}"
 release=no
 { [ "${GITHUB_REF_TYPE:-}" = tag ] || [[ "$ref" == release/* ]]; } && release=yes
 msg="${CI_MSG-$(git -C "$ROOT" log -1 --format=%B)}"
-case "${1:?sims-tier, ue2 or update}" in
+case "${1:?sims-tier or ue2}" in
   sims-tier)
     if [ "$ref" = main ] || [[ "$ref" == integ-* ]] || [ "$release" = yes ] || [ "$event" = workflow_dispatch ] || [[ "$msg" == *"[sims]"* ]]; then echo 2; else echo 1; fi ;;
   ue2)
     # UE2_INPUT is only ever true from a dispatch (a push has no such input); the event
     # name cannot be checked, a called workflow sees "workflow_call" there
     if [ "$release" = yes ] || [ "${UE2_INPUT:-}" = true ]; then echo yes; else echo no; fi ;;
-  update)
-    if [ "$ref" = integ-m1 ] || [ "$ref" = main ] || [ "${GITHUB_REF_TYPE:-}" = tag ] || [ "${UPDATE_FORCE:-}" = true ]; then echo yes; else echo no; fi ;;
   *) echo "unknown question $1" >&2; exit 2 ;;
 esac

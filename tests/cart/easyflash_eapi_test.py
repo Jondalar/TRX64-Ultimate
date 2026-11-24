@@ -7,7 +7,7 @@ the cartridge model is the same (cores/icepi/c64_cartridge.v with
 c64_flash_amd.v), the board harness is new. The bitstream's flash responder
 answers command sequences, autoselect and status itself and stops at every
 program or erase until the Ultimate app has applied it to the image in DDR2
-(software/ultimate-app, io/c64/trx_cart.cc); the app's auto-save task writes
+(fork TREX/1541ultimate, software/io/c64/trx_cart.cc); the app's auto-save task writes
 the changed image back to the .crt it was started from, 2 s after the last
 change (30 s at most), or before a reset.
 
@@ -103,7 +103,7 @@ PATTERN = bytes([0xA5, 0x5A, 0xC3, 0x3C, 0x0F, 0xF0, 0x81, 0x7E,
                  0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x01])
 
 # The board: the C64 Ultimate with the TRX64 bitstream and the Ultimate app.
-HOST = os.environ.get("TRX64_HOST", "192.168.242.189")
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 BOARD_DIR = os.environ.get("TRX64_CART_DIR", "")   # empty: trx64-cart on the first USB drive, else SD
 BOARD_SUBDIR = "trx64-cart"
 CART_IMAGE = 0x1000000              # DDR2 byte address of the cartridge image: the app's expansion-port block (T60 §7, trx_io ROM_SEL 1; 0x3C00000 is Gideon's)

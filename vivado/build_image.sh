@@ -8,11 +8,11 @@
 # install_config_2024.1.txt); it is only read. The image stays in the NAS
 # docker as vivado-env:2024.1.
 set -euo pipefail
-NAS="${TRX_NAS:-admin@192.168.242.2}"
-DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+NAS="${TRX_NAS:-admin@192.0.2.2}"
+DOCKER=/srv/.qpkg/container-station/bin/docker
 SRC="${1:-/share/CACHEDEV2_DATA/xilinx/install}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TMP=/share/CACHEDEV2_DATA/vivado-image-build
+TMP=/srv/vivado-image-build
 
 ssh "$NAS" "rm -rf '$TMP' && mkdir -p '$TMP'"
 scp -q "$HERE/Dockerfile" "$NAS:$TMP/Dockerfile"

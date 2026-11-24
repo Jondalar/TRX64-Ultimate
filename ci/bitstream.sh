@@ -6,7 +6,7 @@
 #   ci/bitstream.sh ue2     designs/c64_basic for the XC7A100T (Ultimate 64 Elite II)
 #
 # A bitstream is built only when something that goes into it changed
-# (gateware_key in lib.sh): a push that only moves the app, the docs, the
+# (gateware_key in lib.sh): a push that only moves the software, the docs, the
 # benches or the CI gets the bitstream of the last good build with the same key
 # from /cache/bit/. A bitstream with failed timing is not a good build: WNS < 0
 # fails the stage and is not cached.
@@ -16,7 +16,6 @@
 # the package versions `package` made. It cleans up the run's hand-over directory.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-release_reuse_skip bit
 
 board="${1:?c64u or ue2}"
 case "$board" in
