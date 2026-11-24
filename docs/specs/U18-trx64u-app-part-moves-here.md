@@ -1366,7 +1366,7 @@ Nothing decided yet.
       (+5 to +9) passes. MultiCore: the tool's fault (`rtl_check.py`:3784 counts a read only when its answer is not the constant 0, which
       keeps an undecoded address's default answer out and loses a decoded arm that answers 0); the fix is open in their T239.3 §5 and comes
       with a later SDK. Until then `check` stays out of our lint.
-  - D52 (Alex, 2026-11-24, as MultiCore recorded it on integration c7e5ce8a7; translated): "The ITU registers must be writable." The
+  - D52 (Alex, 2026-11-24, as MultiCore recorded it on integration c7e5ce8a7; translated; replaced by D53 below): "The ITU registers must be writable." The
     handed-over server writes the base's ITU itself through `itu.h` (`ITU_IRQ_CLEAR` and `ITU_IRQ_ENABLE` for the C64 reset, `ITU_IRQ_ENABLE`
     for the command interface, `ITU_IRQ_DISABLE` in its destructor), which until 0.4.5 was the base's own code, and the base has no call for
     an interrupt. A core's own library writes the registers of `itu`, an exception to D50; the server stays as it is. The code behind it:
@@ -1377,3 +1377,11 @@ Nothing decided yet.
     `b4e184bd...`, and `trx64g_82fe1b90.cor`, 3,568,073 bytes, sha256 `ffcd38c2...`, both checked against the package's SHA256SUMS.
     MultiCore's pins take them (t239.3 bff5d6730, the values checked there).
   - Not exercised: the board, a UCI command from a C64 program, the NETWORK target and CONTROL.
+- **2026-11-24: T239.3 D53 (Alex) replaces D50 and D52: every source writes every block.**
+  - As MultiCore recorded it (integration ccad7aa43; translated): "In the TOML I define: my core supports UCI on these registers etc. That
+    must then of course be writable. ... At build time this becomes one app. So why protection etc. Out with it. Everything is open."
+  - On MultiCore's t239.3 84acf5130 (pushed; SDK_VERSION 0.4.7, base 3.4, no package yet): `descrec.py` and `lib.mk` no longer have
+    `DRV_BASE_READ_ONLY` (6e280710's `descrec.py` had it three times), so `drvtab.h` gives every source the `_WR` macros of every block,
+    the base's too (`itu`, `c64cart`).
+  - Our code needs no change. The ring keeps its three `c64cart.cmd` writes out: c64cart still drops the cached lines after `ram_write` and
+    `image_write`. The UCI server's ITU writes are allowed. With the 0.4.7 pin, `sdk.pin`'s note on the read-only macros goes.
