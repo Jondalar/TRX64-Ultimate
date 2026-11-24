@@ -922,7 +922,7 @@ Nothing decided yet.
     screen is drawn with the person's Overlay Transparency (`ui.cc` `ov_apply` :1430; the default 25 % is opacity 192).
     A bar painted into our still lies under it: the firmware's `tw_layout` (`trx_video.cc` :653-672) gives the same
     rectangle. T256 D3 moves `tw_draw_bar` into the ring library and keeps `build_timeline`; one of the two has to go.
-  - What T-3 needs of MultiCore (found here, not asked yet): (a) a call that paints the picture the machine drew last
+  - What T-3 needs of MultiCore (found here; asked 2026-11-24, answer below): (a) a call that paints the picture the machine drew last
     into a library's surface as the base paints its own still (the person's palette, the place and Scale of the running
     picture); (b) the timeline page without its bar when the library paints it into the still, or the bar stays the
     base's and (a) becomes "take your still again". With both: `menu_video(1)` (the page is up, `lib_trx64u.cc`
@@ -941,3 +941,11 @@ Nothing decided yet.
     and its `pack_cor.sh --emu` check of step 2b stand; not run again.
   - For MultiCore beside (a) and (b): `core_hooks.h` and api.md 9.7.13 still say `menu_video` is on for the PAUSED tag;
     SDK 0.4.1's base turns it on for the timeline only.
+  - MultiCore's answer (2026-11-24): the line references hold. **S6 is a regression of t239.3 for trx64u**: until T-2
+    the timeline page showed the machine through the key colour and a scrub changed that picture (MultiCore
+    `core_hooks.h` :74-78); T-2's still is taken once, at the menu stop. So `u18` does not go to `main` before T-3 is
+    built. It is a T256 question for Alex (D10's call list has neither call), asked by MultiCore: A) the ring library
+    owns the picture, a new helper paints the last drawn frame into a library surface, and the base's timeline bar
+    leaves with P2-6 (MultiCore recommends A: D3 as decided); B) the base keeps its bar and its still, and a new call
+    makes it take the still again after a scrub step. The `menu_video` text of `core_hooks.h` and api.md 9.7.13 is
+    stale (the code is right: the PAUSED tag is an element) and is rewritten with A or B.
