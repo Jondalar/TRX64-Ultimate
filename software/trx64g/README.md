@@ -9,7 +9,7 @@ application (`ultimate.app`, built from `software/ultimate-app`), both files of 
 ## The files: MultiCore's, copied
 
 Alex (2026-11-24): take MultiCore's scripts as they are. Every file here is a copy from TRX64U-MultiCore, branch `t239.3`,
-commit `cfa7872a`. Each file's PROVENANCE header names what changed, and that is only what this tree forces: paths,
+commit `cfa7872a`; `pack_import_cor.sh` from `0242d0ca5`, which changed only its header comment. Each file's PROVENANCE header names what changed, and that is only what this tree forces: paths,
 `cor_pack.py` taken from the pinned SDK, and the pin values. A `diff` against MultiCore's file shows exactly those lines.
 The comments inside are MultiCore's, so they name MultiCore's tree.
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Pack the large .cor of a core whose bitstream is built in another repository (release/imports/<id>.pin; T104.2: trx64g; trx64u is TRX64-Ultimate's finished .cor since T239.3 P1-8, ci/imports.py).
+# Pack the large .cor of a core whose bitstream is built in another repository (a pin in the BIT form; T104.2). Since T239.3 D46 TRX64-Ultimate's CI packs
+# trx64g.cor with this script and tools/pack_large_cor.sh (copied with provenance); this repository runs it only in tools/test_pack_import_cor.sh, and its
+# pins name both finished files by sha256 (release/imports/*.pin, ci/imports.py).
 #
 #   software/trx64g/pack_import_cor.sh --pin software/trx64g/<id>.pin --out dir [--app-bin coreapp.bin | (pin has APP_FILE)] [--bit <local file>]
 #                            [--app-file <local .app>] [--app-commit <sha>] [--manifest <local manifest.json>]
@@ -22,7 +24,7 @@
 # SEMVER must equal it; an older package without the field is logged and passed. With --bit and no --manifest nothing is downloaded and the check is skipped.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-# PROVENANCE: copied from TRX64U-MultiCore, branch t239.3, commit cfa7872a, tools/pack_import_cor.sh (GPL-3.0-or-later, MultiCore's LICENSING.md), for
+# PROVENANCE: copied from TRX64U-MultiCore, branch t239.3, commit 0242d0ca5, tools/pack_import_cor.sh (GPL-3.0-or-later, MultiCore's LICENSING.md), for
 # MultiCore T239.3 D46: TRX64-Ultimate packs trx64g.cor with MultiCore's scripts. Changed here, only what this tree forces: the paths of the usage line;
 # ROOT is this folder, software/trx64g/, which holds the pin's ICON and the copies of ci/pkg.env and ci/version.sh, so those two are $ROOT/pkg.env and
 # $ROOT/version.sh. Everything else is MultiCore's text; its comments name MultiCore's tree (release/imports, ci/imports.py, their pins). Here ci/cor.sh

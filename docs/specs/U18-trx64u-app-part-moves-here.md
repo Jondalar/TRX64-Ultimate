@@ -1248,6 +1248,8 @@ Nothing decided yet.
     `00368bed...` (records 1, 3, 4 and 5); `trx64u_975aa59b.cor`, 3,984,896 B, sha256 `03239331...` (the same app, libraries,
     record 6, files and bitstream as run 479; only the version and `bit_commit` differ). MultiCore's t239.3 615bb6922 pins
     both, `trx64g.pin` now in the COR form; their ROM check (`check_public_tree --allow-trx`) is clean for both.
+    Their 0242d0ca5 then corrected `pack_import_cor.sh`'s header comment (who packs `trx64g.cor` since D46); our copy took it,
+    its PROVENANCE names 0242d0ca5.
     `app_commit` stays in trx64g's manifest (MultiCore: it names what the file holds, and their side reads no field of it).
   - Open:
     - a release reuses its branch package, so its `trx64g.cor` shows `x.y.z-dev+<commit8>`, not the `x.y.z` that §2 gives a

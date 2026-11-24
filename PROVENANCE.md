@@ -156,7 +156,8 @@ as GPL-3.
 
 `ci/cor.sh` packs `trx64g.cor` (MultiCore T239.3 D46) from two files of our CI package and the files below. The bundle
 has four records: the manifest, `ultimate.app` without its 12-byte header, the icon, and `c64_basic.bit` as it is. Each
-file below is a copy from TRX64U-MultiCore, branch `t239.3`, commit `cfa7872a`. MultiCore's `LICENSING.md` puts its
+file below is a copy from TRX64U-MultiCore, branch `t239.3`, commit `cfa7872a`; `pack_import_cor.sh` is from `0242d0ca5`,
+which changed only that file's header comment (who packs `trx64g.cor` since D46). MultiCore's `LICENSING.md` puts its
 tools, CI and logos under GPL-3.0-or-later. What a copy changed is in its PROVENANCE header, and only the paths, the
 SDK's `cor_pack.py` and the pin values changed.
 
