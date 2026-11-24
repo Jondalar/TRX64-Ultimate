@@ -1,6 +1,6 @@
 # U20 — GitHub becomes TRX64-Ultimate's development home; GitHub's runners build everything but Vivado, our builder builds the bitstream
 
-**Status:** SPECIFIED (2026-11-24): Alex's decisions D1-D16, every §4 question answered; build plan §5. Nothing built.
+**Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D17; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482 green: lint, app, bitstream, package, sims, update, cor).
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
