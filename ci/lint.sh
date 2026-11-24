@@ -90,9 +90,9 @@ PY
 
 # U18 (MultiCore T239.3 P1-3, D30 condition 1): no literal I/O address in the sources of our three libraries and of our UCI library (uci/, linked into
 # the app); every address comes from c64_basic's TOML A through the driver table. The pinned SDK's rtl_check.py, from our registry (fetch_sdk.sh
-# --download). The one --allow is SHA-256's K[47], which lies in the I/O space by chance. rtl_check.py check (the TOML A against the RTL) is not here:
-# the tool of SDK 0.4.5 stops at an RTL pattern it does not know for 15 of the 39 blocks and finds a byte of icap that nothing decodes (U18 §5,
-# waiting on MultiCore).
+# --download). The one --allow is SHA-256's K[47], which lies in the I/O space by chance. rtl_check.py check (the TOML A against the RTL) is not here
+# yet: the tool of SDK 0.4.6 holds every block of it but one property, cmd_if's command_start, whose decoded read drives the constant 0 and which it
+# takes for no read: MultiCore's tool fault, fixed in a later SDK (U18 §5).
 check "reverse lint (software/trx64u)" bash -c '
   T="$PWD/software/trx64u"
   [ -f "$T/sdk.pin" ] || exit 0

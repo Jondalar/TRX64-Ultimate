@@ -15,7 +15,8 @@ base_sources = ["portdiag.cc"]
 
 # The libraries the app is linked with. All but uci are shared libraries of the package: their tables are the package's libs/shared.toml (sources,
 # headers and entries copied from it), the ones trx64u uses. uci is trx64u's own (Alex's split, U18 §5 2026-11-24): its sources are ../uci/, which
-# ../pack_cor.sh hands to app_build.py as --src (MultiCore's uci.cc, uci_slot.cc, uci_exports.cc as trxuci*.cc; its export is still "uci").
+# ../pack_cor.sh hands to app_build.py as --src (MultiCore's uci.cc, uci_slot.cc, uci_exports.cc as trxuci*.cc; its export is still "uci"), and
+# the command interface server with its NETWORK target, which SDK 0.4.6 handed over (command_intf.cc, network_target.cc; MultiCore T239.3 D48).
 # An app has none of the code of a library this file does not name.
 #   c64cart, cbm1541, uci, sid, tempdisk, cbmprg: our libraries ask for their tables by name (base/lib_trx64u.cc g_x, ring/ringsys.cc rx_name);
 #     cbm1541 also registers the drive operations for the capability drive_a, which desc.toml's caps name; newfile is what cbm1541 needs.
@@ -49,8 +50,8 @@ headers = ["newfile.h"]
 
 [[library]]
 name = "uci"
-sources = ["trxuci.cc", "trxuci_slot.cc", "trxuci_exports.cc"]
-headers = ["trxuci.h", "trxuci_slot.h", "trxuci_api.h"]
+sources = ["trxuci.cc", "trxuci_slot.cc", "trxuci_exports.cc", "command_intf.cc", "network_target.cc"]
+headers = ["trxuci.h", "trxuci_slot.h", "trxuci_api.h", "command_intf.h", "command_target.h", "network_target.h"]
 bind = "uci_bind"
 freeze_request = "uci_take_freeze_request"
 

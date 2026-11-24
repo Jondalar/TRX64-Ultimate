@@ -53,6 +53,7 @@ op	settings.discard
 op	update.run_record	path:path:0:0:519:
 op	writeback.mode	value:int:0:2:0:
 op	writeback.poll
+op	writeback.flush
 op	writeback.open
 op	writeback.answer	value:int:0:1:0:
 op	writeback.leave

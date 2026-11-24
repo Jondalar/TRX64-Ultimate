@@ -1159,19 +1159,29 @@ size = 0x4000
     bits = 16
 
 # 0x10044000: the UCI (ultimate_sys.vhd:885-886 region r_uci, 8 KB; uci_unit.vhd:124 instantiates Gideon's command_interface, whose splitter
-# :47-59 puts the registers below +0x800 and the 2 KB of buffers from +0x800; the registers are command_protocol.vhd's, address bits 3:0). The core's
-# (Alex, U18 §5 2026-11-24). The two slot registers the UCI library writes through this table (uci/trxuci_slot.cc): slot_base (+0, :201-202 write,
-# :253-254 read: data bits 6:1 are the slot's C64 address bits 8:3, compared at :108, :121, :141; 0x47 puts its four registers at $DF1C-$DF1F) and
-# slot_enable (+1, :203-208 write: b0 the slot answers while b7 is 0, b7 set writes the bus ID instead; :255-256 read b0). The command interface
-# server, which the UCI library starts (the base archive's command_intf.o), drives the other 14 registers (+0x02-+0x0F: the handshake, the buffer
-# pointers and lengths, the IRQ mask) and the buffers by its own constants (command_intf.h CMD_IF_*), not through this table, and writes slot_base
-# once at its start (CommandInterface::start: 0x47).
+# :47-59 puts the registers below +0x800 and the 2 KB of buffers from +0x800). The core's (Alex, U18 §5 2026-11-24). Its driver is the UCI library
+# (uci/): the slot registers through uci/trxuci_slot.cc, everything else through the command interface server, uci/command_intf.cc, which left the
+# base with SDK 0.4.6 (MultiCore T239.3 D48) and takes every register and the buffers from this table (uci/command_intf.h CMD_IF_*). The SDK's map
+# `uci` has only the two slot registers, so the block lists its own (api.md 6.14.11). The registers are command_protocol.vhd's, address bits 3:0
+# (they repeat up to +0x7FF), named as command_if_pkg.vhd's c_cif_io_*; the writes are decoded at :198-249, the reads at :250-289:
+#  - slot_base (+0, :201 write, :253 read): data bits 6:1 are the slot's C64 address bits 8:3, compared at :108, :121, :141; 0x47 puts its four
+#    registers at $DF1C-$DF1F.
+#  - slot_enable (+1, :203 write: b0 the slot answers while b7 is 0, b7 set writes the bus ID instead; :255 read b0).
+#  - handshake_out (+2, :209 write: b0 reset, b1 data seen, b2 abort seen, b4 data valid with b5 more, b7 back to idle; :257 read: b7 freeze,
+#    b6 trigger, b5:4 the state). handshake_in (+3, :261 read): the slot's status byte, the firmware's CMD_IF_STATUSBYTE.
+#  - command_start .. status_end (+4 .. +9, :263-273 read): the buffers' bounds over 8 (command_if_pkg.vhd:33-41). irq_mask_set (+4, :243) and
+#    irq_mask_clear (+5, :245) are the writes of +4 and +5.
+#  - status_length (+A, :233 write: the status length, its pointer back to the start; :275 read: the status pointer), irq_mask (+B, :241, :285),
+#    response_len_l and _h (+C, +D, :236, :239 write: the response length, its pointer back to the start; :277, :279 read: the response pointer),
+#    command_len_l and _h (+E, +F, :281, :283 read: the length of the command).
+#  - buffer (+0x800, 2 KB): command_interface.vhd's dpram (:74-95, port a :84-88), read and written a byte at a time (:70-72); the command at 0,
+#    the response at 896, the status at 1792.
 [[block]]
 name = "cmd_if"
 module = "uci_unit"
 owner = "core"
 address = 0x10044000
-size = 0x10
+size = 0x1000
   [[block.property]]
   name = "slot_base"
   offset = 0x00
@@ -1191,6 +1201,92 @@ size = 0x10
     [[block.property.state]]
     name = "on"
     value = 1
+  [[block.property]]
+  name = "handshake_out"
+  offset = 0x02
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "handshake_in"
+  offset = 0x03
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "command_start"
+  offset = 0x04
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "irq_mask_set"
+  offset = 0x04
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "command_end"
+  offset = 0x05
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "irq_mask_clear"
+  offset = 0x05
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "response_start"
+  offset = 0x06
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "response_end"
+  offset = 0x07
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_start"
+  offset = 0x08
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_end"
+  offset = 0x09
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_length"
+  offset = 0x0A
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "irq_mask"
+  offset = 0x0B
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "response_len_l"
+  offset = 0x0C
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "response_len_h"
+  offset = 0x0D
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "command_len_l"
+  offset = 0x0E
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "command_len_h"
+  offset = 0x0F
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "buffer"
+  offset = 0x800
+  width = 8
+  count = 2048
+  dir = "rw"
 
 # 0x10050000: the DMA window into the C64 (ultimate_sys.vhd:887-888, :1015-1034; dma_win.v behind the handshake), the DMA map
 [[block]]

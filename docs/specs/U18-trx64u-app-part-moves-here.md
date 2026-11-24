@@ -1334,3 +1334,42 @@ Nothing decided yet.
       libraries have no stream code;
     - both `.cor` files are named.
   - The contract is MultiCore's 2f1d1ccd4 (integration), byte for byte, sha256 `4cd4dc89...`.
+- **2026-11-24: SDK 0.4.6 pinned (MultiCore t239.3 6e280710, base 3.4, a dev build).**
+  - The tarball `trx64-sdk-0.4.6.tar.gz` (sha256 `fd3175de...`) with the VERSION MultiCore named (API headers `22fd021d...`, base archive
+    `65dc7f11...`). The online sub-app is the build of the same commit (`online-6e280710.u2a`, `061c7394...`): 0.4.6's `OnlineApi` has
+    `loading` and `loading_for` (D41 L-3c), and the base takes the table only at that size (`netfs.cc` :83-88), so the 8ff28ba9 build would
+    give no folder `/Online` on 0.4.6. Both are in our registry (`trx64-sdk/0.4.6-6e280710`, `trx64-online/1.0-6e280710`), checked by an
+    anonymous download.
+  - What broke, and what changed:
+    - The ring, at its three `c64cart.cmd` writes (no `_WR` for a base block), as D50 said. They are gone: in 0.4.6, c64cart's
+      `cart_ram_write` (`c64cart_exports.cc` :45-51) drops the cached lines after each write in range, and `c64_cart_image_write`
+      (`c64_cart.cc` :809-815) after each write while a cartridge is in. The ring is 136,232 + 16,860 = 153,092 bytes, its budget lowered to it.
+    - UCI (D48): the base has neither the server (`cmd_if`, `command_targets`; `riscv_main.o` keeps weak `command_interface_irq` and
+      `ResetInterruptHandlerCmdIf`) nor the headers `command_intf.h`, `rtc.h`, `subsys.h`, `endianness.h`, `palette_command.h` and `http_codes.h`.
+      `uci/` takes the hand-over (`command_intf.cc` and `.h`, `command_target.h`, `network_target.cc` and `.h`) and the six headers from our
+      firmware submodule, byte for byte MultiCore's at 6e280710, each with a PROVENANCE header. The TOML B's library `uci` names the two new
+      sources.
+    - The server's registers come from the driver table. The TOML A's `cmd_if` lists its own properties (MultiCore's map `uci` has the two
+      slot registers; MultiCore: the block is ours): the 16 registers of `command_protocol.vhd` with the directions of the RTL (+4 and +5 are
+      `command_start` and `command_end` read, `irq_mask_set` and `irq_mask_clear` written) and the run `buffer` (+0x800, 2,048 bytes); its size
+      is 0x1000 (was 0x10). `uci/command_intf.h` maps the firmware's names to `DRV_cmd_if_*`.
+    - `base/ops_trx64u.txt` gets `writeback.flush` (D51), 393 lines. trx64u, monitor and trex_crt build unchanged; trx64u's image is the same.
+  - Checks, local (the Mac and the build container):
+    - `pack_cor.sh --emu`: rc 0, `trx64u.cor` 3,987,047 bytes, READY 3.6 s, 4 libraries loaded, 0 refused, the operations and states equal
+      to the golden.
+    - UCI in ue2emu: `settings.set` "Command Interface (UCI)" = Enabled over REST, then ue2emu's `monitor dir` of `/`, `/Usb0` and
+      `/Usb0/cores` (the DOS target over the UCI block) is answered by our server.
+    - `rtl_check lint-src base ring monitor uci`: no literal I/O address in 70 files.
+    - `rtl_check check` of 0.4.6 on the whole TOML A: every block holds but one property, "block cmd_if, property command_start (dir r):
+      byte +0x4 (0x10044004) has no read in the RTL". `command_protocol.vhd`:263 decodes that read and drives
+      `c_cmd_if_command_buffer_addr(10 downto 3)`, the constant 0 (`command_if_pkg.vhd`:33); the same pattern with constants other than 0
+      (+5 to +9) passes. MultiCore: the tool's fault (`rtl_check.py`:3784 counts a read only when its answer is not the constant 0, which
+      keeps an undecoded address's default answer out and loses a decoded arm that answers 0); the fix is open in their T239.3 §5 and comes
+      with a later SDK. Until then `check` stays out of our lint.
+  - Alex's decision (D50): the handed-over server writes the base's ITU itself through `itu.h`: `ITU_IRQ_CLEAR` and `ITU_IRQ_ENABLE` for the
+    C64 reset, `ITU_IRQ_ENABLE` for the command interface, `ITU_IRQ_DISABLE` in its destructor. Until 0.4.5 that was the base's own code.
+    MultiCore: the base offers no call for an interrupt (api.md and SvcSys have `ms_timer` only), `itu` is a base block, and D50 as written
+    does not allow a library's write to it. What the code does: the enable and disable registers set and clear only the bits written
+    (`itu.vhd`:136-139); the base enables the timer alone, "other modules shall enable their own interrupt" (`riscv_main.c`:185, MultiCore
+    6e280710); the base's handler calls the server's strong hooks. Until Alex decides, the handed-over code stays as it is.
+  - Not exercised: the board, a UCI command from a C64 program, the NETWORK target and CONTROL.

@@ -12,8 +12,8 @@
 //
 // Hardware: the blocks of ../gateware/c64_basic.toml, each with the RTL lines that decode it: trx_gate (the gate, the capture, the stop position),
 // trx_statebus, trx_engine (the log, the copy and the apply), trx_debug and trx_dbg_run, trx_turbo, trx_pixel (the still's count, read only: the block
-// is the base's since Alex's split, U18 §5; its video service takes the still), c64cart (its
-// command: the cartridge drops its cached lines). The areas are fixed in the engine (area_base/area_size below, SLIM D4). c64_basic has no
+// is the base's since Alex's split, U18 §5; its video service takes the still). The cartridge's RAM and image go through the export "c64cart", whose
+// writes drop the cartridge's cached lines (SDK 0.4.6, MultiCore T239.3 D50). The areas are fixed in the engine (area_base/area_size below, SLIM D4). c64_basic has no
 // session register (the firmware's SH_CTRL at page 5 +0: trx_sys.v decodes no word 0x1400), so a stop here is no freeze session.
 //
 // Record formats (trx_engine.v header): stream 0 {new, old, addr16} 4 bytes;
@@ -1118,7 +1118,7 @@ struct RestoreCtx {
     TrxRestoreStats *st;
 };
 
-// colour RAM as bus cycles (stopped, Ultimax); cartridge RAM through c64cart, then the cartridge drops its cached lines
+// colour RAM as bus cycles (stopped, Ultimax); cartridge RAM through c64cart, whose ram_write drops the cartridge's cached lines
 static void restore_bus(void *ctx)
 {
     RestoreCtx *c = (RestoreCtx *)ctx;
@@ -1128,9 +1128,6 @@ static void restore_bus(void *ctx)
     c->st->other = cl.other;
     c->st->bus_writes += each(col_tch, 1024, col_val, [](int a, uint8_t v) { c64_poke(0xD800 + a, v); });
     c->st->cart_bytes = cart_ram_put(NULL, cart_tch, cart_val);
-    if (c->st->cart_bytes) {
-        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);
-    }
 }
 
 // C64 RAM through the second port
@@ -1392,9 +1389,6 @@ static void scrub_bus(void *ctx)
     }
     st->bus_writes += 3;
     st->cart_bytes = cart_ram_put(cart_pg, cart_tch, cart_val);
-    if (st->cart_bytes) {
-        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);
-    }
 }
 
 // C64 RAM through the second port
@@ -2369,21 +2363,16 @@ static void load_bus(void *ctx)
         c64_poke(0xD800 + a, c->m->col[a] & 0x0F);
     }
     c->bus += 1024;
-    bool cart_touched = false;
+    // c64cart's ram_write and image_write drop the cartridge's cached lines themselves (SDK 0.4.6, MultiCore T239.3 D50; the firmware's CART_INVAL)
     if (c->m->cart) {
         // the cartridge's RAM, whole, through c64cart (FW trx_ring.cc load_bus)
         if (const C64CartApi *cc = R_TABLE(C64CartApi, RX_C64CART, ram_write)) {
             cc->ram_write(0, c->m->cart, 65536);
-            cart_touched = true;
         }
     }
     if (c->m->rom_put) {
         // the cartridge's image, which a rewind never puts back (the log has no flash writes): a game that programmed its own flash comes back whole
         c->m->rom_put(c->m->rom_ctx);
-        cart_touched = true;
-    }
-    if (cart_touched) {
-        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);         // the cartridge drops its cached lines
     }
 }
 

@@ -7,7 +7,7 @@ library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U
 |---|---|---|
 | `base/` | `trx64u`, the base | the menu (`menu.toml`), its operations (`trx64u_ops`), the C64U settings (`u64cfg`) |
 | `ring/` | `ring` | the Timewarp ring, its files (`.c64re`, `.c64rering`, `.trxring`) and its operations; the picture under the Timewarp page, the frame and the bar (`twstill.cc`, `twbar.cc`) |
-| `uci/` | `uci`, linked into the app | the Ultimate Command Interface ($DF1C): DOS targets 1 and 2, NETWORK 3, CONTROL 4, the slot registers and the export `uci`; MultiCore's `uci.cc`, `uci_slot.cc`, `uci_exports.cc` and headers as `trxuci*` (PROVENANCE in each), ours since the owner split (U18 §5) |
+| `uci/` | `uci`, linked into the app | the Ultimate Command Interface ($DF1C): DOS targets 1 and 2, NETWORK 3, CONTROL 4, the slot registers and the export `uci`; MultiCore's `uci.cc`, `uci_slot.cc`, `uci_exports.cc` and headers as `trxuci*` (PROVENANCE in each), ours since the owner split (U18 §5); the command interface server and its NETWORK target from SDK 0.4.6's hand-over (`command_intf.cc`, `network_target.cc`, T239.3 D48), its registers from the TOML A's block `cmd_if`, and six firmware headers the SDK no longer ships |
 | `monitor/` | `monitor`, needs `ring` | the monitor, its RPC server on TCP 4312; the engine is trxmon, `software/ultimate-app/apps/trxmon/src` (D4: one source) |
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the libraries it is linked with: the SDK's shared ones and `uci/` (MultiCore T239.3 D31) |
@@ -23,7 +23,7 @@ is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
 
 ## State
 
-The three libraries and the sub-app build on MultiCore's dev SDK 0.4.5 (base 3.3, not released yet): every link
+The three libraries and the sub-app build on MultiCore's dev SDK 0.4.6 (base 3.4, not released yet): every link
 closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (the sub-app declares
 none). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
@@ -31,9 +31,10 @@ TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships 
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
 has the figures and what is open). The ring library's Timewarp picture (U18 T-3) needs SDK 0.4.3 or later
 (`api->overlay->frame`, `still_palette`), and 0.4.5 for its bar on the smaller canvases (`canvas()`) and as the only
-bar (the base draws none since 0.4.5); the pin is 0.4.5 (U18 §5).
+bar (the base draws none since 0.4.5); the pin is 0.4.6 (U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
-the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b). Earlier runs: ue2emu on MultiCore's shared
+the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b; on 0.4.6 too, and the UCI answers the DOS target from our own server,
+U18 §5). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5).
 
 The registers (MultiCore T239.3 P1-7, 2026-11-24): `gateware/c64_basic.toml` is c64_basic's TOML A, written from what the
@@ -71,7 +72,7 @@ trxmon itself builds as a library as it is (2026-11-22): every file compiles aga
 ## SDK
 
 `sdk.pin` names the SDK version and the sha256 of its tarball, and MultiCore's online sub-app with its own
-commit (`online_*`: 8ff28ba9; apps/online has not changed since). `./fetch_sdk.sh <tarball> [<online.u2a>]` checks both and puts them into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
+commit (`online_*`: 6e280710, the build of SDK 0.4.6's commit: 0.4.6's base takes no older one, U18 §5). `./fetch_sdk.sh <tarball> [<online.u2a>]` checks both and puts them into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
 `riscv64-elf-` has no newlib headers.
 
 ## Packing trx64u.cor
@@ -102,11 +103,11 @@ What goes in:
 | the app (record 3) | linked by `pack_cor.sh` from the SDK's base archive (`sdk.pin`) with `gateware/c64_basic.toml` and `app/toml_b.toml` |
 | `cor_pack.py`, `app_build.py`, the symbol check | the SDK (`sdk.pin`) |
 | record 7: libraries `trx64u`, `ring`, `monitor` | `build.sh` |
-| record 7: the online sub-app `online.u2a` | MultiCore's build of `t239.3` `8ff28ba9` (`sdk.pin` `online_*`, `fetch_sdk.sh`): the F3 tab Online and `online.*` |
+| record 7: the online sub-app `online.u2a` | MultiCore's build of `t239.3` `6e280710` (`sdk.pin` `online_*`, `fetch_sdk.sh`): the F3 tab Online and `online.*` |
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
 | the registers | `gateware/c64_basic.toml`: the app's and the libraries' driver table (`drvtab.h`) and the app's I/O addresses; no TOML A record in the `.cor` (record 6 holds a description or a TOML A, not both; the record type that carries it beside the description comes with a later MultiCore package: U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
-| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass; `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` from the first start: it installs record 8 before it scans the folder (MultiCore's `coreapp/src/run.cc` at SDK 0.4.5's source commit e8b76719, :735 and :738) |
+| record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass; `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` from the first start: it installs record 8 before it scans the folder (MultiCore's `coreapp/src/run.cc` at SDK 0.4.6's source commit 6e280710, :778 and :786) |
 | bitstream | `--bit`, with `--bit-commit` |
 | the operations | `base/ops_trx64u.txt`: what the running app exports (REST `/v1/ops`, `/v1/state`), ours (U18 R6), written from `tools/emu_ops.py` (MultiCore's `tests/ui/export.py` format). `cor_pack.py --ops` checks record 6's names and bindings against it at every pack; `--emu` checks the running app against it both ways. The SDK's link step makes no operation table, so the list is measured; CI has no emu stage yet (U18 §5) |
 
