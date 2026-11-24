@@ -1317,3 +1317,14 @@ Nothing decided yet.
     `x.y.z-dev+<sha8>`, as `trx64g.cor` has it.
   - `software/trx64u/README.md`'s record 8 note was stale (the base installs record 8 before it scans `apps/`):
     corrected.
+- **2026-11-24: contract §10 rewritten by both sides on Alex's go ("Yes, you may!", translated, given to MultiCore).**
+  - Found while reworking MultiCore's core app guide: §10 still named T230's target split, in which MultiCore would build
+    trx64u's features as generic modules ("today in MultiCore's `coreapp/src`").
+  - The new §10 is the split of T239.3 D21/D44: we own the bitstream, TOML A and B, the menu and the code of the
+    features (Timewarp ring, monitor, U64 registers, UCI), built with MultiCore's SDK. MultiCore owns the host, the base
+    and the SDK; its package takes `trx64u.cor` and `trx64g.cor` by their SHA-256.
+  - Our two changes to MultiCore's draft:
+    - "the streams" is out: the data streams are the base's code (MultiCore's `coreapp/src/netops.cc`), and our
+      libraries have no stream code;
+    - both `.cor` files are named.
+  - The contract is MultiCore's 2f1d1ccd4 (integration), byte for byte, sha256 `4cd4dc89...`.
