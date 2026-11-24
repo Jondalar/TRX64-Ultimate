@@ -4,7 +4,7 @@
 // input, expert).
 //
 // One operation per group, each takes the setting's value (ignored: the group is written as a whole, as Gideon's effectuate does, so a value changed by
-// REST, by the menu or at the start gives the same registers). PROVENANCE: vendor/gideon/software/u64/u64_config.cc (Gideon Zweijtzer, GPL-3.0), the
+// REST, by the menu or at the start gives the same registers). PROVENANCE: TRX64U-MultiCore vendor/gideon/software/u64/u64_config.cc (Gideon Zweijtzer, GPL-3.0), the
 // register sequences and tables of its effectuate_settings functions; the keys are the item names of its stores.
 #ifndef TRX64U_U64CFG_H
 #define TRX64U_U64CFG_H

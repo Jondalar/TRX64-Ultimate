@@ -1,4 +1,4 @@
-// The C64U's hardware configuration from the core's settings (u64cfg.h). PROVENANCE: vendor/gideon/software/u64/u64_config.cc (Gideon Zweijtzer, GPL-3.0):
+// The C64U's hardware configuration from the core's settings (u64cfg.h). PROVENANCE: TRX64U-MultiCore vendor/gideon/software/u64/u64_config.cc (Gideon Zweijtzer, GPL-3.0):
 // U64Config::effectuate_settings, setMixer, setSpeakerMixer, U64SidSockets/U64UltiSids/U64SidAddressing::effectuate_settings, setFilter, setSidEmuParams,
 // setCpuSpeed, setLedSelector, auto_mirror, the palette programming. The register addresses are not Gideon's (u64.h): every one is c64_basic's, from
 // its TOML A (../gateware/c64_basic.toml) through the driver table (drvtab.h, trx64u_lib.h). c64_basic has no resampler (ultimate_sys.vhd decodes none

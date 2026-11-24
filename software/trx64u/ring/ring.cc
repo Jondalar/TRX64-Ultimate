@@ -2808,7 +2808,7 @@ int trx_ring_trace_writes(uint32_t start, uint32_t n, TrxWriteRec *out)
 
 // The debug block's log action (trx_dbg.v): the stream 1 records of space 8 that came since the last call, as the engine wrote them ([15:0] address, [23:16] data,
 // [27:24] {0, IB, write, unit}, [31:28] 8, [47:32] IPC, [62:48] CYCLES low 15). max = 0 only moves the reader to the present. *lost counts records the area overwrote
-// before they were read. PROVENANCE: trx_ring_log_read() of vendor/gideon/software/io/c64/trx_ring.cc (the TRX64 line, GPL-3.0), T104.2 UI.
+// before they were read. PROVENANCE: trx_ring_log_read() of TRX64U-MultiCore vendor/gideon/software/io/c64/trx_ring.cc (the TRX64 line, GPL-3.0), T104.2 UI.
 int trx_ring_log_read(uint64_t *out, int max, uint32_t *lost)
 {
     *lost = 0;
