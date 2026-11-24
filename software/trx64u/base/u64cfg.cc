@@ -144,6 +144,40 @@ static void program_palette(const uint8_t rgb[16][3])
     }
 }
 
+// The colours of the stopped machine's picture (api->overlay->still_palette, SDK 0.4.3; U18 T-3): the base paints its still (the picture under the open
+// menu) and a library's frame() (the ring library's Timewarp still) from the 16 colours of a source, else from its own (none for this core: MultiCore's c64
+// core sets it, and that code is not in trx64u's app), else Colodore. This library's source is the palette in force (program_palette, u64cfg_palette);
+// false before the first. It runs on the task that takes the picture, inside the base's grab lock: a copy, no lock, no call of api->overlay. A palette
+// written while it copies may give that one picture colours of both.
+static bool still_colours(uint8_t rgb[16][3])
+{
+    if (!g_palette_valid) {
+        return false;
+    }
+    memcpy(rgb, g_palette, sizeof(g_palette));
+    return true;
+}
+
+// The base takes the source only once its overlay service is up, after the core's start (api.md 4.17.1.1, 4.17.15.6: OVL_E_NOSERVICE before; the core's
+// start hook runs before the service starts, run.cc). The core's service poll calls this at each pass until the base has it (c64core.cc c64_service): the
+// first pass after the service starts, 20 ms at most, sets it; the hook menu_video tries it too. A base without the member: nothing.
+void u64cfg_still_palette(void)
+{
+    static volatile bool done;
+    if (done) {
+        return;
+    }
+    const SvcOverlay *ov = LIB_API_COVERS(g_api, overlay) ? g_api->overlay : 0;
+    if (ov && ov->size < offsetof(SvcOverlay, still_palette) + sizeof(ov->still_palette)) {
+        done = true;
+        return;
+    }
+    if (SVC_HAS(SvcOverlay, ov, still_palette) && ov->still_palette(still_colours) == 0) {
+        done = true;
+        lib_logf("[u64cfg] the stopped machine's picture is painted in the palette in force");
+    }
+}
+
 // CONTROL 0x51-0x54 of the command interface (control_target.cc:158-199, U64Config::get_palette_rgb / set_palette_rgb / set_palette_color / reset_palette, u64_config.cc:3099-3170).
 // what 0 reads the 16 colours in force, 1 sets all, 2 sets colour idx from rgb[0], 3 back to the default colours. A palette set here is not the setting's: the next change of the
 // palette's group loads the configured one again (the name is forgotten, as the firmware's effectuate always reads the file again).

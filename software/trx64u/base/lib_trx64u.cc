@@ -8,6 +8,7 @@
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "c64core.h"
+#include "ring_still.h"
 #include <string.h>
 
 const LibApi *g_api;
@@ -64,14 +65,16 @@ int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen)
     return rc;
 }
 
-// ---- the exports of the shared libraries ----------------------------------------------------------------------------------------------------------
+// ---- the exports of the shared libraries and of the ring library -----------------------------------------------------------------------------------
 // A table is kept once found: the loaded libraries stay. `size` is the smaller of what find reports and the table's own first word. Two tasks may look
 // at the same time; either order of the two stores leaves an entry that answers null or the table, never a wrong size.
 static struct {
     const char *name;
     const void *t;
     uint32_t size;
-} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 }, { CBMPRG_API_NAME, 0, 0 } };
+} g_x[X_N] = { { "c64cart", 0, 0 }, { "cbm1541", 0, 0 }, { "uci", 0, 0 }, { "sid", 0, 0 }, { "tempdisk", 0, 0 }, { CBMPRG_API_NAME, 0, 0 },
+               { RING_STILL_EXPORT, 0, 0 } };
+static_assert(RING_STILL_MAJOR == 1, "x_table finds every export at major 1");
 
 const void *x_table(int which, uint32_t off)
 {
@@ -174,15 +177,22 @@ static void hook_menu_closed(void)
     }
 }
 
-// menu_video: the base's Timewarp page (layout "timeline") came up (1) or went (0); the menu task, no core lock. SDK 0.4.1's base calls it from no
-// other screen: only screens.cc's timeline turns ui_live_key on, and the PAUSED tag is an element of the overlay service (T256 T-2). The hook only
-// logs the call. Under the page lies the base's still, its capture of the menu's stop: a scrub step does not change it, and the ring library cannot
-// paint the frame of the scrub position, because no call of SDK 0.4.1 gives a library the still capture (U18 section 5, T-3). c64_basic shows no
-// picture of a halted machine by itself: vic_scaler.v shows black while the whole machine is halted (top.v: .blank(c64_halted)); the firmware drew
-// Timewarp's still into the pixel layer in software (trx_video.cc grab_still, draw_still).
+// menu_video: the base's Timewarp page (layout "timeline") came up (1) or went (0); the menu task, no core lock. The base of SDK 0.4.3 calls it for no
+// other screen: only screens.cc's timeline turns ui_live_key on. The picture under the page is the ring library's (U18 T-3, MultiCore T256 D11): its
+// export "ringstill" (ring/ring_still.h) takes the page's coming, with the palette the person set for the bar it paints, and its going; it paints the
+// frame of each scrub position itself. Without the ring library the page keeps the base's still, its capture of the menu's stop. c64_basic shows no
+// picture of a halted machine by itself: vic_scaler.v shows black while the whole machine is halted (top.v: .blank(c64_halted)). The still's colours are
+// the person's once the base has the source (u64cfg.cc u64cfg_still_palette, tried here too).
 static void hook_menu_video(int behind)
 {
-    lib_logf("[trx64u] menu_video(%d)", behind);
+    u64cfg_still_palette();
+    const RingStill *s = X_GET(X_RINGSTILL, RingStill, page);
+    lib_logf("[trx64u] menu_video(%d)%s", behind, s ? "" : ": no ring library, the page keeps the base's still");
+    if (s) {
+        uint8_t rgb[16][3];
+        u64cfg_palette(0, 0, rgb);
+        s->page(behind, rgb);
+    }
 }
 
 // init, release, media_flush, media_pending and the mount slots: the C64 descriptor's (c64core.cc, from MultiCore's c64.cc, whose descriptor had no

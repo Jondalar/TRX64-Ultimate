@@ -1026,3 +1026,42 @@ Nothing decided yet.
   are byte for byte those of 0.4.1. The ICAP insert moved the lines of `ultimate_sys.vhd` (+5 from 354, +10 from 428, +12 from
   885, +44 from 1363, +54 from 1366): the references in the TOML A, `desc.toml` and `u64cfg.cc` follow. Not run here: the
   emulator check (`pack_cor.sh --emu`) on 0.4.4; it comes with T-3, which is built on 0.4.3 meanwhile.
+- **2026-11-24: T-3 built (branch `u18-t3`, local; on SDK 0.4.3 through a TEMP pin commit that is not pushed, the T-3
+  commit goes onto the 0.4.4 pin).** Alex's A (MultiCore T256 D11) and his word, relayed by MultiCore: the bar and its
+  texts come from trx64u, the base only makes it possible.
+  - Ring library: `twstill.cc` takes the page's coming and going from trx64u's hook `menu_video` through a new export
+    `ringstill` (major 1, `ring/ring_still.h`; no operation, so nothing for REST and no change of the ops golden). On
+    coming: a 960 x 540 RGB565 surface from the ring's heap (1,036,800 B, cleared once), `api->overlay->frame("still")`
+    into it, the bar over it, `show("still")`; after every move of tw.step, tw.seconds, tw.oldest, tw.live and
+    tw.next_mark: frame(), bar, `update`; on going: `remove`, the surface freed. A mutex orders the menu task and the
+    executor (REST runs the same operations). tw.cancel does not paint: its key closes the menu.
+  - The bar, `twbar.cc` `tw_bar_paint(surface, canvas, palette, TwBar)`: the firmware's tw_draw_bar (`trx_video.cc`)
+    at the place of the base's copy (x 96, y 476, 768 x 48 on 960 x 540); per pixel in RGB565 1/4 frame and 3/4
+    0x101018 (barmix), glyph, position, info, hint and track in the person's palette (the hook passes
+    `u64cfg_palette`). The texts use c64_basic's overlay font (`ovl_font8.mem`, made into `twfont.h` at build time by
+    `twfont.py`), not `api->overlay->text()`: the UI task writes those at its next frame, outside the paint. The states
+    tw.pos, tw.info, tw.glyph, tw.track and the page's hint are unchanged; the base of 0.4.3 still draws its bar over
+    ours until P2-6.
+  - trx64u: `u64cfg_still_palette()` makes the palette in force the source of the still's colours (`still_palette`),
+    called by the core's service poll (the start hook runs before the overlay service: OVL_E_NOSERVICE) and the hook.
+  - Budget (ring/Makefile): image 136,160 + 16,852 B; heap_peak 2,931,868 -> 3,968,668 B = idle 1,486,893 + the still
+    1,036,800 + the .trxring save 1,444,975 (the monitor's RPC can save while the page shows); heap_keep, ops and states
+    unchanged. trx64u 89,760 + 120,684 B, within its budget.
+  - Proof, all on the 0.4.3 base: `pack_cor.sh --emu` rc 0, `trx64u.cor` 3,883,643 B (`283c93dc...`), READY 3.6 s,
+    204 operations, 188 states, missing 0, not in the golden 0. ue2emu, `10 print ti` / `20 goto 10`, Timewarp, UP, UP,
+    LEFT, against the u18 libraries without T-3 on the same base: with T-3 the picture's lines read 506..567,
+    443..506, 382..446, 382..443, each its step's C64 screen (at least 99 % of the 64,000 C64 pixels, UP 1 all of them;
+    the rest is the frame drawn last lagging the screen RAM), without T-3 511..572 at every step. Colours: u64cfg's
+    default palette, then a `.vpl` applied by `u64.apply_palette` (screen 00A200, text FF8200), without T-3 Colodore in
+    both; the base's own still under the menu takes the `.vpl` too. Host: `tw_bar_paint` compiled on the Mac against a
+    model of tw_draw_bar, 6 states, no pixel different; box, glyph, track marker, texts and the mix checked. Not shown:
+    our bar in ue2emu (the base's lies over it), the board.
+  - Found for MultiCore: frame() of the still takes 1.2 s in ue2emu (timed around the call: frame() 1,193-1,205 ms,
+    the bar 45 ms; inside the base's `Video::grab`, not timed further), so the menu task needs 1,477 ms for the page's
+    key and each step's picture follows its move by 1.24 s. The close from the page takes 1,248 ms instead of 49-64 ms:
+    `remove()` sets `retake_` and settles on the UI task, and settle takes the base's still again while the machine
+    stands (`overlay.cc` 389-400, 615-633), though the menu is closing; the time is that of one grab. The bar is laid
+    out on 960 x 540: a library learns no canvas, so on 480p, 576p and 800 x 600 it lies partly outside.
+  - Found here: `build.sh` and `pack_cor.sh` keep objects of the old SDK after a pin change (their `.d` files name the
+    old SDK's files, which stay), so the first runs linked 0.4.1's base; `build/app/obj` had to be emptied by hand.
+    `fetch_sdk.sh` given a relative path to `online.u2a` deletes the file before it copies it.

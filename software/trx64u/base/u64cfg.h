@@ -67,8 +67,11 @@ void u64cfg_power_on_keys(void);
 void u64cfg_restore_mixer(CoreCtx *c);
 
 // The command interface's palette and SID map commands (the export "uci" through UciHooks): what 0 reads the 16 colours, 1 sets all, 2 sets colour idx from
-// rgb[0], 3 resets; the SID map bytes.
+// rgb[0], 3 resets; the SID map bytes. The core hook menu_video reads the 16 colours with 0 for the ring library's Timewarp bar (lib_trx64u.cc).
 void u64cfg_palette(int what, uint8_t idx, uint8_t (*rgb)[3]);
+// Makes the palette in force the source of the colours the base paints the stopped machine's picture in (api->overlay->still_palette), once the base takes
+// it; until then each call tries again. Any task; the core's service poll and the hook menu_video call it.
+void u64cfg_still_palette(void);
 int u64cfg_sid_map(uint8_t *data);
 
 // Which SID sits in a socket (the last detection, 0 none, 1 6581, 2 8580, ...) and the names for the screen.

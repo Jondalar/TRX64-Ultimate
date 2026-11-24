@@ -6,7 +6,7 @@ against the TRX64 SDK (docs/specs/U18-trx64u-app-part-moves-here.md, D1-D5).
 | Folder | Library | Holds |
 |---|---|---|
 | `base/` | `trx64u`, the base | the menu (`menu.toml`), its operations (`trx64u_ops`), the C64U settings (`u64cfg`) |
-| `ring/` | `ring` | the Timewarp ring, its files (`.c64re`, `.c64rering`, `.trxring`) and its operations |
+| `ring/` | `ring` | the Timewarp ring, its files (`.c64re`, `.c64rering`, `.trxring`) and its operations; the picture under the Timewarp page, the frame and the bar (`twstill.cc`, `twbar.cc`) |
 | `monitor/` | `monitor`, needs `ring` | the monitor, its RPC server on TCP 4312; the engine is trxmon, `software/ultimate-app/apps/trxmon/src` (D4: one source) |
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the shared libraries of the SDK it is linked with (MultiCore T239.3 D31) |
@@ -28,7 +28,8 @@ none). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
 `pack_cor.sh` links trx64u's app from the SDK's base archive with `gateware/c64_basic.toml` (TOML A) and
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
-has the figures and what is open).
+has the figures and what is open). The ring library's Timewarp picture (U18 T-3) needs SDK 0.4.3 or later
+(`api->overlay->frame`, `still_palette`); with it the pin goes to 0.4.4 (U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
 the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5).

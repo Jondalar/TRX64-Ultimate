@@ -467,10 +467,11 @@ static void service_job(void)
     g_st.job = J_NONE;
 }
 
-// c64.service (desc.toml [core] service_op, every 20 ms while the machine runs): the SID player's handshake (T228 R21 item 7), the program job, then the
-// drive's write-back on the same task (T104.1 D15).
+// c64.service (desc.toml [core] service_op, every 20 ms while the machine runs): the source of the still's colours until the base takes it (u64cfg.h), the
+// SID player's handshake (T228 R21 item 7), the program job, then the drive's write-back on the same task (T104.1 D15).
 int c64_service(CoreCtx *c, const OpArgs &, OpOut &o)
 {
+    u64cfg_still_palette();
     trx64u_sid_service(c);
     service_job();
     const Cbm1541Api *d = X_GET(X_DRIVE, Cbm1541Api, service);

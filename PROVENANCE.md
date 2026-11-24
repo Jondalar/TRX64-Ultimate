@@ -130,7 +130,7 @@ carry `SPDX-License-Identifier: GPL-3.0-or-later`, except those noted as made fr
 
 | Content | Path | Used in | Origin | Licence |
 |---|---|---|---|---|
-| Overlay fonts | `designs/c64_basic/mem/ovl_font8.mem`, `ovl_font12.mem` (`tools/font2mem.py`) | c64 | Gideon's `char_generator_rom_pkg.vhd` and `font_pkg.vhd` (header of `tools/font2mem.py`) | GPL-3 (`cores/gideon/LICENSE.txt`) |
+| Overlay fonts | `designs/c64_basic/mem/ovl_font8.mem`, `ovl_font12.mem` (`tools/font2mem.py`) | c64; `ovl_font8.mem` also in trx64u's `ring` library (the Timewarp bar's texts, `software/trx64u/ring/twfont.py` at build time) | Gideon's `char_generator_rom_pkg.vhd` and `font_pkg.vhd` (header of `tools/font2mem.py`) | GPL-3 (`cores/gideon/LICENSE.txt`) |
 | SID tables, kawari colours/luma, USB HID ROM | listed with their blocks above | c64 | as their blocks | as their blocks |
 
 No Commodore ROM is in a bitstream. The C64's Kernal, BASIC and character ROM

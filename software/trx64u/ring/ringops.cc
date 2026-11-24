@@ -1,6 +1,8 @@
 // Timewarp as operations and state values (T104.2 UI, Alex 2026-10-28: everything declarative). The engine is ring.cc (TRX64-Ultimate's frame ring driver); this file is what
 // the menu says to it: start and stop, scrub a frame or a second, back to live, mark, resume here, write and load a .c64re. menu.toml's page F1/timewarp is the base's
-// layout "timeline" (screens.cc build_timeline, which draws the bar from the states tw.pos, tw.info, tw.glyph, tw.track), its [[key]] rows call these operations.
+// layout "timeline", its [[key]] rows call these operations. The picture under the page is this library's (U18 T-3, twstill.cc): the frame of the scrub
+// position with the bar painted from the states tw.pos, tw.info, tw.glyph and tw.track (ringops_bar, twbar.cc); the base of SDK 0.4.3 still draws a bar of its
+// own from the same states over it (screens.cc build_timeline), until MultiCore's P2-6 takes it away.
 // U18 (the ring library on the SDK): the registrations are the static tables of ringops_record() (lib_ring.cc hands them out), settings are read
 // through api->ops->state("set.<Key>"), the dumps are operations the menu steps (trx_dump_*), the menu's write protocol and the target path are the ctx
 // group's; ring.init starts the engine (the core's start hook calls it), ring.poll is the library's poll and ring.unfreeze the menu's rewind at its close
@@ -97,10 +99,28 @@ static int go_to(int idx, char *msg, int msglen)
     return OPE_OK;
 }
 
-static int op_step(CoreCtx *, const OpArgs &a, OpOut &o) { return go_to(shown() + a.i(0), o.msg, o.msglen); }
-static int op_seconds(CoreCtx *, const OpArgs &a, OpOut &o) { return go_to(shown() + a.i(0) * trx_ring_fps(), o.msg, o.msglen); }
+// After a move the machine stands on another frame (also after a failed run, which may have drawn one): the still under the Timewarp page shows it with the
+// bar's new state (twstill.cc; nothing while the page is not up). Returns rc.
+static int painted(int rc)
+{
+    tw_still_scrubbed();
+    return rc;
+}
 
-static int op_oldest(CoreCtx *, const OpArgs &, OpOut &o) { return go_to(0, o.msg, o.msglen); }
+static int op_step(CoreCtx *, const OpArgs &a, OpOut &o) { return painted(go_to(shown() + a.i(0), o.msg, o.msglen)); }
+static int op_seconds(CoreCtx *, const OpArgs &a, OpOut &o) { return painted(go_to(shown() + a.i(0) * trx_ring_fps(), o.msg, o.msglen)); }
+
+static int op_oldest(CoreCtx *, const OpArgs &, OpOut &o) { return painted(go_to(0, o.msg, o.msglen)); }
+
+// From a frame shown (g_sel >= 0) back to the newest frame; the selection is forgotten. Returns go_to's answer.
+static int to_newest(OpOut &o)
+{
+    int rc = go_to(newest(), o.msg, o.msglen);
+    g_sel = -1;
+    g_glyph = 4;
+    trx_ring_set_pending(-1);                                      // the unfreeze goes on from the scrub's state to the newest frame
+    return rc;
+}
 
 static int op_live(CoreCtx *, const OpArgs &, OpOut &o)
 {
@@ -111,18 +131,16 @@ static int op_live(CoreCtx *, const OpArgs &, OpOut &o)
     if (g_sel < 0) {
         return OPE_OK;
     }
-    int rc = go_to(newest(), o.msg, o.msglen);
-    g_sel = -1;
-    g_glyph = 4;
-    trx_ring_set_pending(-1);                                      // the unfreeze goes on from the scrub's state to the newest frame
-    return rc;
+    return painted(to_newest(o));
 }
 
-// RUN/STOP and the left arrow: the menu closes and the machine goes on from the newest frame (a frame shown is not a place to run on from)
-static int op_cancel(CoreCtx *c, const OpArgs &a, OpOut &o)
+// RUN/STOP and the left arrow: the menu closes and the machine goes on from the newest frame (a frame shown is not a place to run on from). The still is
+// not painted again: the key closes the menu right after this (menu.toml), so the page goes, and a paint would hold the close for its time (a frame()
+// of the whole still). A caller that runs tw.cancel with the page left open (REST) sees the still of the frame shown before until the next step.
+static int op_cancel(CoreCtx *, const OpArgs &, OpOut &o)
 {
-    if (g_sel >= 0) {
-        op_live(c, a, o);
+    if (g_sel >= 0 && trx_ring_count() > 0) {
+        to_newest(o);
     }
     g_glyph = 0;
     return OPE_OK;
@@ -215,7 +233,7 @@ static int op_next_mark(CoreCtx *, const OpArgs &a, OpOut &o)       // value +1:
         r_snprintf(o.msg, o.msglen, "No marker that way");
         return OPE_FAILED;
     }
-    return go_to(best, o.msg, o.msglen);
+    return painted(go_to(best, o.msg, o.msglen));
 }
 
 static int op_clear_marks(CoreCtx *, const OpArgs &, OpOut &o)
@@ -446,25 +464,36 @@ static const char *st_bar(CoreCtx *)
     r_snprintf(b4, sizeof(b4), "%d", n > 1 ? shown() * 100 / (n - 1) : 100);
     return b4;
 }
-// the bar of the pixel layer (trx_timewarp_ui.cc draw_bar): the position large, the frame small, the span of the ring as a track
-static const char *st_pos(CoreCtx *)
+// the bar (trx_timewarp_ui.cc draw_bar): the position large, the frame small, the span of the ring as a track; the state values below and the still's bar
+// (ringops_bar) say the same
+static void pos_text(char *out, int len)
 {
     int n = trx_ring_count();
     if (g_sel < 0 || n <= 0) {
-        return "now";
+        r_snprintf(out, len, "now");
+        return;
     }
     int fps = trx_ring_fps() ? trx_ring_fps() : 50;
     int f = n - 1 - g_sel;
-    r_snprintf(b4, sizeof(b4), "-%d.%d s", f / fps, (f % fps) * 10 / fps);
+    r_snprintf(out, len, "-%d.%d s", f / fps, (f % fps) * 10 / fps);
+}
+static void info_text(char *out, int len)
+{
+    int n = trx_ring_count();
+    if (n < 2) {
+        r_snprintf(out, len, "the ring holds no frame yet");
+        return;
+    }
+    r_snprintf(out, len, "frame %d / %d", shown() + 1, n);
+}
+static const char *st_pos(CoreCtx *)
+{
+    pos_text(b4, sizeof(b4));
     return b4;
 }
 static const char *st_info(CoreCtx *)
 {
-    int n = trx_ring_count();
-    if (n < 2) {
-        return "the ring holds no frame yet";
-    }
-    r_snprintf(b1, sizeof(b1), "frame %d / %d", shown() + 1, n);
+    info_text(b1, sizeof(b1));
     return b1;
 }
 static const char *st_glyph(CoreCtx *)
@@ -478,6 +507,22 @@ static const char *st_track(CoreCtx *)
     int n = trx_ring_count();
     r_snprintf(b5, sizeof(b5), "%d/%d", n > 0 ? shown() : 0, n);
     return b5;
+}
+
+// The bar of the still under the Timewarp page (twstill.cc): what tw.glyph, tw.pos, tw.info and tw.track say, info in the warning colour when it says the
+// ring holds no frame, and the page's hint, the text of the page's ui.hint in base/menu.toml (the menu has no state for it; keep the two the same).
+void ringops_bar(TwBar *b, char *pos, int poslen, char *info, int infolen)
+{
+    int n = trx_ring_count();
+    pos_text(pos, poslen);
+    info_text(info, infolen);
+    b->glyph = g_glyph;
+    b->pos = pos;
+    b->info = info;
+    b->hint = "RETURN jump  <- cancel";
+    b->warn = n < 2;
+    b->track_pos = n > 0 ? shown() : 0;
+    b->track_len = n;
 }
 static const char *st_marks(CoreCtx *)
 {
