@@ -1372,4 +1372,6 @@ Nothing decided yet.
     does not allow a library's write to it. What the code does: the enable and disable registers set and clear only the bits written
     (`itu.vhd`:136-139); the base enables the timer alone, "other modules shall enable their own interrupt" (`riscv_main.c`:185, MultiCore
     6e280710); the base's handler calls the server's strong hooks. Until Alex decides, the handed-over code stays as it is.
+  - CI run 481 (82fe1b90) green in every stage; delivered to MultiCore (D45): `trx64u_82fe1b90.cor`, 3,987,048 bytes, sha256
+    `b4e184bd...`, and `trx64g_82fe1b90.cor`, 3,568,073 bytes, sha256 `ffcd38c2...`, both checked against the package's SHA256SUMS.
   - Not exercised: the board, a UCI command from a C64 program, the NETWORK target and CONTROL.
