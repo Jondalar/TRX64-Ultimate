@@ -154,4 +154,18 @@ In this order; each step is a commit with its docs. A, B and E are ours; C is Mu
 
 ## 6. Build notes
 
-None yet.
+### A1, A4 (Gideon's gateware in `vendor/gideon`, bench inputs)
+
+Not started.
+
+### A2, A3 (our fork code in the tree, the SID and music player out)
+
+Not started.
+
+### A5, A6, A7 (submodule out, the Gideon-app line on Gitea, ROMs, keys)
+
+Not started.
+
+### A8 (public-tree check)
+
+Not started.
