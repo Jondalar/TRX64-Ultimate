@@ -133,15 +133,17 @@ put_op = "drive.put_rom"
 
 # ---- the register windows -----------------------------------------------------------------------------------------------------------------------------
 # What is left of this core's [[window]] rows after its registers moved into c64_basic's TOML A (../gateware/c64_basic.toml, MultiCore T239.3 P1-7): the
-# four whose blocks lie in ranges MultiCore's host TOML A gives the base. Who owns them is open (Alex, U18 §5); until then they stay as they were, and
+# four whose blocks lie in ranges MultiCore's host TOML A gives the base. Alex decided 2026-11-24 (U18 §5): they become core blocks of our TOML A; until
+# that change they stay as they were, and
 # `io.window(name, &size)` hands them out (lib_trx64u.cc c64u_win; the offsets are u64cfg.cc's). The addresses are the firmware's (U2P_IO_BASE 0xA0000000):
-# the base (SDK 0.4.0 and later) translates them to the I/O bus of the TOML A the app is linked with (0.4.1: libsvc.cc window() with descrec.cc
-# descrec_fw_to_board, 0xA0000000 + n to DRV_U2P_IO_BASE 0x10100000 + n; null for a block off the I/O bus), and both readers of the record (descrec.py,
-# descrec.cc) refuse a window that leaves its firmware span or covers a register of basereg.def after that translation. A base before 0.4.0 handed them
+# the base (SDK 0.4.0 and later) translates them to the I/O bus of the TOML A the app is linked with (0.4.4: libsvc.cc window() with descrec.cc
+# descrec_fw_to_board, 0xA0000000 + n to DRV_U2P_IO_BASE 0x10100000 + n; null with *size 0 for a window not wholly inside the board's I/O span
+# [0x10000000, 0x11000000)), and both readers of the record (descrec.py, descrec.cc) refuse a window that leaves its firmware span, lies outside that
+# span or covers an entry of basereg.def after that translation. A base before 0.4.0 handed them
 # out as they are, and the app's bus converter sent 0xA0xxxxxx to the memory path (bit 28 clear). In
-# c64_basic, ultimate_sys.vhd decodes the mixer at 0x1005xx (:1245-1268: +0x00-0x0B, +0x40, +0x41, +0x44, +0x45, writes only), the C64 palette at
-# 0x180800-0x18083F (:913-914, :973: RGB writes only, no YUV at +0x400), and the HDMI palette in the overlay region (0x140000-0x147FFF, :903-904, :966,
-# :971): overlay.v's 16 colours of the overlay's characters at +0x5000-0x503F (overlay.v:105-111, R G B at 4n, writes only; used at :288).
+# c64_basic, ultimate_sys.vhd decodes the mixer at 0x1005xx (:1257-1280: +0x00-0x0B, +0x40, +0x41, +0x44, +0x45, writes only), the C64 palette at
+# 0x180800-0x18083F (:925-926, :985: RGB writes only, no YUV at +0x400), and the HDMI palette in the overlay region (0x140000-0x147FFF, :915-916, :978,
+# :983): overlay.v's 16 colours of the overlay's characters at +0x5000-0x503F (overlay.v:105-111, R G B at 4n, writes only; used at :288).
 
 [[window]]
 name = "audio_mixer"            # FW U64_AUDIO_MIXER: 10 channels, a byte per side

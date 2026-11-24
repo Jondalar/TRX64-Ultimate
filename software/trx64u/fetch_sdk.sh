@@ -5,7 +5,7 @@
 #   software/trx64u/fetch_sdk.sh --download      (our registry's copies, sdk.pin's sdk_package and online_package; GITEA_URL, default
 #                                                  http://gitea.example, CI passes its server)
 # Each file is checked against its sha256 in sdk.pin first; a different file is refused. The tarball unpacks to trx64-sdk-<sdk_version>/
-# whatever its own name (some dev builds carry their commit in it, 0.3.0, 0.4.0 and 0.4.1 do not); its VERSION must match the pin (build.sh --check).
+# whatever its own name (some dev builds carry their commit in it, 0.3.0 and the 0.4.x do not); its VERSION must match the pin (build.sh --check).
 # online.u2a (sdk.pin online_*: MultiCore's online sub-app of the same t239.3 commit, not part of the tarball) goes to .sdk/online.u2a, where
 # pack_cor.sh takes it for record 7 and checks it again; with a local tarball and no second argument only the SDK is unpacked.
 set -eu

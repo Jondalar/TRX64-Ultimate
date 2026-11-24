@@ -79,7 +79,8 @@ uint32_t sum32(const uint8_t *p, uint32_t n, uint32_t s)
 // 0 and the jump done (on the board it does not return); otherwise 1 and the reason in msg.
 int run_record(const char *path, char *msg, int msglen)
 {
-    // the base's board profile: under the MultiCore host the host's menu runs updates (diag.cc state_host_multicore: the ICAP loader answered)
+    // the base's board profile: under the MultiCore host the host's menu runs updates (diag.cc state_host_multicore: board_detect's MultiCore
+    // profile, api.md 6.17.5.5: the ICAP loader answers 0x7A and the partition control is linked or the hand-over page is valid)
     const char *host = g_api->ops->state("host.multicore", 0);
     if (host && host[0]) {
         snprintf(msg, msglen, "Updates run from the host's menu on this board.");

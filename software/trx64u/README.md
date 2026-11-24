@@ -1,6 +1,6 @@
 # trx64u: TRX64 Ultimate as a core of the MultiCore app core (U18)
 
-The application part of the `trx64u` core: three libraries and two sub-apps for MultiCore's generic app core, built here
+The application part of the `trx64u` core: three libraries and a sub-app for MultiCore's generic app core, built here
 against the TRX64 SDK (docs/specs/U18-trx64u-app-part-moves-here.md, D1-D5).
 
 | Folder | Library | Holds |
@@ -22,8 +22,8 @@ is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
 
 ## State
 
-The three libraries and the two sub-apps build on MultiCore's dev SDK 0.4.1 (base 3.3, not released yet): every link
-closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (the sub-apps declare
+The three libraries and the sub-app build on MultiCore's dev SDK 0.4.4 (base 3.3, not released yet): every link
+closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (the sub-app declares
 none). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
 `pack_cor.sh` links trx64u's app from the SDK's base archive with `gateware/c64_basic.toml` (TOML A) and
@@ -63,8 +63,8 @@ trxmon itself builds as a library as it is (2026-11-22): every file compiles aga
 
 ## SDK
 
-`sdk.pin` names the SDK version and the sha256 of its tarball, and MultiCore's online sub-app of the same commit
-(`online_*`). `./fetch_sdk.sh <tarball> [<online.u2a>]` checks both and puts them into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
+`sdk.pin` names the SDK version and the sha256 of its tarball, and MultiCore's online sub-app with its own
+commit (`online_*`: 8ff28ba9; apps/online has not changed since). `./fetch_sdk.sh <tarball> [<online.u2a>]` checks both and puts them into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
 `riscv64-elf-` has no newlib headers.
 
 ## Packing trx64u.cor
@@ -78,7 +78,7 @@ trxmon itself builds as a library as it is (2026-11-22): every file compiles aga
    `curl -o c64_basic.bit http://gitea.example/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit`.
    It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
 3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version> [--emu <ue2emu>]` builds the three libraries,
-   the two sub-apps and the SID player's files, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
+   the sub-app and the SID player's files, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
    `tools/app_build.py build` with `gateware/c64_basic.toml` and `app/toml_b.toml`), runs the SDK's symbol check
    (`libtab.py symcheck`: no object of the base uses a symbol of a linked library), packs `build/cor/trx64u.cor` (`--out`
    for another name) with the heap of word 0 and runs `cor_pack.py check` on it; it prints the heap figures, the size and

@@ -2,26 +2,28 @@
 # unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore's branch t239.3 (their D26: we take
 # it from there); their builds are in that repository's .ci/sdk/ and in their pipeline's artifacts, which expire.
 # A copy of the pinned tarball is in our registry under sdk_package (TREX, generic); fetch_sdk.sh --download takes it there.
-# DEV BUILD: 0.4.1 (base 3.3) from MultiCore's branch t239.3, commit 8ff28ba9, not a release. The tarball's name does not
-# carry the commit (trx64-sdk-0.4.1.tar.gz); it unpacks to trx64-sdk-0.4.1/, the name a 0.4.1 release unpacks to as well.
+# DEV BUILD: 0.4.4 (base 3.3) from MultiCore's branch t239.3, commit 9cd216eb, not a release: D11's frame() and still_palette, D37's
+# blocks icap and partition with the rule of the board profile, D36's audio_master. The tarball's name does not carry the commit
+# (trx64-sdk-0.4.4.tar.gz); it unpacks to trx64-sdk-0.4.4/, the name a 0.4.4 release unpacks to as well.
 # build.sh checks the unpacked VERSION against source_commit and the hashes below, so a release unpacked over it is not
 # taken for this build. The SDK ships no app image (since 0.4.0): the app is linked here from the base archive
 # (pack_cor.sh), and base_archive_sha256 is the hash of its lib/libtrxbase.a as VERSION names it.
-sdk_version=0.4.1
-sdk_tarball=trx64-sdk-0.4.1.tar.gz
-sdk_package=trx64-sdk/0.4.1-8ff28ba9
-sdk_tarball_sha256=8b5f2b29d3c6716104b969d6ffc6f4a080d0f2d59fabc5d47aec753069942d67
+sdk_version=0.4.4
+sdk_tarball=trx64-sdk-0.4.4.tar.gz
+sdk_package=trx64-sdk/0.4.4-9cd216eb
+sdk_tarball_sha256=29144432bd77133d12b446fc5a5aa9619458bef8aaf5878c83e492159ebaafe7
 source_branch=t239.3
-source_commit=8ff28ba9
+source_commit=9cd216eb
 base_api=3.3
 abi_major=3
-api_headers_sha256=d7a12ad85028f666dcd1b25a0e8e4cd55e883faeb4261065045ff3b733a04db1
-base_archive_sha256=c7ad6b29d8d3d3224c389e74a07023a18ade4a14f73984185644765c89248123
-# The online sub-app (MultiCore T239.3 L-3, D12: online search is a shared sub-app): online.u2a of MultiCore's t239.3 8ff28ba9 apps/online, not inside the
-# tarball (their .ci/sdk/ keeps it beside the SDK). Rebuilt here byte for byte (2026-11-24) from those sources with 8ff28ba9's coreapp/src/online_api.h (the
-# SDK does not ship it) and this SDK's mk/app.mk. trx64u.cor carries it in record 7 (pack_cor.sh --lib); it registers the operations and states online.*
-# and its menu record brings the F3 tab Online. fetch_sdk.sh checks it against online_u2a_sha256 and puts it into .sdk/; a copy goes into our registry
-# under online_package (TREX, generic; fetch_sdk.sh --download).
+api_headers_sha256=1065b4ac210783c4b76a090b850c74d34c8ab44d03eb7a74f0f0bf93c6da1cb8
+base_archive_sha256=37b35de3e3ffec8852db00fc5f49ddda20cfa0738a331a5e2bbeec392e592428
+# The online sub-app (MultiCore T239.3 L-3, D12: online search is a shared sub-app): online.u2a of MultiCore's t239.3 8ff28ba9 apps/online, not inside
+# the tarball (their .ci/sdk/ keeps it beside the SDK; 8ff28ba9 is not on their remote, 2b6d6a56b of origin/t239.3 has its subject and the same
+# apps/online tree). Rebuilt here byte for byte (2026-11-24) from those sources with 8ff28ba9's coreapp/src/online_api.h (SDK 0.4.2 and later ship it
+# as include/online_api.h) and SDK 0.4.1's mk/app.mk; apps/online has not changed since. trx64u.cor carries it in record 7 (pack_cor.sh --lib); it
+# registers the operations and states online.* and its menu record brings the F3 tab Online. fetch_sdk.sh checks it against online_u2a_sha256 and puts
+# it into .sdk/; a copy goes into our registry under online_package (TREX, generic; fetch_sdk.sh --download).
 online_u2a=online.u2a
 online_package=trx64-online/1.0-8ff28ba9
 online_u2a_sha256=970b0c2ce7586f44a46422fbb6214184cff538f7525ca57718374d560216e32b

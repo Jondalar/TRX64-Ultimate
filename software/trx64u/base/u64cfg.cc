@@ -396,7 +396,7 @@ static const uint8_t spare_vol[3] = { 11, 4, 4 };
 static const uint8_t spare_pan[3] = { 7, 5, 5 };
 
 // The two mixer windows (desc.toml: audio_mixer, speaker_mixer): 10 channels of two bytes (right, left), and the speaker's gain, of which
-// ultimate_sys.vhd:1245-1268 decodes the bytes +0x00, +0x01, +0x04 and +0x05.
+// ultimate_sys.vhd:1257-1280 decodes the bytes +0x00, +0x01, +0x04 and +0x05.
 #define MIXER_CHANNELS 10
 #define SPEAKER_GAINS 4
 static const uint8_t speaker_gain[SPEAKER_GAINS] = { 0x00, 0x01, 0x04, 0x05 };
@@ -417,7 +417,7 @@ static void write_mixer(void)
     }
 }
 
-// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0: speaker_enable) and setSpeakerMixer :1749-1765. ultimate_sys.vhd:1245-1268 decodes four bytes
+// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0: speaker_enable) and setSpeakerMixer :1749-1765. ultimate_sys.vhd:1257-1280 decodes four bytes
 // of the speaker mixer (speaker_gain) and the bitstream plays the mono mix at the highest of them, so the one speaker volume goes to all four; the
 // per-source volumes of the FW are not decoded and stay out.
 static void write_speaker(void)

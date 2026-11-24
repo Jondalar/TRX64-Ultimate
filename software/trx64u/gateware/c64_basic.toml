@@ -5,7 +5,7 @@
 # take every register address from; rtl_check.py checks it against the RTL (U18 §5 has the command and what it can follow).
 #
 # The address path: the app RISC-V sends a data access to the I/O bus only when address bit 28 is set (rvlite_wrapper_dc.vhd: bus_converter g_io_bit
-# 28; bus_converter.vhd:123), and the I/O bus carries bits 23:0 of it (ultimate_sys.vhd:860-862 decodes io_req.address(23:0)); so iobase is
+# 28; bus_converter.vhd:123), and the I/O bus carries bits 23:0 of it (ultimate_sys.vhd:870-872 decodes io_req.address(23:0)); so iobase is
 # 0x10000000. A 16- or 32-bit access is split into byte accesses at rising addresses, byte 0 first, within one CPU access (bus_converter.vhd:56,
 # :173-184), which is what the 32-bit registers of trx_sys.v want (bytes 0-2 collect, byte 3 commits; byte 0 latches a read: trx_sys.v:311-323).
 #
@@ -14,7 +14,7 @@
 # it today: open, U18 §5). owner "core": a block only trx64u's libraries drive. One block per register range and driver (D34); trx_io.v is cut into
 # its pages that way.
 #
-# Not here: the resampler (0x10100580: ultimate_sys.vhd:1245-1268 decodes 0x101005xx only at 0x00-0x0B and 0x40, 0x41, 0x44, 0x45), and the
+# Not here: the resampler (0x10100580: ultimate_sys.vhd:1257-1280 decodes 0x101005xx only at 0x00-0x0B and 0x40, 0x41, 0x44, 0x45), and the
 # ranges of the four register windows still in desc.toml (audio_mixer, speaker_mixer, c64_palette, hdmi_palette: their owner is open, U18 §5).
 
 [io]
@@ -25,7 +25,7 @@ u2p_io_base = 0x10100000
 id = "TRX2"
 block = "ident"
 
-# ---- trx_io.v (0x101A0000-0x101AFFFF, ultimate_sys.vhd:873 region r_cw, page = addr[15:12]) ------------------------------------------------------
+# ---- trx_io.v (0x101A0000-0x101AFFFF, ultimate_sys.vhd:883 region r_cw, page = addr[15:12]) ------------------------------------------------------
 
 # page 0 0x000-0x00F: the standard block (trx_io.v:328-340): "TRX2", the capability bytes (constants of the bitstream: 0xFF, 0xF7, caps3), BUILD
 [[block]]
@@ -876,8 +876,8 @@ size = 0x14
 
 # ---- ultimate_sys.vhd's own decode --------------------------------------------------------------------------------------------------------------
 
-# 0x10040000: the C64's control page (page RAM, every byte writes and reads back: ultimate_sys.vhd:1232-1233, :1243; the registers: :1076-1108
-# write, :1315-1330 read). The cartridge library's map c64cart_regs has mode, stop, type, reu, reu_size and sampler write-only and no stop_mode or
+# 0x10040000: the C64's control page (page RAM, every byte writes and reads back: ultimate_sys.vhd:1244-1245, :1255; the registers: :1088-1120
+# write, :1327-1342 read). The cartridge library's map c64cart_regs has mode, stop, type, reu, reu_size and sampler write-only and no stop_mode or
 # clock_detect, which trx64u reads and writes; the block carries the page's registers itself, under the map's names and states.
 [[block]]
 name = "cart_regs"
@@ -970,7 +970,7 @@ size = 0x100
     name = "on"
     value = 1
 
-# 0x10020000-0x10023FFF: drive A (ultimate_sys.vhd:869-870, drive_unit.vhd, Gideon's c1541_drive). The drive library's map cbm1541 without what
+# 0x10020000-0x10023FFF: drive A (ultimate_sys.vhd:879-880, drive_unit.vhd, Gideon's c1541_drive). The drive library's map cbm1541 without what
 # this drive does not decode: the WD177x registers from +0x1800 (no write reaches them), `side` (it reads a constant 0) and `drivetype`
 # (drive_registers.vhd:89-92, :121-124 only with g_multi_mode).
 [[block]]
@@ -1085,7 +1085,7 @@ size = 0x4000
     shift = 16
     bits = 16
 
-# 0x10044000: the UCI (ultimate_sys.vhd:875-876, uci_unit.vhd), the UCI library's map
+# 0x10044000: the UCI (ultimate_sys.vhd:885-886, uci_unit.vhd), the UCI library's map
 [[block]]
 name = "cmd_if"
 module = "uci_unit"
@@ -1094,7 +1094,7 @@ address = 0x10044000
 size = 0x10
 map = "uci"
 
-# 0x10050000: the DMA window into the C64 (ultimate_sys.vhd:877-878, :1003-1022; dma_win.v behind the handshake), the DMA map
+# 0x10050000: the DMA window into the C64 (ultimate_sys.vhd:887-888, :1015-1034; dma_win.v behind the handshake), the DMA map
 [[block]]
 name = "dma"
 module = "dma_win"
@@ -1103,7 +1103,7 @@ address = 0x10050000
 size = 0x10000
 map = "dma"
 
-# 0x10060500: the GCR coder (ultimate_sys.vhd:883-884, Gideon's gcr_codec), the drive library's map
+# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894, Gideon's gcr_codec), the drive library's map
 [[block]]
 name = "gcr_coder"
 module = "gcr_codec"
@@ -1112,7 +1112,19 @@ address = 0x10060500
 size = 0x10
 map = "gcr_coder"
 
-# 0x1010000C: the speaker enable of u2p_io (ultimate_sys.vhd:891-892 region r_u2p; u2p_io.vhd:75-77 read, :120-122 write: b0 on, b4:1 volume);
+# 0x10060600: the ICAP loader (MultiCore T239.3 D37, a port of the host's loader; ultimate_sys.vhd:895-896 region r_icap, :1374-1403 write,
+# :1410-1419 read; top.v:620-625 the byte bit reversal and ICAPE2 X32 on cpu_clk), the base's map icap: the way back to the MultiCore host
+# (IPROG with WBSTAR 0, the contract's section 7). c64_basic has no partition and no port lock, so there is no block `partition` (+0x20, +0x21):
+# the base then does no partial load, no port release and no decouple write, and takes the board as the host's only with a valid hand-over page.
+[[block]]
+name = "icap"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10060600
+size = 0x1C
+map = "icap"
+
+# 0x1010000C: the speaker enable of u2p_io (ultimate_sys.vhd:903-904 region r_u2p; u2p_io.vhd:75-77 read, :120-122 write: b0 on, b4:1 volume);
 # the rest of the U2P block (I2C, MDIO, the USB hub and ULPI resets) is the base's
 [[block]]
 name = "speaker_enable"
@@ -1130,8 +1142,8 @@ size = 0x1
     shift = 0
     bits = 1
 
-# 0x10100400 (page 2, page RAM: ultimate_sys.vhd:901-902, :1232-1233, :1243): the three runs of the U64 block trx64u writes. The bitstream gives
-# them no function beyond the page RAM (the page's registers are 0x00, 0x02, 0x03, 0x06, 0x07, 0x0A, 0x0B, 0x0E, 0x0F: :1187-1219, :1331-1347);
+# 0x10100400 (page 2, page RAM: ultimate_sys.vhd:913-914, :1244-1245, :1255): the three runs of the U64 block trx64u writes. The bitstream gives
+# them no function beyond the page RAM (the page's registers are 0x00, 0x02, 0x03, 0x06, 0x07, 0x0A, 0x0B, 0x0E, 0x0F: :1199-1231, :1343-1359);
 # power, RESTORE, the HDMI PLL reset, the keyboard scan and the case LEDs are the base's
 [[block]]
 name = "u64_userport"
@@ -1174,7 +1186,7 @@ size = 0x1
   width = 8
   dir = "rw"
 
-# 0x10180000 (page 3, the C64's I/O block, page RAM: ultimate_sys.vhd:905-906, :1109-1180, :1352-1357), one block per register range and driver:
+# 0x10180000 (page 3, the C64's I/O block, page RAM: ultimate_sys.vhd:917-918, :1121-1192, :1364-1369), one block per register range and driver:
 # the base writes the video format (io.video_format), the DMA mode (io.ram_memonly) and the joystick lines; trx64u the rest. Of the video format the
 # bitstream acts on ntsc_encoding and cycles_65 (mode_ctl.v:74-75 picks the clock and line timing from them); hz60, rgb_output and ntsc_freq are the
 # firmware's bits, kept in the page RAM and read back.
@@ -1259,7 +1271,7 @@ size = 0x1
   width = 8
   dir = "rw"
 
-# +0x08-0x0F: the addresses of the two SID sockets and the two UltiSIDs (:1160-1163, :1171-1174), each a run of four in that order: socket 1,
+# +0x08-0x0F: the addresses of the two SID sockets and the two UltiSIDs (:1172-1175, :1183-1186), each a run of four in that order: socket 1,
 # socket 2, UltiSID 1, UltiSID 2
 [[block]]
 name = "c64_sid_addr"
@@ -1280,7 +1292,7 @@ size = 0x8
   count = 4
   dir = "rw"
 
-# +0x11-0x14: the sockets' enables (:1175-1176), the paddles (page RAM only) and the stereo address select (:1177)
+# +0x11-0x14: the sockets' enables (:1187-1188), the paddles (page RAM only) and the stereo address select (:1189)
 [[block]]
 name = "c64_sid_sock"
 module = "ultimate_sys"
@@ -1308,7 +1320,7 @@ size = 0x4
   width = 8
   dir = "rw"
 
-# +0x20-0x29: the UltiSIDs' waveforms, resonance, digis and split (:1164-1170)
+# +0x20-0x29: the UltiSIDs' waveforms, resonance, digis and split (:1176-1182)
 [[block]]
 name = "c64_sid_cfg"
 module = "ultimate_sys"
@@ -1351,7 +1363,7 @@ size = 0xA
   width = 8
   dir = "rw"
 
-# +0x2A-0x2E: the bus bridge (page RAM only), the bus sharing (:1137-1144) and the turbo's speed (:1153-1154)
+# +0x2A-0x2E: the bus bridge (page RAM only), the bus sharing (:1149-1156) and the turbo's speed (:1165-1166)
 [[block]]
 name = "c64_bus"
 module = "ultimate_sys"
@@ -1384,7 +1396,7 @@ size = 0x5
   width = 8
   dir = "rw"
 
-# +0x30-0x31: the joystick lines the base drives (:1128-1134)
+# +0x30-0x31: the joystick lines the base drives (:1140-1146)
 [[block]]
 name = "c64_joy"
 module = "ultimate_sys"
@@ -1402,7 +1414,7 @@ size = 0x2
   width = 8
   dir = "rw"
 
-# 0x10181800 (page 5): U64_DEBUG_REGISTER, its own byte at +0 (ultimate_sys.vhd:1235-1242, :1348-1351), the DMA service's
+# 0x10181800 (page 5): U64_DEBUG_REGISTER, its own byte at +0 (ultimate_sys.vhd:1247-1254, :1360-1363), the DMA service's
 [[block]]
 name = "c64_debug"
 module = "ultimate_sys"
@@ -1415,7 +1427,7 @@ size = 0x10
   width = 8
   dir = "rw"
 
-# 0x10188000-0x1018FFFF: the ROM apertures (ultimate_sys.vhd:911-912, :1023-1043; dma_win.v): BASIC at +0x0000, KERNAL at +0x2000, the character
+# 0x10188000-0x1018FFFF: the ROM apertures (ultimate_sys.vhd:923-924, :1035-1055; dma_win.v): BASIC at +0x0000, KERNAL at +0x2000, the character
 # ROM at +0x4000 (4 KB, mirrored up to +0x6FFF). The base's io group writes and reads them (io.rom_write, io.rom_read).
 [[block]]
 name = "c64_roms"

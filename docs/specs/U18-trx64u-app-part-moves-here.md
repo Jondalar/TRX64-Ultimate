@@ -1006,3 +1006,23 @@ Nothing decided yet.
   - Open: the TOML A block `icap` (owner base) comes with SDK 0.4.4, which splits the host's region into `icap` and
     `partition` and brings the profile rule; until then the app is linked without `icap`, so the base sees no loader and
     trx64u stays standalone. A CI bitstream run, then the board test (Alex): "Return to host menu" reaches the host's menu.
+- **2026-11-24: CI run 475 (dispatched on `u18` 9716a546): green, the ICAP loader in the bitstream.** Lint, app, Bitstream,
+  Package, Simulations, Update files and Core (.cor) pass. c64_basic built anew (synth to bitstream 6 min): ICAPE2 1 of 2
+  (0 before), Slice LUTs 27,608 of 32,600 (84.69 %; 27,593 before), WNS +0.070 ns; `dma_bus` PASS in CI as well. The registry
+  uploads it needed (SDK 0.4.1 and `online.u2a`, then 0.4.4) are mine (Alex: "Uploads machst du doch selbst"), checked by an
+  anonymous download and its sha256.
+- **2026-11-24: our `trx64u.cor` for MultiCore's P1-8 (Alex: "Dann bau die .cor hier ... die muss nicht perfekt sein. Die
+  Fehler schleifen wir hier dann aus").** The Core stage packs it on every run: run 475's
+  `trx64-ultimate/u18-9716a546/trx64u_9716a546.cor`, 3,979,287 B, sha256 `513bd1aa...` (`cor_pack.py check` of 0.4.4 OK;
+  bitstream 9716a546 with the loader, app on SDK 0.4.1, records 7 and 8 as in step 2b). MultiCore has URL and sha256; its
+  package takes our `.cor` by sha256 and deletes its own trx64u copy (P1-8). Each later build has its own sha256.
+- **2026-11-24: SDK 0.4.4 pinned, the TOML A block `icap`.** 0.4.4 (`29144432...`, commit 9cd216eb, headers `1065b4ac`, the
+  same as 0.4.3's) brings D11 (`frame()`, `still_palette`), D37 (the host's ICAP region as the blocks `icap`, 0x1C bytes, and
+  `partition`; the board is the host's when the loader answers 0x7A and `partition` is linked or the hand-over page is valid)
+  and D36 (Volume and Tone rows only with the base block `audio_master`; the operations `volume.*` and `tone.apply` stay
+  registered, so `base/ops_trx64u.txt` is unchanged). `gateware/c64_basic.toml` gets block `icap` (owner base, map `icap`,
+  34 blocks) and no `partition`: under the host the base offers "Return to host menu" through the page; standalone, at flash
+  0x0 without a page, it does not, and keeps the settings in the flash. Record 6 and the driver table of the other 33 blocks
+  are byte for byte those of 0.4.1. The ICAP insert moved the lines of `ultimate_sys.vhd` (+5 from 354, +10 from 428, +12 from
+  885, +44 from 1363, +54 from 1366): the references in the TOML A, `desc.toml` and `u64cfg.cc` follow. Not run here: the
+  emulator check (`pack_cor.sh --emu`) on 0.4.4; it comes with T-3, which is built on 0.4.3 meanwhile.
