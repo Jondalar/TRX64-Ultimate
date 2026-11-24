@@ -22,7 +22,7 @@ on:
 
 # The chain (docs/specs/T31-ci-pipeline.md), each stage its own workflow file that
 # also runs alone:
-#   lint -> app -> bitstream 50t -> package -> update and cor (trx64u.cor), and sims behind the package
+#   lint -> app -> bitstream 50t -> package -> update and cor (trx64u.cor, trx64g.cor), and sims behind the package
 #   (bitstream 100t commented out 2026-10-16, see bit-ue2 at the end)
 # Nothing here decides anything: what a stage skips (benches that already passed,
 # a bitstream whose sources did not change) it decides
@@ -76,10 +76,10 @@ jobs:
     with:
       force: ${{ github.event.inputs.update }}
     secrets: inherit
-  # trx64u.cor (U18) from the package's bitstream and software/trx64u; a branch without software/trx64u prints
-  # "cor SKIPPED" and is green in seconds.
+  # trx64u.cor (U18) from the package's bitstream and software/trx64u, and trx64g.cor (MultiCore T239.3 D46) from its
+  # bitstream and ultimate.app; a branch without software/trx64u prints "cor SKIPPED" and is green in seconds.
   cor:
-    name: cor (trx64u.cor)
+    name: cor (trx64u.cor, trx64g.cor)
     needs: package
     uses: ./.gitea/workflows/cor.yml
     secrets: inherit

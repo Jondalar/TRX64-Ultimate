@@ -2,6 +2,7 @@
 # unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore's branch t239.3 (their D26: we take
 # it from there); their builds are in that repository's .ci/sdk/ and in their pipeline's artifacts, which expire.
 # A copy of the pinned tarball is in our registry under sdk_package (TREX, generic); fetch_sdk.sh --download takes it there.
+# trx64g.cor is packed with this SDK's tools/cor_pack.py too (software/trx64g/pack_large_cor.sh, MultiCore T239.3 D46).
 # DEV BUILD: 0.4.5 (base 3.3) from MultiCore's branch t239.3, commit e8b76719, not a release: D11's frame() and still_palette (0.4.3),
 # D37's blocks icap and partition with the rule of the board profile and D36's audio_master (0.4.4), and T256's canvas() with the
 # grab's column table, no grab when a library's still goes as the menu closes, no Timewarp bar of the base (D12) and the base's still

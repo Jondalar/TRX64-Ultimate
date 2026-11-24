@@ -1,9 +1,10 @@
 name: Core
 
-# Stage cor: trx64u.cor (U18) from the package's bitstream, the pinned TRX64 SDK and software/trx64u, added to the same
-# package version (ci/cor.sh). Called by pipeline.yml (workflow_call) and runnable alone (workflow_dispatch). A branch
-# without software/trx64u stays green after seconds with "cor SKIPPED" (decided in the script). No concurrency group,
-# as in the other stages.
+# Stage cor: trx64u.cor (U18) from the package's bitstream, the pinned TRX64 SDK and software/trx64u, and trx64g.cor
+# (MultiCore T239.3 D46) from the package's bitstream and ultimate.app with MultiCore's packer as copied to software/trx64g,
+# both added to the same package version (ci/cor.sh). Called by pipeline.yml (workflow_call) and runnable alone
+# (workflow_dispatch). A branch without software/trx64u stays green after seconds with "cor SKIPPED" (decided in the
+# script). No concurrency group, as in the other stages.
 on:
   workflow_call:
   workflow_dispatch:
@@ -35,7 +36,7 @@ jobs:
         env:
           APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
         run: src/ci/submodule.sh
-      - name: Build, pack and publish trx64u.cor
+      - name: Build, pack and publish trx64u.cor and trx64g.cor
         env:
           PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
         run: src/ci/cor.sh

@@ -1184,3 +1184,66 @@ Nothing decided yet.
     `/Usb0/cores`, answered by our library.
   - Not exercised: the board, the UCI from the C64's side, and CONTROL's palette and DECODE_TRACK commands. Their
     registers are covered by the address check and by the unchanged driver table names.
+- **2026-11-24: `trx64g.cor` is packed here too (MultiCore T239.3 D46; branch `u18-g` from `u18` e8927a74).**
+  - Alex's decision, as MultiCore recorded it (integration dfea55cbd): "Yes, of course, please. If they pack the trx64u cor, the
+    trx64g cor is not much harder. They can take the scripts from you or have them given." Both finished files lie in one version
+    of our package, and MultiCore's builder takes each by its sha256 (D45). Until our first file exists, their pin stays and their
+    builder packs trx64g itself.
+  - `software/trx64g/` holds MultiCore's packer as it is (Alex: take their scripts as they are), copied from t239.3 cfa7872a:
+    `pack_import_cor.sh` and `pack_large_cor.sh`, what they call (`core_toml.py`, `version.sh`, `pkg.env`), the pin
+    `trx64g.pin` and the icon. Only what this tree forces changed: paths, `cor_pack.py` taken from the pinned SDK (`sdk.pin`, as
+    for trx64u), and the pin values, which each run brings. Each file has a PROVENANCE header, and a `diff` against MultiCore's
+    file shows only those lines.
+  - `ci/cor.sh`:
+    - It fetches `ultimate.app` with `c64_basic.bit` and checks both against the manifest.
+    - It writes the pin of the run (`SEMVER` is the manifest's "version") and runs the copied `pack_import_cor.sh`.
+    - It publishes `trx64g_<commit8>.cor` beside `trx64u_<commit8>.cor`, both with their `SHA256SUMS` lines.
+    - It removes the older `.cor` files of either core from the version and from `-latest`.
+    - trx64u's part and `release_reuse_skip` are unchanged.
+  - The version inside is `x.y.z-dev+<commit8>`, or `x.y.z` on a tag build. MultiCore's `version.sh with` makes it from the
+    manifest's "version" (`APPL_VERSION_NUMBER`), which is the contract's §2 form. `bit_commit` is the commit8. `app_commit` is
+    the submodule commit; MultiCore's builder passed none.
+  - Proof with run 479's inputs (`u18-e8927a74`; both files equal the manifest's):
+    - `trx64g.cor` is 3,568,073 B, sha256 `d9e8c537...`, and `cor_pack.py check` passes: kind large, id trx64g, name "TRX64
+      Ultimate (Gideon app)", version 0.3.1-dev+e8927a74, records 1, 3, 4 and 5 only.
+    - The app is 1,688,216 B, sha256 `d2a9b237...`: `ultimate.app` without its 12 bytes. The bitstream is 1,877,221 B, sha256
+      `4d2a74f6...`, the manifest's. The icon is `d521f548...`.
+    - MultiCore's own scripts, exported from t239.3 into the scratchpad, pack the same bytes from the same pin. Both forms of
+      `SEMVER` give them, and a wrong `APP_SHA256` is refused.
+  - Dry run of `ci/cor.sh` (HEAD e8927a74) against a stand-in registry on 127.0.0.1, holding run 479's files and three planted
+    stale `.cor` files. trx64u's container build was a stand-in that gave run 479's trx64u file. The run was green:
+    - both inputs fetched and checked, and the three stale files deleted;
+    - `SHA256SUMS` rewritten with both `.cor` lines; the lines of both `.cor` files and both inputs verify (`shasum -c`);
+    - both `.cor` files and `SHA256SUMS` put to `u18-e8927a74` and `u18-latest`.
+    - shellcheck is clean at every level on `ci/cor.sh` and on the copies.
+  - ue2emu 0.7.4, the packed `trx64g.cor` with `--handover` (its path, id, name and version):
+    - From `/SD/cores`, where MultiCore's package puts its cores, on a first start and on a second one:
+      - the banner `*** C64 Ultimate (V1.01) 0.3.1 ***`, then "All linked modules" after 1.0 s emulated;
+      - the C64 at READY, and `GET /v1/info` 200 (firmware_version 0.3.1, git_commit_hash 0103c58);
+      - the menu button opens Gideon's menu.
+    - The first start from the card asks nothing. The init of U64 Config writes `/SD/cores/trx64g/trx64g.cfg`, and
+      `save_core_cfg` closes the question (`cfg_import_open = false`). So the flash's settings are kept without the user
+      deciding, which contract §4 asks for.
+    - From `/Usb0/cores`, the firmware looks for the `.cfg` before the stick is mounted:
+      - it reports "does not exist yet" even when the `.cfg` is there, and the writes of the init fail ("cannot write", 10
+        times);
+      - the question goes to `c64UserInterface->popup()` while the C64 is not frozen, so it does not show, and Y is not read
+        (`C64::keyboard_scan_allowed` needs `isFrozen`);
+      - the start goes on only after two pushes of the menu button. The first push answers No, and the 16-byte `.cfg` of
+        defaults is written. The second push closes the note about factory settings, and the menu stays open.
+      - With the `.cfg` already on the stick, the next start reports "does not exist yet" again and stops at the question.
+  - Licence: of the Commodore ROMs, `trx64g.cor` holds what `ultimate.app` holds (`PROVENANCE.md`, `software/trx64g/README.md`):
+    - the BASIC ROM 901226-01, whole;
+    - `roms/chars.bin`, 225 of whose 256 glyphs are glyphs of 901225-01;
+    - `software/u64/default_chars.bin`, 252 of whose 512 glyphs are;
+    - `module.bin`.
+    There is no files record.
+  - Not exercised: a CI run and a real upload (nothing is pushed or uploaded), and the board.
+  - Open:
+    - the contract's §1, §2 and §5 for D46 (both sides, with Alex);
+    - MultiCore's pin moving to the COR form after our first CI file;
+    - a release reuses its branch package, so its `trx64g.cor` shows `x.y.z-dev+<commit8>`, not the `x.y.z` that §2 gives a
+      release;
+    - the firmware findings of the ue2emu runs (the `.cfg` looked for before the stick is mounted, and the question not shown
+      and not readable from the keyboard; on the card, the question closed by the first write). These are in
+      `software/ultimate-app` and were not changed here.
