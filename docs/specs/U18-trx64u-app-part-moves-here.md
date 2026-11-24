@@ -961,3 +961,8 @@ Nothing decided yet.
   3,875,625 B (`f9868d5b...`), READY. from the core 3.5 s after ue2emu's start, 204 operations and 188 states, missing
   from the app 0, not in the golden 0; the first start lists 0 applications (the base scans `apps/` before it installs
   record 8, MultiCore's fix in SDK 0.4.2).
+- **2026-11-24: T-3, Alex chose A ("Ok - answer A fits", MultiCore T256 D11, their integration `7a62b75b5`).** The ring
+  library owns the Timewarp picture: a helper of the SDK paints the frame the machine drew last into a library surface
+  (palette, place, Scale, like D3's text helper), the ring library paints frame and bar as the still (D10), and the base's
+  timeline bar leaves with the trx64u code set (P2-6). MultiCore sends the helper's exact shape before T-3 is built on it;
+  until that SDK, T-3 waits.
