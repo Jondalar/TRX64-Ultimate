@@ -1317,6 +1317,12 @@ Nothing decided yet.
     `x.y.z-dev+<sha8>`, as `trx64g.cor` has it.
   - `software/trx64u/README.md`'s record 8 note was stale (the base installs record 8 before it scans `apps/`):
     corrected.
+  - MultiCore's fact check of it followed (21 wrong statements, mostly of their sections 1-12, and the 0.4.6 state on
+    t239.3 e61ed6b88). Applied on the branch as 21faec901, checked in the code; where the code said otherwise than their
+    list, the guide follows the code (the host app checks the contract, `all`, the volume keys, the controls), and six
+    more differences were found. `rtl_check` of e61ed6b88 passes c64_basic's whole TOML A (39 blocks, 168
+    properties, re-run here). MultiCore merged the branch into t239.3 (6081237dd) and fixed the comments the guide's
+    §12 named in their code. Our worktree there is removed.
 - **2026-11-24: contract §10 rewritten by both sides on Alex's go ("Yes, you may!", translated, given to MultiCore).**
   - Found while reworking MultiCore's core app guide: §10 still named T230's target split, in which MultiCore would build
     trx64u's features as generic modules ("today in MultiCore's `coreapp/src`").
