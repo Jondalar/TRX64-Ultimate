@@ -1184,6 +1184,26 @@ Nothing decided yet.
     `/Usb0/cores`, answered by our library.
   - Not exercised: the board, the UCI from the C64's side, and CONTROL's palette and DECODE_TRACK commands. Their
     registers are covered by the address check and by the unchanged driver table names.
+  - MultiCore's answers to the split's six questions (2026-11-24; 1, 2 and 4 Alex's decisions T239.3 D48-D50 on their
+    integration 527671089, 3, 5 and 6 MultiCore's from the code):
+    - D48 (Alex: "the advantage of libraries is that we can 'share' them when needed"): the UCI server
+      (`command_intf.cc`) leaves MultiCore's base and becomes a source of the library `uci`, taking `cmd_if`'s address
+      from the driver table. SDK 0.4.6 hands it to us with provenance; we add it to `uci/`. `uci` leaves MultiCore's
+      shared app and the SDK; no core of theirs runs UCI.
+    - D49 (Alex: "UCI is relevant only for the trx64 core ... it must always run"): UCI is a linked library of trx64u
+      only, form (b). There is no `.u2a` form, and LibApi gets none of the three things it would need.
+    - rtl_check: `--core-in-design` and the patterns it stops at here (VHDL for-generate, ascending vectors, a genvar
+      select as a constant, the debugger behind trx_sys's handshake) are on MultiCore's t239.3-v. They reach us with SDK
+      0.4.6. Before cutting 0.4.6, MultiCore runs it on u18's TOML A and fixes what still stops (P1-3's proof). `icap`
+      +0x1 decoded by nothing: agreed.
+    - D50 (Alex: "Ok. 1"): a core's own library reads base blocks through the driver table and writes only blocks its
+      core owns; 0.4.6 gives it only read macros for base blocks. The ring's `trx_pixel.still_status` read stays. Our
+      one direct write to a base block is the ring's `c64cart.cmd` = inval (`ring.cc` :1132, :1396, :2386, after
+      `cart_ram_put`). Asked MultiCore which call replaces it, and to keep the base blocks' `_ADDR` (for `DRV_OFF`) for
+      the io group's offset-taking calls (`cart_wr`/`cart_rd` on `cart_regs`, `rom_write`/`rom_read` on `c64_roms`).
+    - The SDK's generic `trx64u_ops.cc` leaves the SDK with `uci` in 0.4.6; the rest of trx64u's code set goes with P2-6.
+    - `PX_OSIZE`: intended. The base's `video.cc` writes it only when the VIC scaler gateware answers, with `PX_CTRL`'s
+      scale bits for a layer without it; on c64_basic the write lands on an undecoded address.
 - **2026-11-24: `trx64g.cor` is packed here too (MultiCore T239.3 D46; branch `u18-g` from `u18` e8927a74).**
   - Alex's decision, as MultiCore recorded it (integration dfea55cbd): "Yes, of course, please. If they pack the trx64u cor, the
     trx64g cor is not much harder. They can take the scripts from you or have them given." Both finished files lie in one version
