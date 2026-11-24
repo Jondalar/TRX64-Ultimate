@@ -1206,6 +1206,16 @@ Nothing decided yet.
       drop the lines. 0.4.6 leaves out only the base blocks' `_WR` macros; `_ADDR`, `_RD`, masks and values stay, so
       `DRV_OFF` and the io group's offset-taking calls (`cart_wr`/`cart_rd` on `cart_regs`, `rom_write`/`rom_read` on
       `c64_roms`) stay, and those writes are the base's.
+    - D51 (Alex, raised by the D50 question: "The core must be able to persist from libs, apps. And triggered over the
+      API too."): LibApi gets the base's write-back service for libraries in 0.4.6 (register a writable medium, report
+      changes, write now); apps and the API ask for the write. MultiCore's first text had c64cart's `ram_write` and
+      `image_write` report their writes, so a ring restore would have counted as a cartridge change. We showed from the
+      firmware that neither a Timewarp rewind nor a state load is one (`trx_ring.cc` `restore_bus` and :2264-2287 write
+      the RAM window and the flash image, then CART_INVAL; only the C64's own flash or EEPROM programming marks a change,
+      `trx_cart.cc` `note_change_isr`), and reporting them would make Ask ask after a mere rewind and Auto overwrite the
+      user's .crt with an older flash image. Corrected on MultiCore's integration 9a402fb21: in 0.4.6 both calls only
+      add the inval and report nothing; a library that changes cartridge content on purpose reports it itself. Our ring
+      needs no change for it beyond D50's.
     - The SDK's generic `trx64u_ops.cc` leaves the SDK with `uci` in 0.4.6; the rest of trx64u's code set goes with P2-6.
     - `PX_OSIZE`: intended. The base's `video.cc` writes it only when the VIC scaler gateware answers, with `PX_CTRL`'s
       scale bits for a layer without it; on c64_basic the write lands on an undecoded address.
