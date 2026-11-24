@@ -72,6 +72,10 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   **b** then Vivado (a private snapshot with Vivado installed builds `c64_basic`, compared with the builder in time and cost). Alex brings a
   Hetzner Cloud project with an API token and a GitHub token that may register runners on the repository. D1 stands until the experiment
   says otherwise.
+- **D18 (Alex, 2026-11-24, on A3):** "Gone: SID Player Autoconfig. Stays: UltiSID by .cfg file." The settings group "SID player behavior"
+  (SID Player Autoconfig, Allow Autoconfig uses UltiSid; read only by the player's autoconfig) stays out with the player. The UltiSID
+  settings (`u64cfg.cc` UltiSID 1/2 address, filter, waveforms, digis, ...) stay, and with them a `.cfg` that sets them: `settings.load_file`
+  (menu `.cfg` "Load settings") and the `.cfg`/`.usr` beside a PRG, D64, G64 or CRT (`trx64u_ops.cc:265-269`).
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
