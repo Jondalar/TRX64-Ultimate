@@ -76,7 +76,9 @@ fi
 # command line takes one TOML), the link, the symbol check.
 TB="$HERE/app/toml_b.toml"
 A="$HERE/build/app"
+[ "$(cat "$A/.sdk" 2>/dev/null)" = "$(pin sdk_tarball_sha256)" ] || rm -rf "$A"   # objects of another SDK would stay (build.sh says why)
 mkdir -p "$A"
+pin sdk_tarball_sha256 > "$A/.sdk"
 python3 -I - "$SDK/tools" "$TB" "$A/desc.bin" "$HERE/base/menu.toml" "$HERE/base/desc.toml" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])

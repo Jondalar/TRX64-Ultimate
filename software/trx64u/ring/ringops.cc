@@ -1,7 +1,7 @@
 // Timewarp as operations and state values (T104.2 UI, Alex 2026-10-28: everything declarative). The engine is ring.cc (TRX64-Ultimate's frame ring driver); this file is what
 // the menu says to it: start and stop, scrub a frame or a second, back to live, mark, resume here, write and load a .c64re. menu.toml's page F1/timewarp is the base's
 // layout "timeline", its [[key]] rows call these operations. The picture under the page is this library's (U18 T-3, twstill.cc): the frame of the scrub
-// position with the bar painted from the states tw.pos, tw.info, tw.glyph and tw.track (ringops_bar, twbar.cc); the base of SDK 0.4.3 still draws a bar of its
+// position with the bar painted from the states tw.pos, tw.info, tw.glyph and tw.track (ringops_bar, twbar.cc); the base (SDK 0.4.3, 0.4.4) still draws a bar of its
 // own from the same states over it (screens.cc build_timeline), until MultiCore's P2-6 takes it away.
 // U18 (the ring library on the SDK): the registrations are the static tables of ringops_record() (lib_ring.cc hands them out), settings are read
 // through api->ops->state("set.<Key>"), the dumps are operations the menu steps (trx_dump_*), the menu's write protocol and the target path are the ctx

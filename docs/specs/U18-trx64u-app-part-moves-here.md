@@ -1065,3 +1065,19 @@ Nothing decided yet.
   - Found here: `build.sh` and `pack_cor.sh` keep objects of the old SDK after a pin change (their `.d` files name the
     old SDK's files, which stay), so the first runs linked 0.4.1's base; `build/app/obj` had to be emptied by hand.
     `fetch_sdk.sh` given a relative path to `online.u2a` deletes the file before it copies it.
+- **2026-11-24: T-3 on `u18` with SDK 0.4.4; CI run 476.**
+  - Run 476 (3e96c8cb, the 0.4.4 pin with block `icap`) is green. Its `trx64u.cor` (3,981,511 B, `1f45b8bf...`) went to
+    MultiCore, whose P1-8 started with run 475's. Read from the app's own bytes: the base reads the loader's ID at
+    0x10060600, and the way back writes enable 1 at 0x10060614, the 36 bytes FFFFFFFF AA995566 20000000 30020001 00000000
+    30008001 0000000F 20000000 20000000 (WBSTAR 0, IPROG) to 0x10060610, then enable 0. Run 475's app has none of these.
+  - T-3 (b1a92d07 of `u18-t3`, without its TEMP pin) is cherry-picked as 5c9ff24a. On 0.4.4 the libraries link at the
+    sizes of 0.4.3 (trx64u 89,760 + 120,684, ring 136,160 + 16,852; monitor 209,004, trex_crt 80,016), so the budgets
+    stand. `pack_cor.sh --emu`: rc 0, `trx64u.cor` 3,986,811 B (`5b2c9970...`, the same from a clean rebuild), READY
+    3.6 s, 4 libraries loaded, 0 refused; the app's heap 10,967,632 B, free 7,986,912 before the libraries and 6,703,968
+    after them; operations and states: missing 0, not in the golden 0.
+  - The ue2emu check of T-3 (the run above: `10 print ti`, Timewarp, UP, UP, LEFT, then a `.vpl`) passes on 0.4.4 as on
+    0.4.3: the picture's lines 514..578, 457..517, 396..459, 396..457, each its own step's screen; the colours 2928B5 /
+    6B69EF, then 00A200 / FF8200; frame() 1,193-1,206 ms, the bar 45 ms. 0.4.4 leaves overlay.cc, screens.cc and
+    trx_lv_port.cc as 0.4.3 has them.
+  - Fixed with it (the two traps above): a build folder keeps the sha256 of its SDK tarball in `.sdk` and starts clean
+    under another (`build.sh`, `pack_cor.sh`); `fetch_sdk.sh` given `.sdk/online.u2a` by a relative path keeps it.

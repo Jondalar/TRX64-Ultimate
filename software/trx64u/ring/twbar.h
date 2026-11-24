@@ -1,6 +1,6 @@
 // Timewarp's bar, painted into the picture under the Timewarp page (U18 T-3; MultiCore T256 D3, D11: the bar is the ring library's, the base only shows
 // the surface). The firmware's tw_draw_bar (software/ultimate-app/software/io/c64/trx_video.cc) on the surface the ring library shows as the still
-// (twstill.cc): its box, glyph, texts and track, at the place the base's own copy of it used (screens.cc build_timeline of SDK 0.4.3). twbar.cc calls
+// (twstill.cc): its box, glyph, texts and track, at the place the base's own copy of it used (screens.cc build_timeline of SDK 0.4.3, 0.4.4). twbar.cc calls
 // nothing of the base, so a test on the build host compiles it alone. C and C++.
 #ifndef RING_TWBAR_H
 #define RING_TWBAR_H

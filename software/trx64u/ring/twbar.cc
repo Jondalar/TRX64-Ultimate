@@ -1,5 +1,5 @@
 // Timewarp's bar (twbar.h): the firmware's tw_draw_bar and tw_layout (software/ultimate-app/software/io/c64/trx_video.cc :643-758, its 800 x 540 layer of
-// 1080p) at the place of the base's copy (SDK 0.4.3 screens.cc build_timeline :919-977, the same bar on the canvas of 960 x 540). The firmware drew the
+// 1080p) at the place of the base's copy (SDK 0.4.3 and 0.4.4 screens.cc build_timeline :919-977, the same bar on the canvas of 960 x 540). The firmware drew the
 // texts with the C64 character ROM's lower-case set (trx_video.cc :706-725); here they are drawn with the 8 x 8 font of c64_basic's overlay, built in
 // (twfont.h, made by twfont.py from designs/c64_basic/mem/ovl_font8.mem, ASCII order), the position twice as wide and high. Not api->overlay->text():
 // the UI task writes those texts into the surface at its next frame, so they would be no part of this paint (and of no test on the build host).

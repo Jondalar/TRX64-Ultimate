@@ -177,7 +177,7 @@ static void hook_menu_closed(void)
     }
 }
 
-// menu_video: the base's Timewarp page (layout "timeline") came up (1) or went (0); the menu task, no core lock. The base of SDK 0.4.3 calls it for no
+// menu_video: the base's Timewarp page (layout "timeline") came up (1) or went (0); the menu task, no core lock. The base (SDK 0.4.3, 0.4.4) calls it for no
 // other screen: only screens.cc's timeline turns ui_live_key on. The picture under the page is the ring library's (U18 T-3, MultiCore T256 D11): its
 // export "ringstill" (ring/ring_still.h) takes the page's coming, with the palette the person set for the bar it paints, and its going; it paints the
 // frame of each scrub position itself. Without the ring library the page keeps the base's still, its capture of the menu's stop. c64_basic shows no

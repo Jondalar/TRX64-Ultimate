@@ -51,10 +51,14 @@ for lib in $LIBS; do
         *) echo "build.sh: no library or sub-app $lib" >&2; exit 1 ;;
     esac
     B="$HERE/build/$lib"
+    # Objects of another SDK would stay: make takes them as up to date, as their .d files name that SDK's headers, which stay in .sdk/ (U18 T-3,
+    # 2026-11-24: the first builds after a pin change linked objects of 0.4.1). A build folder made with another SDK tarball starts clean.
+    [ "$(cat "$B/.sdk" 2>/dev/null)" = "$(pin sdk_tarball_sha256)" ] || rm -rf "$B"
     # lib.mk's .u2a depends on the .elf and the menu only, not on the Makefile's budget, needs, version or exports: a library is linked and packed again
     # each time; app.mk tracks no header either (no .d files), so a sub-app is built from a clean copy each time
     case "$src" in apps/*) rm -rf "$B" ;; *) rm -f "$B/$lib.elf" "$B/$lib.u2a" ;; esac
     mkdir -p "$B"
+    pin sdk_tarball_sha256 > "$B/.sdk"
     case "$src" in
         apps/*) cp -Rp "$HERE/$src/." "$B/" ;;
         *) find "$HERE/$src" -maxdepth 1 -type f -exec cp -p {} "$B/" \; ;;

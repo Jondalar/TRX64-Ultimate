@@ -56,7 +56,9 @@ firmware's copy is frozen, bug fixes only, each also here).
 also gets trxmon's files from the submodule). The driver table of `base/` and `ring/` is made there first from
 `gateware/c64_basic.toml` (their Makefiles: `descrec.py drivers` of the SDK with the SDK's `maps/`; `DRV_TOOLS` and
 `DRV_MAPS` name others). On a Mac it runs in the local `u64-build-env` container. `build.sh --check` only checks that
-the unpacked SDK matches `sdk.pin`. The app is linked by `pack_cor.sh` (below), in `build/app/`.
+the unpacked SDK matches `sdk.pin`. The app is linked by `pack_cor.sh` (below), in `build/app/`. Each build folder
+keeps the sha256 of the SDK tarball it was built with in `.sdk`; a folder of another SDK starts clean (its objects'
+`.d` files name the old SDK's headers, which stay in `.sdk/`, so make would take them as up to date).
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
 (`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which

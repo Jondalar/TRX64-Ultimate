@@ -50,7 +50,7 @@ tar -xzf "$TAR" -C "$HERE/.sdk"
 sh "$HERE/build.sh" --check
 echo "SDK $VER ($(pin source_commit)) in $HERE/.sdk/$DIR"
 if [ -n "$ONL" ]; then
-    if [ "$ONL" != "$HERE/.sdk/$(pin online_u2a)" ]; then
+    if ! [ "$ONL" -ef "$HERE/.sdk/$(pin online_u2a)" ]; then   # the same file by another path (a relative one) is neither removed nor copied
         rm -f "$HERE/.sdk/$(pin online_u2a)"                 # an earlier copy can be read only (MultiCore's .ci/sdk/ files are)
         cp "$ONL" "$HERE/.sdk/$(pin online_u2a)"
     fi

@@ -12,7 +12,7 @@ LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_ring.cc).
 LIB_EXPORTS = ring=1 ringsteps=1 ringstill=1
 # The budget (T239.3 S13): the packer refuses an image over `image`, the loader a library over any figure. image: payload and bss as linked against SDK
-# 0.4.3 (base 3.3, e45fbb97) with the Timewarp still (U18 T-3) on 2026-11-24, 136,160 + 16,852 bytes; heap (U18 S13): 1,486,893 bytes held while idle (the
+# 0.4.3 (base 3.3, e45fbb97) and 0.4.4 (9cd216eb) with the Timewarp still (U18 T-3) on 2026-11-24, 136,160 + 16,852 bytes; heap (U18 S13): 1,486,893 bytes held while idle (the
 # timeline 1,146,880 of it); while the Timewarp page shows, its still on top, 1,036,800 bytes (960 x 540 RGB565, twstill.cc; freed when the page goes); the
 # peak is that plus the most one operation holds on top. Measured from the allocations: the .trxring save (save_native) with cartridge RAM and a full
 # timeline 1,444,975 bytes (the timeline copied, 1,146,880, the memories, the walk with its cartridge RAM, the 32 KB buffer); a .c64rering dump of 64
