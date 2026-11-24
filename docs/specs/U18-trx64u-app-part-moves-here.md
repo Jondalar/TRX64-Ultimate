@@ -1104,3 +1104,35 @@ Nothing decided yet.
     1,249-1,252).
   - Open: the ring's heap_peak (Alex: as it is, or the still taken away for a save, with a progress element), and the
     board.
+- **2026-11-24: P1-8 at MultiCore: their package takes our `trx64u.cor`; the contract follows (D21, D44, D45).**
+  - MultiCore's t239.3 c26aab2aa pins our CI run 478: `trx64-ultimate/u18-a294af0f/trx64u_a294af0f.cor`, 3,985,867 B,
+    sha256 `18c16a1e...`. MultiCore deleted its own trx64u image, `c64_desc`, `coreapp/cores/trx64u/`, `c64.cc`,
+    `hk_c64`, its two trx64u lint checks and the trx64u tests by the D21 sort.
+  - Our link does not use any of it: `app.elf` has no `c64_register`, `hk_c64`, `c64_desc`, `c64_go` or `cbmrun`. The
+    descriptor's code is ours (`base/c64core.cc`), and the record's id "TRX2" (`base/desc.toml`) keeps `appsvc.cc`'s
+    trx/c64 groups.
+  - The delivery (MultiCore T239.3 D45; Alex: "Findet mal einen Weg mit dem builder Lokal", no GitHub for now):
+    MultiCore's builder poller fetches the pinned file from our Gitea generic registry over the LAN, without a token
+    (checked from the builder: HTTP 200). It keeps the file only when its size and sha256 match the pin, and publishes
+    it as `bit-imp-trx64u-<key>` in trx64mc-builds. For each new build we send PACKAGE, VERSION, COR_FILE, sha256 and
+    size, and MultiCore moves the pin.
+  - The contract (`docs/contracts/trx64u-firmware-handover.md`) is MultiCore's 8058b7617 (integration), byte for byte
+    the same as cfa7872a7 (t239.3), sha256 `a643e632...`:
+    - §1: `trx64u.cor` is built, tested and delivered here; the coreapp and the SDK are MultiCore's.
+    - §2: the pin fields.
+    - §5: the `.cfw` note.
+    - §10: the menu is ours.
+    - §7 and §8 (D37) are unchanged.
+    - Their first P1-8 text (9de718305) was based on the text before D37 and dropped §7's way back and §8's loader; it
+      was merged again on our note.
+  - Open (MultiCore D22, ours to rewrite; no test rig in the SDK):
+    - test_boot_c64 and test_c64_prg with c64_rig.h;
+    - the C64 cases of test_prompt, test_cut (trx64u key mapping, monitor_grid adapter) and test_desc (caps, PRG
+      actions, machine_info);
+    - the TRX64U lines of the keywalk/ids goldens and menu_c64.txt (`ops_trx64u.txt` is ours already);
+    - media.py, crtmedia.py and the coreapp_emu run (tests/coreapp/emu/run.sh);
+    - the render's C64 yardstick (c64-home, c64-settings);
+    - the UI features of our menu (export, home, letters, library, media_level, navigation, overlay, overlay_trx64u,
+      rows_shots, settings).
+    - MultiCore keeps c64_model.h; copy it with its provenance when needed.
+  - MultiCore's next SDK drops `coreapp/cores/c64.cc`; 0.4.5 stays as it is.
