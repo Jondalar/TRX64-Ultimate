@@ -1298,3 +1298,22 @@ Nothing decided yet.
         needs `isFrozen`); the first menu-button push answers "no" and writes the defaults `.cfg`.
       MultiCore's coreapp waits for the `.cor`'s medium (`mediumwait.h`); Gideon's application does not. Ours to fix
       (MultiCore: noted as ours); `software/ultimate-app` is not changed yet.
+- **2026-11-24: MultiCore's core app guide reworked, in their repository (Alex).**
+  - Alex: "Build an md page on how a core gets its service and its app with the SDK, as a help for MultiCore", then, on
+    MultiCore's `docs/dev/core-app-guide.md`: "basically that needs to be reworked", and "agree that you may store it
+    there directly".
+  - Agreed with MultiCore: our own worktree of their repository, branch `fw/core-app-guide` from their t239.3; only the
+    guide; their commit rules (no Claude trailers, `tools/check_todo.py`, a public text: no hosts, IPs, registry URLs,
+    logins or private paths); they merge it into t239.3, and integration gets it with Alex's PR.
+  - Committed there as c765b8f3f on t239.3 e7bed3e93: 814 lines, +507/-107; `check_todo` ok, `check_public_tree`
+    (`--commits`, `--messages --trailers`) clean. The guide is read off their t239.3 (0.4.6 parts B, C, D) and off
+    trx64u. Sections 1-12 are theirs, corrected from the code; sections 13-26 are new: the SDK core path from pin to
+    delivery, with trx64u and trx64g as the worked example.
+  - Sent to MultiCore with eight findings for their side: two lines of the SDK README, `lib.mk`'s `RV_PREFIX` default,
+    `DRV_BASE_READ_ONLY` not set by `lib.mk`, contract §10's stale "today in MultiCore's coreapp/src", `SVC_HAS` and
+    `drv_fake.h` in the SDK headers, TOML A names in record 6's register numbers, and P2-6's replacement of
+    `lib->find`.
+  - Ours, open: trx64u's `.cor` carries the version `<branch>-<sha8>`, while contract §2's shown form is
+    `x.y.z-dev+<sha8>`, as `trx64g.cor` has it.
+  - `software/trx64u/README.md`'s record 8 note was stale (the base installs record 8 before it scans `apps/`):
+    corrected.
