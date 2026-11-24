@@ -1,5 +1,5 @@
 // What the ring library's files share of the base (U18): the LibApi pointer, the base 3.3 groups (g_api->sync, settings, ctx, io, board), the exports
-// of MultiCore's shared libraries, memory on the library's own account, text without a C library, the TRX IO block's registers, the C64 machine's
+// of the app's libraries (MultiCore's shared c64cart and cbm1541, our UCI library), memory on the library's own account, text without a C library, the TRX IO block's registers, the C64 machine's
 // registers and memory window, and files. ringsys.cc.
 #ifndef RING_RINGSYS_H
 #define RING_RINGSYS_H
@@ -11,7 +11,7 @@
 #include "libapi.h"
 #include "c64cart_api.h"
 #include "cbm1541_api.h"
-#include "uci_api.h"
+#include "trxuci_api.h"                // trx64u's UCI library's export "uci" (../uci, Makefile LIB_INC)
 #include "drvtab.h"
 
 // Set by lib_register (lib_ring.cc) before anything else runs.
@@ -23,7 +23,7 @@ extern const LibApi *g_api;
 // to an older table (SvcSys, SvcFs) is called only when SVC_HAS says the table has it: its size covers the member and the member is set (api.md 3.2.2).
 #define SVC_HAS(T, t, m) ((t) && (t)->size >= offsetof(T, m) + sizeof(((T *)0)->m) && (t)->m)
 
-// ---- the exports of MultiCore's shared libraries (SvcLib::find(name, U2A3_VERSION(1, 0), &size), major 1) --------------------------------------------
+// ---- the exports of the app's libraries (SvcLib::find(name, U2A3_VERSION(1, 0), &size), major 1): c64cart and cbm1541 MultiCore's, uci ours (../uci) -
 // Looked up at their first use and kept once found; while one is not loaded every use asks again.
 enum RExportId { RX_C64CART, RX_CBM1541, RX_UCI, RX_COUNT };
 // The table of export `id` when it is loaded, its size covers the member at `off` (`len` bytes) and that member is set; else null.

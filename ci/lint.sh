@@ -12,7 +12,7 @@
 #  - the workflows: parse, every `needs:` names a job, every `uses:` a file
 #  - ci/select.sh: its answers for the cases the workflows rely on
 #  - ci/sims.txt: every bench's script exists
-#  - software/trx64u (U18): the pinned SDK's reverse lint (rtl_check.py lint-src) on our libraries' sources
+#  - software/trx64u (U18): the pinned SDK's reverse lint (rtl_check.py lint-src) on our libraries' sources and uci/
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 cd "$ROOT"
@@ -88,16 +88,17 @@ for n, line in enumerate(open("ci/sims.txt"), 1):
 sys.exit(0 if ok else 1)
 PY
 
-# U18 (MultiCore T239.3 P1-3, D30 condition 1): no literal I/O address in the sources of our three libraries; every address comes from c64_basic's
-# TOML A through the driver table. The pinned SDK's rtl_check.py, from our registry (fetch_sdk.sh --download). The one --allow is SHA-256's K[47],
-# which lies in the I/O space by chance. rtl_check.py check (the TOML A against the RTL) is not here: the SDK's tool cannot follow 13 of the 33
-# blocks yet (U18 §5, waiting on MultiCore).
+# U18 (MultiCore T239.3 P1-3, D30 condition 1): no literal I/O address in the sources of our three libraries and of our UCI library (uci/, linked into
+# the app); every address comes from c64_basic's TOML A through the driver table. The pinned SDK's rtl_check.py, from our registry (fetch_sdk.sh
+# --download). The one --allow is SHA-256's K[47], which lies in the I/O space by chance. rtl_check.py check (the TOML A against the RTL) is not here:
+# the tool of SDK 0.4.5 stops at an RTL pattern it does not know for 15 of the 39 blocks and finds a byte of icap that nothing decodes (U18 §5,
+# waiting on MultiCore).
 check "reverse lint (software/trx64u)" bash -c '
   T="$PWD/software/trx64u"
   [ -f "$T/sdk.pin" ] || exit 0
   GITEA_URL="${GITHUB_SERVER_URL:-http://gitea.example}" sh "$T/fetch_sdk.sh" --download >/tmp/lint-sdk.log 2>&1 || { cat /tmp/lint-sdk.log; exit 1; }
   S="$T/.sdk/trx64-sdk-$(sed -n "s/^sdk_version=//p" "$T/sdk.pin")"
-  cd "$T" && python3 -I "$S/tools/rtl_check.py" lint-src base ring monitor --toml-a gateware/c64_basic.toml --maps "$S/maps" \
+  cd "$T" && python3 -I "$S/tools/rtl_check.py" lint-src base ring monitor uci --toml-a gateware/c64_basic.toml --maps "$S/maps" \
       --allow trx_sha256.c:0x106aa070u'
 
 if [ ${#fails[@]} -gt 0 ]; then echo "FAILED: ${fails[*]}"; exit 1; fi

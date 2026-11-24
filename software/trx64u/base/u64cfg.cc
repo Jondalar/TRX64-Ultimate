@@ -7,9 +7,9 @@
 // the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
 // U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read and written through the settings
 // group (setting.cc), the SID chips through the C64's memory window (api->c64), the keys, the SID sockets' supply, the video PLL, the picture layer, the
-// case LEDs and the ESP32 through the 3.3 groups io and board (g_api->io, board); the registers through the driver table (the C64's I/O page, the U64
-// page, the speaker, reSID8, the cartridge port's page), and the mixers and palettes through the four register windows still in desc.toml (c64u_win).
-// lib_trx64u.cc lists the operations and states of this file with their names and arguments.
+// case LEDs and the ESP32 through the 3.3 groups io and board (g_api->io, board); every register through the driver table: the C64's I/O page, the U64
+// page, the speaker, reSID8, the mixer's and the speaker's gains, both palettes (core blocks of the TOML A since Alex's split, U18 §5 2026-11-24) and the
+// cartridge port's page. lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "u64cfg.h"
 #include "trx64u_lib.h"
 #include "sid_decide.h"
@@ -23,9 +23,7 @@
     X(PPM, "Adjust Color Clock") X(PALETTE, "Palette Definition")                                                                                    \
     X(MASTER, "Vol Master")                                                                                                                          \
     X(VOL0, "Vol UltiSid 1") X(VOL1, "Vol UltiSid 2") X(VOL2, "Vol Socket 1") X(VOL3, "Vol Socket 2") X(VOL4, "Vol Sampler L") X(VOL5, "Vol Sampler R")  \
-    X(VOL6, "Vol Drive 1")                                                                                                                           \
     X(PAN0, "Pan UltiSID 1") X(PAN1, "Pan UltiSID 2") X(PAN2, "Pan Socket 1") X(PAN3, "Pan Socket 2") X(PAN4, "Pan Sampler L") X(PAN5, "Pan Sampler R") \
-    X(PAN6, "Pan Drive 1")                                                                                                                           \
     X(SPK_EN, "Speaker Enable")                                                                                                                      \
     X(SPK0, "Spk Vol UltiSid 1")                                                                                                                     \
     X(S1_EN, "SID Socket 1") X(S2_EN, "SID Socket 2") X(S1_SHUNT, "SID Socket 1 1K Ohm Resistor") X(S2_SHUNT, "SID Socket 2 1K Ohm Resistor")          \
@@ -89,50 +87,21 @@ static const uint8_t default_colors[16][3] = {
     { 0x2C, 0x29, 0xB1 }, { 0xEF, 0xEF, 0x5D }, { 0x98, 0x4E, 0x20 }, { 0x5B, 0x38, 0x00 }, { 0xD1, 0x67, 0x6D }, { 0x4A, 0x4A, 0x4A },
     { 0x7B, 0x7B, 0x7B }, { 0x9F, 0xEF, 0x93 }, { 0x6D, 0x6A, 0xEF }, { 0xB2, 0xB2, 0xB2 } };
 
-// Gideon U64Config::rgb_to_yuv (the matrix in 0.14 format, Y scaled so that white is 0xB6)
-static void rgb_to_yuv(const uint8_t rgb[3], uint8_t yuv[3])
-{
-    const int Y[3] = { 3496, 6864, 1333 };
-    const int U[3] = { -2408, -4735, 7143 };
-    const int V[3] = { 10076, -8438, -1638 };
-    int y = Y[0] * rgb[0] + Y[1] * rgb[1] + Y[2] * rgb[2];
-    int u = U[0] * rgb[0] + U[1] * rgb[1] + U[2] * rgb[2];
-    int v = V[0] * rgb[0] + V[1] * rgb[1] + V[2] * rgb[2];
-    y >>= 14;
-    u >>= 14;
-    v >>= 14;
-    if (u > 127) { v *= 127; v /= u; u = 127; }
-    if (u < -127) { v *= -127; v /= u; u = -127; }
-    if (v > 127) { u *= 127; u /= v; v = 127; }
-    if (v < -127) { u *= -127; u /= v; v = -127; }
-    yuv[0] = (uint8_t)y;
-    yuv[1] = (uint8_t)u;
-    yuv[2] = (uint8_t)v;
-}
-
 static uint8_t g_palette[16][3];
 static bool g_palette_valid;
 static char g_palette_name[64];
 
-// Colour i of the two palettes (the C64's RGB and YUV, the HDMI one), each written only where its window is there: 4 bytes per colour, the C64's YUV
-// 0x400 after its RGB (the offsets of the windows c64_palette and hdmi_palette, desc.toml).
-#define PAL_RGB 0x000
-#define PAL_YUV 0x400
+// Colour i of the two palettes, the C64's picture (c64_palette) and the overlay's characters on HDMI (hdmi_palette): red, green and blue, runs of 16
+// in the TOML A. Gideon's YUV copy of the C64 palette 0x400 behind its RGB (U64Config::rgb_to_yuv) is not written: c64_basic decodes no register
+// there (ultimate_sys.vhd pal_we only with address bits 10:6 = 0).
 static void put_colour(int i, const uint8_t rgb[3])
 {
-    volatile uint8_t *c64 = c64u_win(WIN_C64_PALETTE);
-    volatile uint8_t *hdmi = c64u_win(WIN_HDMI_PALETTE);
-    uint8_t yuv[3];
-    rgb_to_yuv(rgb, yuv);
-    for (int k = 0; k < 3; k++) {
-        if (c64) {
-            c64[PAL_RGB + 4 * i + k] = rgb[k];
-            c64[PAL_YUV + 4 * i + k] = yuv[k];
-        }
-        if (hdmi) {
-            hdmi[4 * i + k] = rgb[k];
-        }
-    }
+    HW_WR_I(c64_palette_red, i, rgb[0]);
+    HW_WR_I(c64_palette_green, i, rgb[1]);
+    HW_WR_I(c64_palette_blue, i, rgb[2]);
+    HW_WR_I(hdmi_palette_red, i, rgb[0]);
+    HW_WR_I(hdmi_palette_green, i, rgb[1]);
+    HW_WR_I(hdmi_palette_blue, i, rgb[2]);
 }
 
 static void program_palette(const uint8_t rgb[16][3])
@@ -188,7 +157,7 @@ void u64cfg_palette(int what, uint8_t idx, uint8_t (*rgb)[3])
         return;
     }
     if (what == 2) {
-        if (idx >= 16) {                                            // the palettes have 16 colours; uci_api.h leaves the bound to the callee
+        if (idx >= 16) {                                            // the palettes have 16 colours; trxuci_api.h leaves the bound to the callee
             return;
         }
         if (!g_palette_valid) {
@@ -425,47 +394,41 @@ static uint8_t mixer_side(uint8_t source_raw, uint8_t master_raw, uint16_t pan)
     return v ? (uint8_t)v : 1;
 }
 
-// the channels Gideon's mixer has that this board has no source for (drive 2, tape read, tape write): his defaults
-static const uint8_t spare_vol[3] = { 11, 4, 4 };
-static const uint8_t spare_pan[3] = { 7, 5, 5 };
-
-// The two mixer windows (desc.toml: audio_mixer, speaker_mixer): 10 channels of two bytes (right, left), and the speaker's gain, of which
-// ultimate_sys.vhd:1257-1280 decodes the bytes +0x00, +0x01, +0x04 and +0x05.
-#define MIXER_CHANNELS 10
-#define SPEAKER_GAINS 4
-static const uint8_t speaker_gain[SPEAKER_GAINS] = { 0x00, 0x01, 0x04, 0x05 };
+// The mixer's gains (the TOML A's block audio_mixer, a run of 12): a right and a left byte per channel, in Gideon's channel order UltiSID 1, UltiSID 2,
+// socket 1, socket 2, sampler L, sampler R. Gideon's mixer goes on with drive 1 (the hidden settings "Vol Drive 1" and "Pan Drive 1"), drive 2, tape
+// read and tape write: c64_basic decodes no byte of the mixer from 0x0C up (ultimate_sys.vhd:1257-1274), so those channels are not written.
+#define MIXER_CHANNELS 6
+static_assert(2 * MIXER_CHANNELS == DRV_audio_mixer_gain_COUNT, "a right and a left gain per channel");
 
 static void write_mixer(void)
 {
-    volatile uint8_t *mixer = c64u_win(WIN_AUDIO_MIXER);
-    if (!mixer) {
-        return;
-    }
     uint8_t master = volume_ctrl[V(K_MASTER, 24)];
     for (int i = 0; i < MIXER_CHANNELS; i++) {
-        int vol = i < 7 ? V(K_VOL0 + i, i == 6 ? 11 : 24) : spare_vol[i - 7];
-        int pan = i < 7 ? V(K_PAN0 + i, 5) : spare_pan[i - 7];
+        int vol = V(K_VOL0 + i, 24);
+        int pan = V(K_PAN0 + i, 5);
         uint8_t src = volume_ctrl[vol];
-        mixer[2 * i] = mixer_side(src, master, pan_ctrl[10 - pan]);    // right
-        mixer[2 * i + 1] = mixer_side(src, master, pan_ctrl[pan]);     // left
+        HW_WR_I(audio_mixer_gain, 2 * i, mixer_side(src, master, pan_ctrl[10 - pan]));    // right
+        HW_WR_I(audio_mixer_gain, 2 * i + 1, mixer_side(src, master, pan_ctrl[pan]));     // left
     }
 }
 
-// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0: speaker_enable) and setSpeakerMixer :1749-1765. ultimate_sys.vhd:1257-1280 decodes four bytes
-// of the speaker mixer (speaker_gain) and the bitstream plays the mono mix at the highest of them, so the one speaker volume goes to all four; the
-// per-source volumes of the FW are not decoded and stay out.
+// The speaker's four gains (blocks speaker_mixer: gain0, gain1 and speaker_mixer_b: gain2, gain3), of which the bitstream plays the mono mix at the
+// highest (ultimate_sys.vhd mix_spk), so the one speaker volume goes to all four.
+static void write_speaker_gains(uint8_t vol)
+{
+    HW_WR(speaker_mixer_gain0, vol);
+    HW_WR(speaker_mixer_gain1, vol);
+    HW_WR(speaker_mixer_b_gain2, vol);
+    HW_WR(speaker_mixer_b_gain3, vol);
+}
+
+// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0: speaker_enable) and setSpeakerMixer :1749-1765. The per-source volumes of the FW have no gain of their
+// own in c64_basic and stay out.
 static void write_speaker(void)
 {
     bool on = V(K_SPK_EN, 1) != 0;
     HW_WR(speaker_enable_ctrl, on ? DRV_speaker_enable_ctrl_on_MASK : 0);
-    volatile uint8_t *mixer = c64u_win(WIN_SPEAKER_MIXER);
-    if (!mixer) {
-        return;
-    }
-    uint8_t vol = on ? volume_ctrl[V(K_SPK0, 0)] : 0;
-    for (int i = 0; i < SPEAKER_GAINS; i++) {
-        mixer[speaker_gain[i]] = vol;
-    }
+    write_speaker_gains(on ? volume_ctrl[V(K_SPK0, 0)] : 0);
 }
 
 int fx_audio(CoreCtx *, const OpArgs &, OpOut &)
@@ -502,11 +465,9 @@ void u64cfg_power_on_keys(void)
 void u64cfg_mute_sids(void)
 {
     for (int i = 0; i < 8; i++) {                                   // the four SIDs' channels, both sides
-        c64u_win_wr(WIN_AUDIO_MIXER, (uint32_t)i, 0);
+        HW_WR_I(audio_mixer_gain, i, 0);
     }
-    for (int i = 0; i < SPEAKER_GAINS; i++) {                       // the speaker's four bytes
-        c64u_win_wr(WIN_SPEAKER_MIXER, speaker_gain[i], 0);
-    }
+    write_speaker_gains(0);                                         // the speaker's four bytes
 }
 
 void u64cfg_restore_mixer(CoreCtx *)
@@ -1305,9 +1266,9 @@ static void write_sid_sockets(void)
     HW_WR(c64_sid_sock_socket2_en, V(K_S2_EN) ? 1 : 0);
 }
 
-// The reSID8 filter (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the block resid8 (the SDK's map sid), written
-// only when ident's caps3 says the SID is the 8-SID reDIP.
-// Interim (U18 §5): resid8 is the SID library's block (base); these writes move to its filter call once the SDK has one.
+// The reSID8 filter (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the TOML A's block resid8, a core block (Alex's
+// split, U18 §5 2026-11-24: the SID settings are this library's, so no filter call of the SID library is needed), written only when ident's caps3 says
+// the SID is the 8-SID reDIP.
 static bool trx_resid8(void)
 {
     return g_api->io && (DRV_ident_caps3_RD() & DRV_ident_caps3_resid8_MASK);
@@ -1625,12 +1586,8 @@ static void set_mixer_auto_sid(const uint8_t *slots, int count)
     for (int i = 0; i < 4; i++) {
         vol[i] = combine_gain(volume_ctrl[sel[i]], master);
     }
-    volatile uint8_t *mixer = c64u_win(WIN_AUDIO_MIXER);
-    if (!mixer) {
-        return;
-    }
     for (int i = 0; i < 8; i++) {
-        mixer[i] = 0;                                               // first mute the SIDs
+        HW_WR_I(audio_mixer_gain, i, 0);                            // first mute the SIDs
     }
     if (count > 4) {
         count = 4;
@@ -1644,8 +1601,8 @@ static void set_mixer_auto_sid(const uint8_t *slots, int count)
             v = 0x80;
         }
         int pan = panning[4 * count + i];
-        mixer[0 + channel_map[ms]] = mixer_side(v, 0x80, pan_ctrl[10 - pan]);
-        mixer[1 + channel_map[ms]] = mixer_side(v, 0x80, pan_ctrl[pan]);
+        HW_WR_I(audio_mixer_gain, 0 + channel_map[ms], mixer_side(v, 0x80, pan_ctrl[10 - pan]));
+        HW_WR_I(audio_mixer_gain, 1 + channel_map[ms], mixer_side(v, 0x80, pan_ctrl[pan]));
     }
 }
 

@@ -7,7 +7,8 @@ LIB_VERSION = 1
 LIB_NEEDS = base>=3.3 trx64u>=1
 LIB_SRCS = lib_ring.cc ring.cc ringfile.cc trxring.cc trx_c64re_nodes.cc trx_sha256.c trx_inflate.c ringops.cc ring_api.cc ringsys.cc ringmachine.cc \
            twstill.cc twbar.cc
-LIB_INC = -I$(APPLOADER)
+# APPLOADER: the app loader's headers; ../../uci: our UCI library's export header (trxuci_api.h; build.sh builds in build/ring/, two levels below software/trx64u/)
+LIB_INC = -I$(APPLOADER) -I$(abspath $(CURDIR)/../../uci)
 LIB_LIBC = 1
 # The named exports of lib_register's export_list (lib_ring.cc).
 LIB_EXPORTS = ring=1 ringsteps=1 ringstill=1

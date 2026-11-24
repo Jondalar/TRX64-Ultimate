@@ -1,8 +1,9 @@
 // What every file of the trx64u library shares: the base's table (lib_trx64u.cc keeps it), the log, the settings as the base holds them (setting.cc), the
-// groups of base 3.3 (g_api->sync, settings, ctx, io, board), the exports of MultiCore's shared libraries, and small helpers over them. A group or an
-// export the base does not give (null) makes its helper do nothing and read 0; the code that needs one checks it first. Nothing is read at the
-// registration: the groups and the exports are read at each use (api->c64 is filled after the libraries are loaded, io once the core is handed to
-// the base, the shared libraries load in any order). The registers are the driver table's (drvtab.h, below), generated from c64_basic's TOML A.
+// groups of base 3.3 (g_api->sync, settings, ctx, io, board), the exports of the app's libraries (MultiCore's shared ones and our UCI library), and small
+// helpers over them. A group or an export the base does not give (null) makes its helper do nothing and read 0; the code that needs one checks it first.
+// Nothing is read at the registration: the groups and the exports are read at each use (api->c64 is filled after the libraries are loaded, io once the
+// core is handed to the base, the shared libraries load in any order). The registers are the driver table's (drvtab.h, below), generated from c64_basic's
+// TOML A.
 #ifndef TRX64U_LIB_H
 #define TRX64U_LIB_H
 
@@ -13,7 +14,7 @@
 #include "libc_extra.h"
 #include "c64cart_api.h"
 #include "cbm1541_api.h"
-#include "uci_api.h"
+#include "trxuci_api.h"                // our UCI library's export "uci" (../uci, base/Makefile LIB_INC)
 #include "sid_api.h"
 #include "tempdisk_api.h"
 #include "cbmprg_api.h"
@@ -149,26 +150,11 @@ static inline void c64_rom_write(uint32_t off, const void *p, uint32_t n)
     }
 }
 
-// The four register windows that are still [[window]] rows of desc.toml (io.window): audio_mixer, speaker_mixer, c64_palette, hdmi_palette. Their blocks
-// lie in ranges MultiCore's host TOML A gives the base, so they are not in our TOML A until Alex decides who owns them (U18 §5, open); their names
-// and sizes are lib_trx64u.cc's, their offsets u64cfg.cc's, their addresses desc.toml's. c64u_win gives a window's base, kept once found; null when the io group is missing,
-// desc.toml does not declare it, the base does not grant it, or it is shorter than `need`; the first null of each window is logged, and the caller
-// then writes nothing. One byte per access.
-enum { WIN_AUDIO_MIXER, WIN_SPEAKER_MIXER, WIN_C64_PALETTE, WIN_HDMI_PALETTE, WIN_N };
-volatile uint8_t *c64u_win(int w);
-static inline void c64u_win_wr(int w, uint32_t off, uint8_t v)
-{
-    volatile uint8_t *p = c64u_win(w);
-    if (p) {
-        p[off] = v;
-    }
-}
-
 // An operation of the registry by name (api->ops->call), its message copied to msg. Returns its OpErr (OPE_NOT_FOUND: no library has it).
 int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
 
-// ---- the exports of MultiCore's shared libraries and the ring library's "ringstill" (api->lib->find(name, U2A3_VERSION(1, 0), &size), major 1): found at
-// the first use and kept, looked for again while not found.
+// ---- the exports of the app's libraries (MultiCore's shared ones, our UCI library's "uci": ../uci) and the ring library's "ringstill"
+// (api->lib->find(name, U2A3_VERSION(1, 0), &size), major 1): found at the first use and kept, looked for again while not found.
 // x_table answers the table when its size covers the member at `off` and that member is set; else null. X_GET names the member.
 enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_PRG, X_RINGSTILL, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk", "cbmprg", "ringstill"
 const void *x_table(int which, uint32_t off);

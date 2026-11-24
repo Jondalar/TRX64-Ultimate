@@ -10,8 +10,9 @@
 #    2026-11-24: it starts a .cfw's firmware application on the running bitstream, which c64_basic under this app is not; build.sh).
 #  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
 #    build/app/ (the driver table and the I/O addresses of the TOML A, the library table of the TOML B, the base archive, the sources that depend on
-#    the core) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is in the app, not in the .cor: the .cor has one
-#    record 6, and a TOML A record (version 7) holds nothing but TOML A (api.md 6.14.1), so it cannot ride with our description (U18 §5).
+#    the core, and our UCI library's sources from uci/, --src) and the SDK's symbol check (libtab.py symcheck) runs over its objects. The TOML A is
+#    in the app, not in the .cor: the .cor has one record 6, and a TOML A record (version 7) holds nothing but TOML A (api.md 6.14.1), so it cannot
+#    ride with our description (U18 §5).
 #  - The heap (T239.3 P4-1): word 0, the region left after the linked image and the stack reserve; cor_pack.py reports the figures, and this script
 #    checks them against the image: heap = 0xE70000 - align16(E), E the linker's _end of build/app/app.elf, 0xE70000 the end of the application region
 #    (__heap_limit) less the stack reserve, both as the image's heap record carries them.
@@ -90,7 +91,16 @@ except descrec.DescError as e:
     sys.exit("pack_cor.sh: record 6: %s" % e)
 open(sys.argv[3], "wb").write(blob)
 PY
-python3 -I "$SDK/tools/app_build.py" build --sdk "$SDK" --toml-a "$HERE/gateware/c64_basic.toml" --toml-b "$TB" --out "$A" --record "$A/desc.bin"
+python3 -I "$SDK/tools/app_build.py" build --sdk "$SDK" --toml-a "$HERE/gateware/c64_basic.toml" --toml-b "$TB" --out "$A" --record "$A/desc.bin" \
+    --src "$HERE/uci"
+# An object whose source left the link (a library the TOML B no longer names, or names with other sources, as uci since U18's owner split) stays in
+# obj/, and the symbol check reads every object there: one the link did not load (no LOAD line in app.map) goes, with its dependency file.
+for o in "$A"/obj/*.o; do
+    if ! grep -qx "LOAD obj/$(basename "$o")" "$A/app.map"; then
+        echo "pack_cor.sh: obj/$(basename "$o") is not in the link: removed"
+        rm -f "$o" "${o%.o}.d"
+    fi
+done
 NM=riscv32-unknown-elf-nm python3 -I "$SDK/tools/libtab.py" symcheck "$TB" "$A/obj" "$SDK/base/src"
 echo "symcheck: no object of the base uses a symbol of a library of $(basename "$TB")"
 

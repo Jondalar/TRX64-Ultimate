@@ -11,7 +11,8 @@
 // The frame ring, app side. See trx_ring.h.
 //
 // Hardware: the blocks of ../gateware/c64_basic.toml, each with the RTL lines that decode it: trx_gate (the gate, the capture, the stop position),
-// trx_statebus, trx_engine (the log, the copy and the apply), trx_debug and trx_dbg_run, trx_turbo, trx_pixel (the still's count), c64cart (its
+// trx_statebus, trx_engine (the log, the copy and the apply), trx_debug and trx_dbg_run, trx_turbo, trx_pixel (the still's count, read only: the block
+// is the base's since Alex's split, U18 §5; its video service takes the still), c64cart (its
 // command: the cartridge drops its cached lines). The areas are fixed in the engine (area_base/area_size below, SLIM D4). c64_basic has no
 // session register (the firmware's SH_CTRL at page 5 +0: trx_sys.v decodes no word 0x1400), so a stop here is no freeze session.
 //

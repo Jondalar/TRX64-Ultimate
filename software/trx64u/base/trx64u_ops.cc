@@ -4,7 +4,7 @@
 // U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read through the settings group
 // (setting.cc), the files through api->fs, the C64's memory window through api->c64, the registers through the driver table of c64_basic's TOML A
 // (trx64u_lib.h), the running core's state, the REU's memory and the board through the 3.3 groups ctx, io and board (g_api->ctx, io, board), the cartridge port,
-// drive A, the command interface, the SID file and the temp disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the
+// drive A, the command interface, the SID file and the temp disk through the exports of the app's libraries (X_GET; the command interface's is our UCI library's, ../uci). lib_trx64u.cc lists the
 // operations and states of this file with their names and arguments.
 #include "trx64u_ops.h"
 #include "u64cfg.h"

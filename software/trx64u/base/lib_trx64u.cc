@@ -97,52 +97,6 @@ const void *x_table(int which, uint32_t off)
     return *(void *const *)(t + off) ? t : 0;
 }
 
-// ---- the four register windows still in desc.toml (trx64u_lib.h WIN_*, io.window) -------------------------------------------------------------------
-// The windows are the core's description (desc.toml in record 6 of the .cor), so a window found stays. One that is missing is looked for again at the next
-// use (the io group may come later than the first call) and logged once. `need` is the bytes u64cfg.cc's offsets reach: the mixer's 10 channels of a
-// byte per side, the speaker's gains at +0x00, +0x01, +0x04, +0x05, 16 colours of 4 bytes with their YUV from +0x400, 16 colours of 4 bytes.
-static const struct {
-    const char *name;
-    uint32_t need;
-} g_win_def[WIN_N] = {
-    { "audio_mixer", 2 * 10 },
-    { "speaker_mixer", 0x05 + 1 },
-    { "c64_palette", 0x400 + 16 * 4 },
-    { "hdmi_palette", 16 * 4 },
-};
-static volatile uint8_t *g_win[WIN_N];
-static bool g_win_said[WIN_N];
-
-volatile uint8_t *c64u_win(int w)
-{
-    if (w < 0 || w >= WIN_N) {
-        return 0;
-    }
-    if (g_win[w]) {
-        return g_win[w];
-    }
-    const SvcIo *io = g_api->io;
-    uint32_t size = 0;
-    volatile uint8_t *p = 0;
-    if (SVC_HAS(SvcIo, io, window)) {
-        p = io->window(g_win_def[w].name, &size);
-    }
-    if (p && size >= g_win_def[w].need) {
-        g_win[w] = p;
-        return p;
-    }
-    if (!g_win_said[w]) {
-        g_win_said[w] = true;
-        if (p) {
-            lib_logf("[trx64u] register window \"%s\" is %u bytes, %u needed: its registers are not written", g_win_def[w].name, (unsigned)size,
-                     (unsigned)g_win_def[w].need);
-        } else {
-            lib_logf("[trx64u] no register window \"%s\" (io group, desc.toml or address map): its registers are not written", g_win_def[w].name);
-        }
-    }
-    return 0;
-}
-
 // ---- the core hooks (core_hooks.h, the export "corehooks") ----------------------------------------------------------------------------------------
 // start: the command interface with this machine's side (uci.start, which does nothing when the bitstream lacks it) and the ring library's engine
 // ("ring.init", idempotent; no ring library: nothing; "ring.start" is the log's start, not this). A failure of the ring is the answer: the base logs

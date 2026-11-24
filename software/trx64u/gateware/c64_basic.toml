@@ -9,13 +9,16 @@
 # 0x10000000. A 16- or 32-bit access is split into byte accesses at rising addresses, byte 0 first, within one CPU access (bus_converter.vhd:56,
 # :173-184), which is what the 32-bit registers of trx_sys.v want (bytes 0-2 collect, byte 3 commits; byte 0 latches a read: trx_sys.v:311-323).
 #
-# owner "base": a block the base or a shared driver library of the SDK drives (identity, the cartridge, the cartridge port, UCI, drive, GCR coder,
-# DMA, ROM apertures, the registers the base's io group writes itself; reSID8 by MultiCore's plan, the SID library, although only u64cfg.cc writes
-# it today: open, U18 §5). owner "core": a block only trx64u's libraries drive. One block per register range and driver (D34); trx_io.v is cut into
-# its pages that way.
+# owner "base": a block the base or a shared driver library of the SDK drives (identity, the cartridge, the cartridge port, drive, DMA, ROM apertures,
+# the ICAP loader, the pixel layer and its still capture (the base's video service), the registers the base's io group writes itself). owner "core": a
+# block only trx64u's code drives. Alex's split of 2026-11-24 (U18 §5): reSID8, the mixer's and the speaker's gains, both palettes, the command
+# interface and the GCR coder (our UCI library's) are the core's. A block of the core carries its properties itself, read from this RTL: an SDK map
+# belongs to the shared driver it lives with (api.md 6.14.11) and is written against MultiCore's gateware. One block per register range and driver
+# (D34); trx_io.v is cut into its pages that way.
 #
-# Not here: the resampler (0x10100580: ultimate_sys.vhd:1257-1280 decodes 0x101005xx only at 0x00-0x0B and 0x40, 0x41, 0x44, 0x45), and the
-# ranges of the four register windows still in desc.toml (audio_mixer, speaker_mixer, c64_palette, hdmi_palette: their owner is open, U18 §5).
+# Not here: the resampler (0x10100580) and the base's master volume and tone (its block audio_master, 0x10100550 and 0x10100551): the write decode of
+# 0x101005xx (ultimate_sys.vhd:1257-1280) takes only 0x00-0x0B and 0x40, 0x41, 0x44, 0x45. So trx64u has no Volume and no Tone of the base (Alex: no
+# RTL for them in c64_basic; U18 §5).
 
 [io]
 iobase = 0x10000000
@@ -100,14 +103,82 @@ size = 0x10
   width = 32
   dir = "r"
 
-# page 0 0x040-0x04D: the reSID8 filter control (trx_io.v:276-290 write, :351-364 read), the SID library's map
+# page 0 0x040-0x04D: the reSID8 filter control of the two UltiSIDs' engines (trx_io.v:277-290 write, :351-364 read; rs8_cfg :188-189 goes to the SID
+# engine, top.v:828, :1380). Per engine u = 0, 1: fcsel the cutoff source (c64_redip_sid/sid_multi.sv:105, reDIP-SID/gateware/sid_filter.sv:260: 0 the
+# chip model's own, 1 the 6581 curve, 2 the 8580's), auto b0 the resonance and b1 the digis follow the chip model (sid_multi.sv:103-104), the 6581
+# curve's base (9 bits) and offset (11 bits) as 16-bit registers, low byte first, the two engines' pairs interleaved (stride 4), bypass b0 the filter
+# off. Written by u64cfg.cc (trx64u's SID settings); the names are those of the SDK's map `sid`.
 [[block]]
 name = "resid8"
 module = "trx_io"
-owner = "base"
+owner = "core"
 address = 0x101A0040
 size = 0xE
-map = "sid"
+  [[block.property]]
+  name = "fcsel"
+  offset = 0x00
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "source"
+    shift = 0
+    bits = 2
+      [[block.property.field.state]]
+      name = "chip_model"
+      value = 0
+      [[block.property.field.state]]
+      name = "curve_6581"
+      value = 1
+      [[block.property.field.state]]
+      name = "curve_8580"
+      value = 2
+  [[block.property]]
+  name = "auto"
+  offset = 0x02
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "resonance"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "digis"
+    shift = 1
+    bits = 1
+  [[block.property]]
+  name = "curve_base"
+  offset = 0x04
+  width = 16
+  count = 2
+  stride = 4
+  dir = "rw"
+    [[block.property.field]]
+    name = "base"
+    shift = 0
+    bits = 9
+  [[block.property]]
+  name = "curve_offset"
+  offset = 0x06
+  width = 16
+  count = 2
+  stride = 4
+  dir = "rw"
+    [[block.property.field]]
+    name = "offset"
+    shift = 0
+    bits = 11
+  [[block.property]]
+  name = "bypass"
+  offset = 0x0C
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "filter_off"
+    shift = 0
+    bits = 1
 
 # page 0 0x100-0x117 (trx_sys.v, the C64's clock): the gate, the frame capture, the stop position (trx_sys.v:206-212 read, :347-365 write)
 [[block]]
@@ -675,11 +746,13 @@ size = 0x6B
 map = "c64cart"
 
 # page 6 0x060-0x0A7: the pixel layer and the still capture (trx_io.v:223-224 hands page 6 over; top.v:1580-1582 pix_layer.v: bytes 0-2 stage, byte 3
-# commits :181-202, byte 0 latches a read :204-210; the registers :160-166, :188-197)
+# commits :181-202, byte 0 latches a read :204-210; the registers :160-166, :188-197). The base's: its video service (video.cc) takes the still
+# (still_en, still_base, still_status) and the menu's layer, by the offsets of its own video.h (PX_*, STILL_*), not through this table; the ring library
+# only reads still_status's count (ring.cc scrub_show_locked). No SDK map has the block, so it keeps its properties.
 [[block]]
 name = "trx_pixel"
 module = "pix_layer"
-owner = "core"
+owner = "base"
 address = 0x101A6060
 size = 0x48
   [[block.property]]
@@ -1085,14 +1158,39 @@ size = 0x4000
     shift = 16
     bits = 16
 
-# 0x10044000: the UCI (ultimate_sys.vhd:885-886, uci_unit.vhd), the UCI library's map
+# 0x10044000: the UCI (ultimate_sys.vhd:885-886 region r_uci, 8 KB; uci_unit.vhd:124 instantiates Gideon's command_interface, whose splitter
+# :47-59 puts the registers below +0x800 and the 2 KB of buffers from +0x800; the registers are command_protocol.vhd's, address bits 3:0). The core's
+# (Alex, U18 §5 2026-11-24). The two slot registers the UCI library writes through this table (uci/trxuci_slot.cc): slot_base (+0, :201-202 write,
+# :253-254 read: data bits 6:1 are the slot's C64 address bits 8:3, compared at :108, :121, :141; 0x47 puts its four registers at $DF1C-$DF1F) and
+# slot_enable (+1, :203-208 write: b0 the slot answers while b7 is 0, b7 set writes the bus ID instead; :255-256 read b0). The command interface
+# server, which the UCI library starts (the base archive's command_intf.o), drives the other 14 registers (+0x02-+0x0F: the handshake, the buffer
+# pointers and lengths, the IRQ mask) and the buffers by its own constants (command_intf.h CMD_IF_*), not through this table, and writes slot_base
+# once at its start (CommandInterface::start: 0x47).
 [[block]]
 name = "cmd_if"
 module = "uci_unit"
-owner = "base"
+owner = "core"
 address = 0x10044000
 size = 0x10
-map = "uci"
+  [[block.property]]
+  name = "slot_base"
+  offset = 0x00
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "df1c"
+    value = 0x47
+  [[block.property]]
+  name = "slot_enable"
+  offset = 0x01
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "off"
+    value = 0
+    [[block.property.state]]
+    name = "on"
+    value = 1
 
 # 0x10050000: the DMA window into the C64 (ultimate_sys.vhd:887-888, :1015-1034; dma_win.v behind the handshake), the DMA map
 [[block]]
@@ -1103,14 +1201,42 @@ address = 0x10050000
 size = 0x10000
 map = "dma"
 
-# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894, Gideon's gcr_codec), the drive library's map
+# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894 region r_gcr, :950-953 its request, :798-803 the instance; cores/gideon/fpga/1541/vhdl_source/
+# gcr_codec.vhd). Every write shifts its byte into a 40-bit register (:27-29, at any address of the block); a read (:30-52) of +0 .. +3 answers the
+# four bytes decoded from those 40 bits (gcr2bin :70-76), +4 .. +7 the decoder's error bits, +8 .. +C the five bytes encoded from the last 32. The
+# core's (Alex's split, U18 §5 2026-11-24): its one driver is the UCI library's CONTROL target (uci/uci.cc conv_5bytes_gcr2bin: five bytes in, four out;
+# the drive library codes GCR in software). The names are those of the SDK's map `gcr_coder`.
 [[block]]
 name = "gcr_coder"
 module = "gcr_codec"
-owner = "base"
+owner = "core"
 address = 0x10060500
 size = 0x10
-map = "gcr_coder"
+  [[block.property]]
+  name = "in"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "out0"
+  offset = 0x0
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out1"
+  offset = 0x1
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out2"
+  offset = 0x2
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out3"
+  offset = 0x3
+  width = 8
+  dir = "r"
 
 # 0x10060600: the ICAP loader (MultiCore T239.3 D37, a port of the host's loader; ultimate_sys.vhd:895-896 region r_icap, :1374-1403 write,
 # :1410-1419 read; top.v:620-625 the byte bit reversal and ICAPE2 X32 on cpu_clk), the base's map icap: the way back to the MultiCore host
@@ -1185,6 +1311,88 @@ size = 0x1
   offset = 0x0
   width = 8
   dir = "rw"
+
+# 0x10100500: the mixer's gains (ultimate_sys.vhd:1257-1274, a write decode of its own at address bits 23:8 = 0x1005 outside the regions; writes only,
+# no read). A right and a left byte per source: 0x00-0x03 the two UltiSIDs (sid_gains to the SID mixer, top.v:1382), 0x04-0x07 the two SID sockets
+# (sock_gains, top.v:955), 0x08-0x0B the sampler's two channels (sid_gains2, top.v:1383). Nothing decodes a byte from 0x0C up.
+[[block]]
+name = "audio_mixer"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100500
+size = 0xC
+  [[block.property]]
+  name = "gain"
+  offset = 0x0
+  width = 8
+  count = 12
+  dir = "w"
+
+# 0x10100540 and 0x10100544: the speaker's four gains spk_gain(0..3) (ultimate_sys.vhd:1275-1278, the same write decode; writes only), of which the
+# speaker plays the highest (mix_spk :1559-1562, top.v:1661). Two blocks: +0x02 and +0x03 between them decode nothing.
+[[block]]
+name = "speaker_mixer"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100540
+size = 0x2
+  [[block.property]]
+  name = "gain0"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "gain1"
+  offset = 0x1
+  width = 8
+  dir = "w"
+
+[[block]]
+name = "speaker_mixer_b"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100544
+size = 0x2
+  [[block.property]]
+  name = "gain2"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "gain3"
+  offset = 0x1
+  width = 8
+  dir = "w"
+
+# 0x10145000: the HDMI palette of the overlay's characters (ultimate_sys.vhd:915-916 region r_ovl 0x140000-0x147FFF, ovl_we :978, ovl_addr :983;
+# overlay.v:105-111: block 5 with address bits 11:6 = 0, entry n's R, G, B at 4n + 0, 1, 2, 4n + 3 ignored; writes only: rdata :116-117 is 0 there).
+[[block]]
+name = "hdmi_palette"
+module = "overlay"
+owner = "core"
+address = 0x10145000
+size = 0x40
+  [[block.property]]
+  name = "red"
+  offset = 0x0
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "green"
+  offset = 0x1
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "blue"
+  offset = 0x2
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
 
 # 0x10180000 (page 3, the C64's I/O block, page RAM: ultimate_sys.vhd:917-918, :1121-1192, :1364-1369), one block per register range and driver:
 # the base writes the video format (io.video_format), the DMA mode (io.ram_memonly) and the joystick lines; trx64u the rest. Of the video format the
@@ -1413,6 +1621,36 @@ size = 0x2
   offset = 0x1
   width = 8
   dir = "rw"
+
+# 0x10180800: the C64 palette (ultimate_sys.vhd:925-926 region r_pal 0x180800-0x180FFF; pal_we :985 only with address bits 10:6 = 0, pal_addr :986;
+# pal_ram.v:43-50: entry n's R, G, B at 4n + 0, 1, 2, 4n + 3 ignored; writes only). Nothing decodes the rest of the region (no YUV at +0x400).
+[[block]]
+name = "c64_palette"
+module = "pal_ram"
+owner = "core"
+address = 0x10180800
+size = 0x40
+  [[block.property]]
+  name = "red"
+  offset = 0x0
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "green"
+  offset = 0x1
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "blue"
+  offset = 0x2
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
 
 # 0x10181800 (page 5): U64_DEBUG_REGISTER, its own byte at +0 (ultimate_sys.vhd:1247-1254, :1360-1363), the DMA service's
 [[block]]

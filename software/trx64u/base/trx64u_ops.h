@@ -62,7 +62,7 @@ const char *state_suggest_cart(CoreCtx *c);
 const char *state_suggest_tw(CoreCtx *c);
 const char *state_suggest_ring(CoreCtx *c);
 
-// The machine's side of the command interface (uci_api.h UciHooks), handed to uci.start by the start hook (lib_trx64u.cc).
+// The machine's side of the command interface (trxuci_api.h UciHooks), handed to uci.start by the start hook (lib_trx64u.cc).
 struct UciHooks;
 const struct UciHooks *trx64u_uci_hooks(void);
 

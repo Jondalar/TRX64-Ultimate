@@ -13,8 +13,10 @@ base_sources = ["portdiag.cc"]
 # No [sizes] key: the maxima stay the headers' defaults (`python3 tools/app_build.py table` lists them), the ones of the shared app trx64u ran on until
 # 2026-11-23 (its record: 200 operations, 189 states in base/ops_trx64u.txt, 400 and 320 allowed). Smaller figures wait for a measurement.
 
-# The shared libraries the app is linked with: the tables of the package's libs/shared.toml (sources, headers and entries copied from it), the ones
-# trx64u uses. An app has none of the code of a library this file does not name.
+# The libraries the app is linked with. All but uci are shared libraries of the package: their tables are the package's libs/shared.toml (sources,
+# headers and entries copied from it), the ones trx64u uses. uci is trx64u's own (Alex's split, U18 §5 2026-11-24): its sources are ../uci/, which
+# ../pack_cor.sh hands to app_build.py as --src (MultiCore's uci.cc, uci_slot.cc, uci_exports.cc as trxuci*.cc; its export is still "uci").
+# An app has none of the code of a library this file does not name.
 #   c64cart, cbm1541, uci, sid, tempdisk, cbmprg: our libraries ask for their tables by name (base/lib_trx64u.cc g_x, ring/ringsys.cc rx_name);
 #     cbm1541 also registers the drive operations for the capability drive_a, which desc.toml's caps name; newfile is what cbm1541 needs.
 #   dma: the DMA socket service, which runs our dma.* operations (base/lib_trx64u.cc).
@@ -47,8 +49,8 @@ headers = ["newfile.h"]
 
 [[library]]
 name = "uci"
-sources = ["uci.cc", "uci_slot.cc", "uci_exports.cc"]
-headers = ["uci.h", "uci_slot.h", "uci_api.h"]
+sources = ["trxuci.cc", "trxuci_slot.cc", "trxuci_exports.cc"]
+headers = ["trxuci.h", "trxuci_slot.h", "trxuci_api.h"]
 bind = "uci_bind"
 freeze_request = "uci_take_freeze_request"
 

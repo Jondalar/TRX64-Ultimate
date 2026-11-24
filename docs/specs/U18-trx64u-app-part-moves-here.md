@@ -1136,3 +1136,51 @@ Nothing decided yet.
       rows_shots, settings).
     - MultiCore keeps c64_model.h; copy it with its provenance when needed.
   - MultiCore's next SDK drops `coreapp/cores/c64.cc`; 0.4.5 stays as it is.
+- **2026-11-24: the ring's heap_peak, Alex: "Mach erst mal alles so wie in der gideon based app."** heap_peak stays
+  3,968,668 B: the Timewarp still and a `.trxring` save may be held at once. The firmware does the same: its
+  `trx_trxring_save` (`software/ultimate-app/software/io/c64/trx_trxring.cc:260-279`) mallocs its buffers on top of the
+  Timewarp layer's and never touches the video layer or the still.
+- **2026-11-24: the owner split built (Alex's C; branch `u18-split` from `u18` a294af0f).**
+  - TOML A (`gateware/c64_basic.toml`), core blocks with their properties read from the RTL: `audio_mixer` 0x10100500
+    (12 gains, writes only; `ultimate_sys.vhd:1257-1274` decodes 0x00-0x0B), `speaker_mixer` 0x10100540 and
+    `speaker_mixer_b` 0x10100544 (two blocks, because +0x02 and +0x03 decode nothing and rtl_check refuses a block over
+    them), `c64_palette` 0x10180800 (RGB, 0x40 bytes; `pal_we` only with address bits 10:6 = 0, so no YUV at +0x400),
+    `hdmi_palette` 0x10145000 (`overlay.v` block 5). `resid8`, `cmd_if` and `gcr_coder` are core blocks with inline
+    properties under the names of the SDK's maps `sid`, `uci` and `gcr_coder`; `trx_pixel` is the base's. 0x10100550 and
+    0x10100551 stay out: no Volume and no Tone of the base on trx64u (decided gap, Alex).
+  - `desc.toml` has no `[[window]]`, and `u64cfg.cc` writes through `drvtab.h`; `c64u_win` and `WIN_*` are gone. The
+    writes c64_basic never decoded are dropped: mixer bytes 0x0C-0x13 (drive 1, drive 2, tape; the hidden settings "Vol
+    Drive 1" and "Pan Drive 1" are no longer read) and the C64 palette's YUV copy. The two hidden rows stay in the menu
+    as the firmware has them (`u64_config.cc` :509, :519, `CFG_MIXER6_*`, bytes c64_basic does not decode either), so
+    record 6 is unchanged (Alex: "Mach erst mal alles so wie in der gideon based app").
+  - Address check (host, in the scratchpad): `u64cfg.cc` of a294af0f and the new one, each compiled as it is with its own
+    `drvtab.h`. Every register access faults in macOS's `__PAGEZERO` and is logged at its board address; the old windows
+    come from the base's own code (`libsvc.cc` `window()`, `descrec.cc` lookup and translation, verbatim) over
+    `desc.toml`'s rows. 34 scenarios with 8 settings seeds: the new build writes 8,131 register bytes, each at the old
+    board address with the same values per address; the old one's 3,264 more bytes are all undecoded ones (192 mixer,
+    3,072 YUV); every other call into the base is the same. A wrong offset fails the check.
+  - rtl_check of SDK 0.4.5 (it has no `--core-in-design`): `ident`, `audio_mixer`, `speaker_mixer`, `speaker_mixer_b`
+    and `resid8` agree (5 blocks, 15 properties). For `c64_palette`, `hdmi_palette`, `cmd_if`, `gcr_coder` and
+    `trx_pixel` the checker stops at an RTL pattern it does not know (`vic_scaler.v:52`, `overlay.v:40`,
+    `synchronizer_gzw.vhd:48`, `gcr_codec.vhd:63`, `pix_layer.v:80`; the last two also at a294af0f). Their decode was
+    read by hand, and the TOML A names the lines. Over the whole TOML A, 23 of 39 blocks agree; the tool stops at an
+    unknown pattern for 15 and finds a byte of `icap` (+0x1) that nothing decodes. `ci/lint.sh`'s reverse lint now
+    covers `uci/` too (59 files, no literal I/O address).
+  - UCI: form (b), our own sources linked by our TOML B. Form (a) is out on SDK 0.4.5: the library is C++ on the base's
+    own objects (the server `cmd_if`, its targets' base class, the FileManager, the RTC), which a record-7 image cannot
+    link, and its freeze request is an entry of the app's library table that LibApi does not offer. `uci/` holds
+    MultiCore's `uci.cc`, `uci_slot.cc`, `uci_exports.cc` and their headers (t239.3 e8b76719, byte for byte SDK 0.4.5) as
+    `trxuci*`, with a PROVENANCE header each. The names differ because a library's include path has the SDK's
+    `include/` first. The TOML B's library `uci` takes them (`pack_cor.sh --src uci`), and the export is still "uci".
+    `pack_cor.sh` now drops objects the link did not load before the symbol check (the old `uci*.o`).
+  - Found on the way: the base's server writes `slot_base` (0x47) itself at its start (`CommandInterface::start`); the
+    base's `video.cc` drives `trx_pixel` by its own offsets; the ring reads `trx_pixel`'s still count through the
+    driver table.
+  - Budgets: trx64u 88,924 + 120,672 = 209,596 B (a294af0f, measured: 89,760 + 120,684), image budget 209,596. The ring is
+    unchanged at 136,352 + 16,860 = 153,212.
+  - `pack_cor.sh --emu`: rc 0, READY 3.6 s, 4 libraries loaded, 0 refused, operations and states equal to the golden.
+    The T-3 check passes (`check_emu.py`, the palette through `u64.apply_palette`). UCI in ue2emu: with "Command
+    Interface (UCI)" set over REST, ue2emu's monitor `dir` (DOS target 2 over the UCI block) lists `/`, `/Usb0` and
+    `/Usb0/cores`, answered by our library.
+  - Not exercised: the board, the UCI from the C64's side, and CONTROL's palette and DECODE_TRACK commands. Their
+    registers are covered by the address check and by the unchanged driver table names.
