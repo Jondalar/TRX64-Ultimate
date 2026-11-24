@@ -1366,12 +1366,14 @@ Nothing decided yet.
       (+5 to +9) passes. MultiCore: the tool's fault (`rtl_check.py`:3784 counts a read only when its answer is not the constant 0, which
       keeps an undecoded address's default answer out and loses a decoded arm that answers 0); the fix is open in their T239.3 §5 and comes
       with a later SDK. Until then `check` stays out of our lint.
-  - Alex's decision (D50): the handed-over server writes the base's ITU itself through `itu.h`: `ITU_IRQ_CLEAR` and `ITU_IRQ_ENABLE` for the
-    C64 reset, `ITU_IRQ_ENABLE` for the command interface, `ITU_IRQ_DISABLE` in its destructor. Until 0.4.5 that was the base's own code.
-    MultiCore: the base offers no call for an interrupt (api.md and SvcSys have `ms_timer` only), `itu` is a base block, and D50 as written
-    does not allow a library's write to it. What the code does: the enable and disable registers set and clear only the bits written
-    (`itu.vhd`:136-139); the base enables the timer alone, "other modules shall enable their own interrupt" (`riscv_main.c`:185, MultiCore
-    6e280710); the base's handler calls the server's strong hooks. Until Alex decides, the handed-over code stays as it is.
+  - D52 (Alex, 2026-11-24, as MultiCore recorded it on integration c7e5ce8a7; translated): "The ITU registers must be writable." The
+    handed-over server writes the base's ITU itself through `itu.h` (`ITU_IRQ_CLEAR` and `ITU_IRQ_ENABLE` for the C64 reset, `ITU_IRQ_ENABLE`
+    for the command interface, `ITU_IRQ_DISABLE` in its destructor), which until 0.4.5 was the base's own code, and the base has no call for
+    an interrupt. A core's own library writes the registers of `itu`, an exception to D50; the server stays as it is. The code behind it:
+    the enable and disable registers set and clear only the bits written (`itu.vhd`:136-139); the base enables the timer alone, "other
+    modules shall enable their own interrupt" (`riscv_main.c`:185, MultiCore 6e280710). Open for the next SDK: the driver table gives a
+    core's library `itu`'s `_WR` macros too (0.4.6 puts them inside `#ifndef DRV_BASE_READ_ONLY`).
   - CI run 481 (82fe1b90) green in every stage; delivered to MultiCore (D45): `trx64u_82fe1b90.cor`, 3,987,048 bytes, sha256
     `b4e184bd...`, and `trx64g_82fe1b90.cor`, 3,568,073 bytes, sha256 `ffcd38c2...`, both checked against the package's SHA256SUMS.
+    MultiCore's pins take them (t239.3 bff5d6730, the values checked there).
   - Not exercised: the board, a UCI command from a C64 program, the NETWORK target and CONTROL.
