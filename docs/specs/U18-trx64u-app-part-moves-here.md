@@ -1244,10 +1244,20 @@ Nothing decided yet.
     `trx64-ultimate`; MultiCore's package takes each by its SHA-256.
   - `default_chars.bin` is the part of the character ROM that Gideon's application holds, which MultiCore's licence rule for
     `trx64g.cor` allows (the BASIC ROM, that part of the character ROM, `module.bin`).
+  - Run 480 (975aa59b), the first CI-built `trx64g.cor`, delivered: `trx64g_975aa59b.cor`, 3,568,073 B, sha256
+    `00368bed...` (records 1, 3, 4 and 5); `trx64u_975aa59b.cor`, 3,984,896 B, sha256 `03239331...` (the same app, libraries,
+    record 6, files and bitstream as run 479; only the version and `bit_commit` differ). MultiCore's t239.3 615bb6922 pins
+    both, `trx64g.pin` now in the COR form; their ROM check (`check_public_tree --allow-trx`) is clean for both.
+    `app_commit` stays in trx64g's manifest (MultiCore: it names what the file holds, and their side reads no field of it).
   - Open:
-    - MultiCore's pin moving to the COR form after our first CI file;
     - a release reuses its branch package, so its `trx64g.cor` shows `x.y.z-dev+<commit8>`, not the `x.y.z` that §2 gives a
       release;
-    - the firmware findings of the ue2emu runs (the `.cfg` looked for before the stick is mounted, and the question not shown
-      and not readable from the keyboard; on the card, the question closed by the first write). These are in
-      `software/ultimate-app` and were not changed here.
+    - the firmware's one-time question "import the settings from /Flash?" (`ultimate.cc`, after the UI is up) fails under
+      MultiCore's base, seen in ue2emu and followed in the code:
+      - from the card: an init write of a page (`ConfigPage::write`, `config.cc`) calls `save_core_cfg(false)`, which writes
+        the whole `.cfg` and clears `cfg_import_open`, so the flash settings are taken before the question is asked;
+      - from the stick: the `.cfg` is looked for before the stick is mounted and every write fails; the question goes to
+        the C64 menu while the machine is not frozen, so it is not shown and no key is read (`C64::keyboard_scan_allowed`
+        needs `isFrozen`); the first menu-button push answers "no" and writes the defaults `.cfg`.
+      MultiCore's coreapp waits for the `.cor`'s medium (`mediumwait.h`); Gideon's application does not. Ours to fix
+      (MultiCore: noted as ours); `software/ultimate-app` is not changed yet.
