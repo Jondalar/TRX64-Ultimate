@@ -66,6 +66,12 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   MultiCore's D36); after that the work is native on GitHub. Gitea keeps the full history as the archive (Alex: "A").
 - **D16 (§4 question 11):** the CI images are MultiCore's `trx64u-build`, `trx64u-sim` and `trx64u-emu` on ghcr, pinned by digest (the
   SDK's own compiler; nothing of ours to maintain) (Alex: "A").
+- **D17 (Alex, 2026-11-24, translated):** "If we do that tomorrow, then I would actually also like to test ephemeral runners." An experiment
+  beside D1, on Hetzner only ("no, then only Hetzner tomorrow"; AWS not now): **a** the mechanism first (a small job on a Hetzner Cloud server
+  created through the hcloud API, registered with a GitHub just-in-time runner config for exactly one job, always deleted afterwards),
+  **b** then Vivado (a private snapshot with Vivado installed builds `c64_basic`, compared with the builder in time and cost). Alex brings a
+  Hetzner Cloud project with an API token and a GitHub token that may register runners on the repository. D1 stands until the experiment
+  says otherwise.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
@@ -167,5 +173,9 @@ Not started.
 Not started.
 
 ### A8 (public-tree check)
+
+Not started.
+
+### F (D17: ephemeral runners on Hetzner, experiment)
 
 Not started.
