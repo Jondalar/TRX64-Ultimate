@@ -1,6 +1,7 @@
 # U20 — GitHub becomes TRX64-Ultimate's development home; GitHub's runners build everything but Vivado, our builder builds the bitstream
 
-**Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D17; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482 green: lint, app, bitstream, package, sims, update, cor).
+**Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
+green: lint, app, bitstream, package, sims, update, cor). F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25).
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -228,4 +229,130 @@ Not started.
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 
-Not started.
+**F-a built 2026-11-24, not yet run** (it needs the accounts Alex brings on 2026-11-25). F-b (Vivado) not started.
+
+Built:
+- `.github/workflows/ephemeral-a.yml`, three jobs. `start` (ubuntu-latest, 20 min): sweeps this repository's experiment servers
+  older than 90 min, gets a just-in-time runner config (`generate-jitconfig`, runner group 1, one label only:
+  `eph-<run id>-<attempt>-<12 random hex>`), renders the user data, creates the server (labels `purpose=gh-ephemeral`,
+  `repo=Jondalar.TRX64-Ultimate`, `run=<run id>-<attempt>`; Hetzner refuses `/` in a label value), waits until it runs and until
+  GitHub lists the runner online (10 min, else red). `work` (`runs-on: [<that label>]`, 15 min): checkout, `uname -a`,
+  `nproc`, `free -m`, `df -h /`, then `ci/ephemeral/proof.sh` writes the machine and the seconds from the create request to each
+  step (server running, boot, user data, runner downloaded, dependencies, runner started, online, first step) into the job
+  summary. `stop` (ubuntu-latest, `if: always()`, `needs: [start, work]`, 10 min): see the cleanup below.
+- `ci/ephemeral/hcloud.sh` (`create`, `wait`, `delete`, `sweep`, `list`) and `ghrunner.sh` (`jit`, `wait-online`, `delete`,
+  `user-data`), curl and jq, shared `common.sh` (the token goes to curl on stdin, never on a command line or in the log; GET and
+  DELETE retried on 429/5xx, POST never). `user-data.sh`: the cloud-init script. `--dry-run` prints every request with the token
+  and the user data left out and answers it with canned data.
+- The user data: a lifetime cap first (`systemd-run` timer: power off 45 min later), sshd off (no SSH key, the root password of
+  the create answer is dropped and masked), user `runner` with passwordless sudo (as on GitHub's hosted runners), actions/runner
+  **2.338.2** linux-x64, SHA-256 `baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40` checked before unpacking,
+  `bin/installdependencies.sh`, `run.sh --jitconfig` as `runner`; after the one job the machine powers off.
+- Workflow rules kept: triggers only `push` to `scratch/ephemeral-*` and `workflow_dispatch` (no `pull_request`, no
+  `pull_request_target`); top-level `permissions: contents: read`; `actions/checkout` pinned at
+  `d23441a48e516b6c34aea4fa41551a30e30af803` (v6.1.0, node24); secrets only as env of the steps that need them, `work` gets
+  none; the JIT config and the root password are masked and never printed. Job `work` is the documented exception to the rule
+  "no self-hosted runner" (workflow header). MultiCore's `tools/check_workflows.py` over `.github/` finds nothing: its rule 6
+  looks for the word `self-hosted` in `runs-on`, and `work` names only the random label (open point 4). Gitea runs
+  `.gitea/workflows` only, so this file does nothing there.
+- The label rule (a security fix after review, not a choice): the runner carries only the run's random label. A fork pull
+  request can bring its own workflow (GitHub runs a pull request's own workflow files), whose job waits up to 24 hours for any
+  runner labelled `self-hosted`; with that label our runner could take such a queued job before `work` and run it until the
+  cap. `ghrunner.sh jit` refuses `self-hosted` and GitHub's OS and architecture names (`linux`, `windows`, `macos`, `x64`,
+  `x86`, `arm`, `arm64`), and fails without writing the config when GitHub's answer lists any label but the requested one; job
+  `stop` then removes the registration and no server was created. Default labels: GitHub's REST page on `generate-jitconfig`
+  says only "the names of the custom labels to add to the runner" and nothing about defaults; in actions/runner 2.338.2 the
+  defaults (`self-hosted`, OS, architecture) are added by `config.sh` (`ConfigurationManager.CreateNewAgent`), while the
+  `--jitconfig` path (`Runner.cs`) only writes the decoded config files. So none are requested, the runner adds none, and
+  what GitHub's server might add is caught by the answer check (a read-only default label could not be removed by the API).
+
+What the code rests on (read 2026-11-24, not guessed): Hetzner's OpenAPI document (`docs.hetzner.cloud/cloud.spec.json`): the
+create body (no `datacenter` field; the data-center endpoints answer 410 since 2026-10-01, changelog), `user_data` at most
+32 KiB, the label rules, 412 `resource_unavailable` and 422 `placement_error`, `server_types[].locations[].available` and
+`.deprecation`, image `ubuntu-24.04`, locations `nbg1`, `fsn1`. The smallest shared type is CPX02 (1 AMD vCPU, 1 GB, 20 GB;
+What's New 2026-10-06, in FSN1, NBG1 and HEL1). Its API name `cpx02` follows the changelog's names (`cpx12` = CPX12, ID 108)
+but no API answer was seen without a token, so `create` asks `GET /server_types?name=` first and falls back in the order
+`cpx02 cpx12 cx23 cpx22`, `nbg1` before `fsn1` (the cost-optimized CX23 shows "not available" on Hetzner's page today). The
+runner hash is the release notes' and was recomputed over the downloaded tarball (228,071,396 bytes). `generate-jitconfig`,
+get and delete a runner need the fine-grained permission Administration (write; read for the GETs), GitHub's permission table.
+
+Tests (on the Mac, no request to Hetzner or GitHub): `ci/ephemeral/test_dryrun.sh`, 46 checks, all pass: the whole path with
+`--dry-run` and fake tokens; no token, JIT config or root password in any output (under `GITHUB_ACTIONS=true` only in their
+`::add-mask::` lines); the user data passes `bash -n`, has no field left, holds the config (3 KB plus the config, of
+32 KiB); create skips an unavailable pair; the sweep deletes the 200- and 120-minute servers and keeps the 5-minute one and
+refuses a selector without `purpose=gh-ephemeral`; `run in (...)` finds its server; a Primary IP left unassigned is deleted;
+the label rule (the JIT request's labels are exactly the random one; the workflow neither requests nor names `self-hosted`;
+`jit` refuses `self-hosted` and `X64`; a canned answer with an added `self-hosted` fails and writes no config); shellcheck
+clean. Thirteen broken copies each turn checks red: token printed, JIT printed, root password printed, sweep age in seconds,
+IPv6 on, sweep guard off, IP cleanup off, user data unredacted, `--label self-hosted` back in the workflow's JIT step,
+`self-hosted` back in `work`'s `runs-on`, `jit`'s refusal off, `jit`'s answer check off, the test's own JIT step asking for
+`self-hosted`. The real curl path ran against a mock API on 127.0.0.1 (scratch only): bearer
+header and JSON body arrive, 412 passes to the next pair, 503 is retried, two pages are joined. Not run anywhere yet: the user
+data on Ubuntu 24.04 (no container runtime on the Mac); its first boot is the first real run.
+
+**For Alex, 2026-11-25**, in this order:
+1. Hetzner Cloud console: a new project only for this (e.g. `gh-ephemeral`), Security → API tokens → a token with **Read &
+   Write**. Hetzner tokens do not expire: delete it when the experiment ends.
+2. GitHub: a fine-grained personal access token, resource owner Jondalar, only the repository `TRX64-Ultimate`, repository
+   permission **Administration: Read and write** (Metadata: read comes with it), a short expiry (7 days).
+3. Repository secrets of `Jondalar/TRX64-Ultimate` (Settings → Secrets and variables → Actions): `HCLOUD_TOKEN` (step 1) and
+   `RUNNER_REG_TOKEN` (step 2).
+4. Settings → Actions → General: Actions on for the repository, `actions/checkout` allowed, and "Require approval for all
+   external contributors" as defence in depth beside the label rule (no fork job starts unseen).
+5. The push that starts it, from a GitHub clone (`main` has no such workflow yet, so `workflow_dispatch` is not offered; the
+   push trigger is the way):
+
+   ```
+   git clone https://github.com/Jondalar/TRX64-Ultimate.git eph && cd eph
+   git switch -c scratch/ephemeral-a
+   git -C <checkout that holds this note> archive HEAD .github/workflows/ephemeral-a.yml ci/ephemeral | tar -x
+   git add .github/workflows/ephemeral-a.yml ci/ephemeral
+   git commit -m "U20 F-a: ephemeral runner experiment"
+   git push origin scratch/ephemeral-a
+   ```
+
+   Every further push to that branch is another run; "Re-run all jobs" too ("Re-run failed jobs" only for a failed `stop`). The
+   result is `work`'s job summary; `stop`'s summary lists what is left. From the Mac: `HCLOUD_TOKEN=... ci/ephemeral/hcloud.sh list`.
+
+Cost (Hetzner's pages, 2026-11-24, EUR excl. VAT, IPv4 included): CPX02 "€ 0.0088 per hour" (the page's lowest, the HEL1 price
+whose month is € 5.49), € 6.49 a month in FSN1/NBG1, so about € 0.0104 an hour in Germany (same ratio; the start job prints the
+API's exact hourly price for the location it took)
+([regular-performance](https://www.hetzner.com/cloud/regular-performance/)). Hetzner rounds a server's use up to a whole hour,
+bills it in every state until it is deleted, and never above the monthly cap
+([billing FAQ](https://docs.hetzner.com/cloud/billing/faq/)). One run: about € 0.01. The fallbacks: CPX12 from € 0.0160 an hour
+(€ 11.99 a month in FSN1/NBG1), CX23 from € 0.0096 (€ 5.99; [cost-optimized](https://www.hetzner.com/cloud/cost-optimized/)),
+CPX22 from € 0.0272. A server left behind costs its monthly cap at most (€ 6.49 for CPX02) until it is deleted.
+
+Cleanup:
+- `stop` runs after success, failure and cancel (`if: always()`): it deletes the server by `start`'s id and every server labelled
+  with one of this run's attempts (`run in (<id>-1,...,<id>-<n>)`), so a `start` that died before its outputs leaves nothing;
+  waits until the API answers 404; deletes the Primary IPs the server leaves unassigned (Hetzner's docs do not say whether an IP
+  made with the server goes with it; the code does not rely on it); removes the runner registration by id and by name. It goes
+  red when anything is left, and its summary lists every `purpose=gh-ephemeral` server.
+- `start` fails (and `stop` deletes) when the runner is not online within 10 minutes; before creating, it sweeps this
+  repository's experiment servers older than 90 minutes (a live run's server is at most 45).
+- The server powers itself off 45 minutes after its user data starts, and after its one job. That stops the runner, not the
+  bill. No token is on the server.
+- By hand: `HCLOUD_TOKEN=... ci/ephemeral/hcloud.sh sweep --older-than 60` deletes every `purpose=gh-ephemeral` server older
+  than 60 minutes (a sweep refuses a selector without that term).
+
+Residual risk:
+- `stop` does not run or fails: a force-cancel of the run (it skips `always()` jobs), a GitHub outage, the Hetzner API down
+  through six attempts over 75 seconds, a revoked or expired token. The server stays, off after 45 minutes and billed, until the next run's
+  `start` or a hand sweep deletes it; at most its monthly cap.
+- `work` never starts although `start` saw the runner online (the runner died in between): GitHub keeps the
+  job queued up to 24 hours and `stop` waits for it; the switched-off server costs about 24 × € 0.0104 ≈ € 0.25 meanwhile.
+  Cancelling the run starts `stop` at once.
+
+Open points:
+1. The user data has not run on a real Ubuntu 24.04 yet; the first run shows its times. A boot failure is diagnosed through
+   Hetzner's web console (root password reset there) or `hcloud.sh create --ssh-key NAME` by hand from the Mac. The first run
+   also shows the label list GitHub's answer carries: if its server adds a default label, `start` fails at the JIT step by
+   design, and the experiment stops there until that is understood.
+2. The runner pin: a runner updates itself when GitHub releases a newer one (that download is the runner's own, not checked
+   by our SHA-256), and one not updated within 63 days of a newer release gets no job (GitHub's autoscaling page; it does not
+   say how a JIT runner behaves). The first runs' logs show whether 2.338.2 updates itself; `RUNNER_VERSION` and
+   `RUNNER_SHA256` in `ci/ephemeral/user-data.sh` move together.
+3. F-b (Vivado from a private snapshot) needs its own cap and sweep limit: a Vivado run outlasts the 45 and 90 minutes here.
+4. When U20 copies MultiCore's workflow lint (§3, A8), its rule 6 does not see this workflow (no word `self-hosted` in
+   `runs-on`): the copy needs a rule that does, e.g. every `runs-on` names a GitHub-hosted image or is listed as an exception.
