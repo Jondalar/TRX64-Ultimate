@@ -1,9 +1,9 @@
 # The trx64u base library (U18 D5): the operations of the menu (trx64u_ops) and the C64U settings (u64cfg), the C64 descriptor's code (c64core, c64_go:
 # MultiCore's c64.cc and c64_go.cc); lib_trx64u.cc is the entry, the record and the core hooks, setting.cc the settings as the base shows them,
 # libc_extra.c the C library beyond the SDK's. Built by ../build.sh.
-# The image carries no menu record: menu.toml (the menu and its key table) and desc.toml (the descriptor's data, the register windows) are the core's
-# description, delivered beside the library and packed as record 6 of trx64u.cor (cor_pack.py pack --desc menu.toml --desc desc.toml). This build
-# reads menu.toml only, for setlists.h.
+# The image carries no menu record: menu.toml (the menu and its key table) and desc.toml (the descriptor's data, the four register windows still open)
+# are the core's description, delivered beside the library and packed as record 6 of trx64u.cor (cor_pack.py pack --desc menu.toml --desc desc.toml).
+# This build reads menu.toml for setlists.h, and c64_basic's TOML A (../gateware/c64_basic.toml) for the driver table drvtab.h.
 LIB_NAME = trx64u
 LIB_VERSION = 1
 LIB_NEEDS = base>=3.3
@@ -17,6 +17,16 @@ LIB_EXPORTS = corehooks=1
 LIB_BUDGET = image=212860 heap_keep=0 heap_peak=66044 ops=66 states=54 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=0
 include $(SDK)/mk/lib.mk
 
+# The driver table (api.md 6.17, MultiCore T239.3 D31): DRV_<block>_<property>_* of c64_basic's TOML A, made by the SDK's descrec.py with the shared
+# drivers' maps of the SDK (GATEWARE: ../build.sh passes the folder of the TOML A). descrec.py writes a file only when its text changes; every object
+# of the library waits for it.
+GATEWARE ?= ../../gateware
+DRV_TOOLS ?= $(SDK_TOOLS)
+DRV_MAPS ?= $(SDK)/maps
+drvtab.h: $(GATEWARE)/c64_basic.toml
+	python3 $(DRV_TOOLS)/descrec.py drivers $< . --maps $(DRV_MAPS)
+$(LIB_OBJS): drvtab.h
+
 # setting.cc's lists of the values of every choice setting, from the core's menu.toml (setlists.py)
 setlists.h: menu.toml setlists.py
 	python3 setlists.py $(SDK_TOOLS) menu.toml $@
@@ -24,5 +34,5 @@ setting.o: setlists.h
 
 clean: clean-setlists
 clean-setlists:
-	rm -f setlists.h
+	rm -f setlists.h drvtab.h drvtab.c
 .PHONY: clean-setlists

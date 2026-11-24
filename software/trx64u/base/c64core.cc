@@ -9,7 +9,6 @@
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "trx64u_lib.h"
-#include "c64u_regs.h"
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -103,22 +102,16 @@ int c64_mem_write(CoreCtx *, const OpArgs &a, OpOut &o)
 }
 
 // ---- settings ----------------------------------------------------------------------------------------------------------------------------------
-// GATE_CTRL b0 (trx_sys.v): with it the application's C64_STOP pauses the whole machine - CPU, VIC, CIAs and SID; the C64 picture is black while it
+// trx_gate.ctrl's frz (trx_sys.v): with it the cartridge page's stop pauses the whole machine - CPU, VIC, CIAs and SID; the C64 picture is black while it
 // stands (top.v vic_scaler .blank(c64_halted)), the state bus is writable - without it only the CPU, and the VIC keeps drawing.
 int c64_freeze_mode(CoreCtx *, const OpArgs &a, OpOut &)
 {
-    const SvcIo *io = g_api->io;
-    if (io) {
-        uint32_t v = a.i(0) == 0 ? C64U_GATE_FRZ : 0;
-        for (int i = 0; i < 4; i++) {
-            io->wr(C64U_GATE_CTRL + i, (uint8_t)(v >> (8 * i)));
-        }
-    }
+    HW_WR(trx_gate_ctrl, a.i(0) == 0 ? DRV_trx_gate_ctrl_frz_MASK : 0);
     return OPE_OK;
 }
 
 // ---- ROMs (desc.toml [[rom]] names these as put_op) ---------------------------------------------------------------------------------------------
-// Plain copies at the aperture's offsets. No read-back: the KERNAL array is write only on Gideon's boards, and the other two are the same register file.
+// Plain copies at the aperture's offsets (c64_roms of the TOML A: basic, kernal, char), through the io group's rom_write.
 static int put_rom(const OpArgs &a, uint32_t ofs, uint32_t size, const char *role, OpOut &o)
 {
     if (a.len(0) != size) {
@@ -130,7 +123,7 @@ static int put_rom(const OpArgs &a, uint32_t ofs, uint32_t size, const char *rol
 }
 int c64_put_basic(CoreCtx *c, const OpArgs &a, OpOut &o)
 {
-    int rc = put_rom(a, C64_ROM_BASIC, C64_BASIC_BYTES, "BASIC", o);
+    int rc = put_rom(a, DRV_OFF(c64_roms, basic), DRV_c64_roms_basic_COUNT, "BASIC", o);
     if (rc == OPE_OK) {
         trx64u_basic_put(c, a.p(0), a.len(0));                     // the SID player's cartridge carries the BASIC the machine runs with
     }
@@ -139,7 +132,7 @@ int c64_put_basic(CoreCtx *c, const OpArgs &a, OpOut &o)
 // also dma.kernal (the DMA service's KERNAL write, FW socket_dma.cc SOCKET_CMD_KERNALWRITE): the 8 KB image and its fast reset patch in place, no reset
 int c64_put_kernal(CoreCtx *c, const OpArgs &a, OpOut &o)
 {
-    int rc = put_rom(a, C64_ROM_KERNAL, C64_KERNAL_BYTES, "KERNAL", o);
+    int rc = put_rom(a, DRV_OFF(c64_roms, kernal), DRV_c64_roms_kernal_COUNT, "KERNAL", o);
     if (rc == OPE_OK) {
         trx64u_kernal_put(c, a.p(0), a.len(0));                    // the copy the fast reset patch is made against
     }
@@ -147,7 +140,7 @@ int c64_put_kernal(CoreCtx *c, const OpArgs &a, OpOut &o)
 }
 int c64_put_char(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    return put_rom(a, C64_ROM_CHAR, C64_CHAR_BYTES, "CHAR", o);
+    return put_rom(a, DRV_OFF(c64_roms, char), DRV_c64_roms_char_COUNT, "CHAR", o);
 }
 
 // ---- the program loader: the export "cbmprg" (MultiCore's app/loaders/cbm_prg.cc) with the C64's numbers (c64.cc run_params, load_params) ------------

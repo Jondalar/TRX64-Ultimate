@@ -589,10 +589,10 @@ static void write_vic(Gz &g, const uint32_t *w, const uint8_t *color, int line, 
 // §12.7). Without it the machine runs at 1 MHz with badline stalls, the registers-mode reset state, written out.
 static void write_turbo(Gz &g, const TrxFrame &)
 {
-    if (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO) {
+    if (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK) {
         // T29: the engine's live state (TURBO_W1/W2); the ring records at 1 MHz only, so a frame's
         // node is the state of the machine when it is written, not per frame
-        uint32_t w1 = trx_io_read32(TRX_TURBO_W1), w2 = trx_io_read32(TRX_TURBO_W2);
+        uint32_t w1 = HW_RD(trx_turbo_w1), w2 = HW_RD(trx_turbo_w2);
         g.str("\"turbo\":{");
         g.num("\"enable\":", (w1 >> 8) & 7);
         g.num(",\"menuIndex\":", w1 & 15);
@@ -822,7 +822,7 @@ static void write_cart(Gz &g, const uint32_t *w, const uint8_t *cart)
     g.str(",\"cartState\":{");
     g.num("\"currentBank\":", uint8_t(w[W_CART]));
     g.num(",\"controlRegister\":", uint8_t(w[W_CART] >> 8));
-    g.num(",\"cartridgeType\":", io_cart_rd(C64U_CART_TYPE));
+    g.num(",\"cartridgeType\":", CART_RD(type));
     g.str(",\"source\":\"");
     g.jstr(src ? src : "");
     g.str("\"");
@@ -999,19 +999,7 @@ static const char *open_out(const char *path, RFile *f)
 // bytes runs on the drive's own CPU in the free part of the stack page, writes them into memory the app reads, and puts the drive back where it was. The
 // drive is held (CMD_DRV_PAUSE) and moved on with CMD_DRV_STEP (drv_dbg.v), so the C64 may run, be paused or frozen. Limits as there: reading a 6522
 // clears interrupt flags, the timers run during the stub's cycles, the T2 latch low is not readable.
-#ifndef CAPS_DBG
-#define CAPS_DBG       0x08
-#endif
-#define P3(o)          (TRX_IO_BASE + 0x3000 + (o))
-#define DRV_CMD        P3(0x000)
-#define DRV_ARG        P3(0x004)
-#define DRV_STAT       P3(0x0C4)
-#define DRV_CYCLES     P3(0x0C8)
-#define CMD_DRV_PAUSE  0x10
-#define CMD_DRV_RUN    0x11
-#define CMD_DRV_STEP   0x12
-#define ST_HALTED      0x01
-#define ST_STEPPING    0x04
+// The drive's debugger is trx_debug's drive half (c64_basic's TOML A: cmd drv_pause / drv_run / drv_step, arg, drv_stat, drv_cycles).
 #define STUB_BASE      0x0100
 #define STUB_SIZE      0x90
 #define STUB_NEED      (STUB_SIZE + 4)
@@ -1051,25 +1039,25 @@ static bool drv_wait(uint32_t mask, uint32_t want, int ms)
 {
     uint16_t t0 = r_ms_timer();
     while (uint16_t(r_ms_timer() - t0) < uint16_t(ms)) {
-        if ((trx_io_read32(DRV_STAT) & mask) == want) {
+        if ((HW_RD(trx_debug_drv_stat) & mask) == want) {
             return true;
         }
     }
-    return (trx_io_read32(DRV_STAT) & mask) == want;
+    return (HW_RD(trx_debug_drv_stat) & mask) == want;
 }
 static bool drv_hold(void)
 {
-    trx_io_write32(DRV_CMD, CMD_DRV_PAUSE);
-    return drv_wait(ST_HALTED, ST_HALTED, 50);
+    HW_WR(trx_debug_cmd, DRV_trx_debug_cmd_drv_pause);
+    return drv_wait(DRV_trx_debug_drv_stat_halted_MASK, DRV_trx_debug_drv_stat_halted_MASK, 50);
 }
-static void drv_free(void) { trx_io_write32(DRV_CMD, CMD_DRV_RUN); }
+static void drv_free(void) { HW_WR(trx_debug_cmd, DRV_trx_debug_cmd_drv_run); }
 static bool drv_step(int n)
 {
-    trx_io_write32(DRV_ARG, uint32_t(n));
-    trx_io_write32(DRV_CMD, CMD_DRV_STEP);
-    return drv_wait(ST_STEPPING, 0, 200);
+    HW_WR(trx_debug_arg, uint32_t(n));
+    HW_WR(trx_debug_cmd, DRV_trx_debug_cmd_drv_step);
+    return drv_wait(DRV_trx_debug_drv_stat_stepping_MASK, 0, 200);
 }
-static uint16_t drv_pc(void) { return uint16_t(trx_io_read32(DRV_STAT) >> 16); }
+static uint16_t drv_pc(void) { return uint16_t((HW_RD(trx_debug_drv_stat) & DRV_trx_debug_drv_stat_pc_MASK) >> DRV_trx_debug_drv_stat_pc_SHIFT); }
 
 // The stubs are assembled by hand, as there, 0x90 bytes each: code first, then data. The save stub: 68 A, 69 X, 6A Y, 6B S, 6C P, 6D MAGIC, 6E FLAG,
 // 6F MAGIC2, 70..7F VIA 1, 80..8F VIA 2.
@@ -1182,20 +1170,20 @@ static bool drive_powered(void)
 
 bool trx_drive_present(void)
 {
-    return (trx_io_caps() & CAPS_DBG) && drive_powered();
+    return (trx_io_caps() & DRV_ident_caps_debug_MASK) && drive_powered();
 }
 
 const char *trx_drive_read(TrxDriveState *st, bool with_regs)
 {
     memset(st, 0, sizeof(*st));
-    if (!(trx_io_caps() & CAPS_DBG)) {
+    if (!(trx_io_caps() & DRV_ident_caps_debug_MASK)) {
         return "This bitstream has no debug page, so drive A cannot be read";
     }
     if (!drive_powered()) {
         return "Drive A is not powered";
     }
     dread(0, st->ram, TRX_DRIVE_RAM);
-    st->cycles = trx_io_read32(DRV_CYCLES);
+    st->cycles = HW_RD(trx_debug_drv_cycles);
     if (!with_regs) {
         return NULL;
     }
@@ -1251,7 +1239,7 @@ const char *trx_drive_read(TrxDriveState *st, bool with_regs)
         st->pc = next;
         memcpy(st->via1, sv + SV_V1, 16);
         memcpy(st->via2, sv + SV_V2, 16);
-        st->cycles = trx_io_read32(DRV_CYCLES);
+        st->cycles = HW_RD(trx_debug_drv_cycles);
         st->regs = true;
         if (st->sp < STUB_NEED) {
             r_log("[DRIVE] drive A's stack pointer was $%02X, below the stub's %d bytes: its stack was written over and is put back, but the drive may have lost data\n",
@@ -1280,7 +1268,7 @@ const char *trx_drive_read(TrxDriveState *st, bool with_regs)
 
 const char *trx_drive_write(const TrxDriveState *st)
 {
-    if (!(trx_io_caps() & CAPS_DBG)) {
+    if (!(trx_io_caps() & DRV_ident_caps_debug_MASK)) {
         return "This bitstream has no debug page, so drive A cannot be written";
     }
     if (!drive_powered()) {
@@ -1449,8 +1437,8 @@ static uint32_t block_section(uint8_t *dst, const TrxFrame &f)
     dst[n++] = uint8_t(f.x >> 8);
     uint16_t flags = 0;
     uint32_t pack = 0;
-    if (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO) {
-        uint32_t w1 = trx_io_read32(TRX_TURBO_W1), w2 = trx_io_read32(TRX_TURBO_W2);
+    if (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK) {
+        uint32_t w1 = HW_RD(trx_turbo_w1), w2 = HW_RD(trx_turbo_w2);
         uint32_t en = (w1 >> 8) & 7, mi = w1 & 15, d031 = (w1 >> 24) & 0xFF;
         uint32_t d030 = (w1 >> 11) & 1, hold = w2 & 0x7FFFFF, stalls = (w1 & 0x80) ? 1 : 0;
         pack = ((hold >> 8) << 17) | (d031 << 9) | (d030 << 8) | (en << 5) | (stalls << 4) | mi;
@@ -1514,8 +1502,8 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     int n = r_snprintf(dst, cap,
                      "{\"kind\":\"c64re\",\"version\":%d,\"writer\":\"trx64u\",\"appVersion\":\"%s\""
                      ",\"machine\":\"%s\",\"bitstreamId\":%u,\"caps\":%u,\"caps2\":%u,\"blockWords\":%d",
-                     C64RE_FORMAT, SVC_HAS(SvcSys, sys, app_version) ? sys->app_version() : "", machine_name(), (unsigned)trx_io_read32(TRX_ID),
-                     (unsigned)trx_rd8(TRX_CAPS), (unsigned)trx_rd8(TRX_CAPS2), TRX_BLOCK_WORDS);
+                     C64RE_FORMAT, SVC_HAS(SvcSys, sys, app_version) ? sys->app_version() : "", machine_name(), (unsigned)HW_RD(ident_id),
+                     (unsigned)HW_RD(ident_caps), (unsigned)HW_RD(ident_caps2), TRX_BLOCK_WORDS);
     uint8_t t[6];                                 // sys.wall_time: year - 2000, month, day, hour, minute, second
     if (SVC_HAS(SvcSys, sys, wall_time) && sys->wall_time(t)) {
         int y = 2000 + t[0];
@@ -1529,7 +1517,7 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     n += r_snprintf(dst + n, cap - n, ",\"pc\":%d", int((f.w[W_CPU + 1] & 0xFFFF) - PC_ADJ) & 0xFFFF);
     if (cart) {
         // the type is C64_CARTRIDGE_TYPE, the machine's own number (the one trx_ring_cart_state_ok() and a load compare), not the .crt's hardware type
-        n += r_snprintf(dst + n, cap - n, ",\"cartridgeType\":%u,\"source\":\"", (unsigned)io_cart_rd(C64U_CART_TYPE));
+        n += r_snprintf(dst + n, cap - n, ",\"cartridgeType\":%u,\"source\":\"", (unsigned)CART_RD(type));
         n += json_str(dst + n, cap - n, g_src.cart_src);
         n += r_snprintf(dst + n, cap - n, "\",\"mediumBytes\":%u", (unsigned)rom_len);
     }
@@ -1538,7 +1526,7 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
         // require/prohibit: the cartridge definition's flags as c64cart reports them (0 when the base does not know them). Written for the file's
         // reader; no load here reads them back (TrxMachineWant parses them and nothing uses the fields).
         n += r_snprintf(dst + n, cap - n, "\"cartridge\":{\"type\":%u,\"bytes\":%u,\"require\":%u,\"prohibit\":%u,\"source\":\"",
-                        (unsigned)io_cart_rd(C64U_CART_TYPE), (unsigned)rom_len, (unsigned)g_src.cart_require, (unsigned)g_src.cart_prohibit);
+                        (unsigned)CART_RD(type), (unsigned)rom_len, (unsigned)g_src.cart_require, (unsigned)g_src.cart_prohibit);
         n += json_str(dst + n, cap - n, g_src.cart_src);
         n += r_snprintf(dst + n, cap - n, "\"},");
     }
@@ -1550,8 +1538,8 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
     const UciApi *uci = R_TABLE(UciApi, RX_UCI, slot_enable);
     n += r_snprintf(dst + n, cap - n, "\"settings\":{\"uci\":%s,\"reu\":%u,\"reuSize\":%u,\"sampler\":%s}}}",
                   (fpga_caps() & CAPAB_COMMAND_INTF) && uci && uci->slot_enable() ? "true" : "false",
-                  (unsigned)(io_cart_rd(C64U_CART_REU_ENABLE) ? 1 : 0), (unsigned)io_cart_rd(C64U_CART_REU_SIZE),
-                  io_cart_rd(C64U_CART_SAMPLER) ? "true" : "false");
+                  (unsigned)(CART_RD(reu) ? 1 : 0), (unsigned)CART_RD(reu_size),
+                  CART_RD(sampler) ? "true" : "false");
     return n;
 }
 
@@ -1564,8 +1552,6 @@ static int header_json(char *dst, int cap, const TrxFrame &f, uint32_t rom_len)
 #define DUMP_SLICE      (21 * DUMP_PIECE)   // the bytes of a medium one step hashes or writes
 #define MAX_RING_ENTRIES 64
 
-// The register the dump with no ring tests before it reads the VIC registers and the colour RAM as bus cycles (machine_read).
-#define DRV_STATUS_REG (TRX_IO_BASE + 0x3008)
 
 struct SecOut {
     uint8_t id;
@@ -1665,12 +1651,12 @@ static const char *frame_prep(TrxDump *d)
     // (FW trx_c64re_dump_ex, U9 D0); one list answers here and in replay_cart()
     if (f->w[W_GLUE] & GLUE_CART) {
         const char *cname = NULL;
-        if (!trx_ring_cart_state_ok(io_cart_rd(C64U_CART_TYPE), &cname)) {
+        if (!trx_ring_cart_state_ok(CART_RD(type), &cname)) {
             static char refused[96];
-            r_snprintf(refused, sizeof(refused), "A state of this cartridge (type %02x) cannot be loaded back yet", (int)io_cart_rd(C64U_CART_TYPE));
+            r_snprintf(refused, sizeof(refused), "A state of this cartridge (type %02x) cannot be loaded back yet", (int)CART_RD(type));
             return refused;
         }
-        if (trx_ring_cart_has_eeprom(io_cart_rd(C64U_CART_TYPE))) {
+        if (trx_ring_cart_has_eeprom(CART_RD(type))) {
             // U9 D3a: GMod2's saved game is in the 93C86, outside the ROM window: without it the file would hold a cartridge whose save it cannot put back
             if (!(fpga_caps() & CAPAB_EEPROM)) {
                 return "This bitstream has no EEPROM: a GMod2 state cannot be saved";
@@ -1810,11 +1796,11 @@ static const char *machine_read(TrxDump *d)
         return "This core has no C64 memory window";
     }
     uint8_t *const ram = d->ram, *const col = d->col;
-    bool old = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    bool old = HW_RD(c64_dma_mode_memonly) != 0;
     io_memonly(true);
     g_api->c64->dma_read(0, ram, 65536);
-    uint32_t st = trx_io_read32(DRV_STATUS_REG);
-    if ((st & 1) && (st & (0x02 | 0x20))) {                  // the gate is shut and a stop is in force: the window's D page is a bus cycle
+    uint32_t st = HW_RD(trx_debug_status);                    // the debugger's status: the gate shut and a stop in force make the window's D page a bus cycle
+    if ((st & DRV_trx_debug_status_shut_MASK) && (st & (DRV_trx_debug_status_stop_MASK | DRV_trx_debug_status_fw_stop_MASK))) {
         io_memonly(false);
         for (int r = 0; r < 0x30; r++) {
             d->vic[r] = c64_peek(0xD000 + r);
@@ -3794,9 +3780,9 @@ static const char *stage_v2(RFile *file, const uint8_t *head, uint32_t size, con
     if (!err && mw.present && mw.drive_img[0]) {
         (void)resolve_medium(mw.drive_img, sizeof(mw.drive_img), self, false);
     }
-    if (!err && !mw.present && mw.cart_type >= 0 && mw.cart_type != int(io_cart_rd(C64U_CART_TYPE))) {
+    if (!err && !mw.present && mw.cart_type >= 0 && mw.cart_type != int(CART_RD(type))) {
         static char msg[80];
-        r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", mw.cart_type, (int)io_cart_rd(C64U_CART_TYPE));
+        r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", mw.cart_type, (int)CART_RD(type));
         err = msg;
     }
     if (!err && (!rd.get(buf, 4) || (ns = le16(buf)) < 1 || ns > SEC_LIMIT)) {
@@ -3902,7 +3888,7 @@ static const char *stage_v2(RFile *file, const uint8_t *head, uint32_t size, con
         st->x = le16(blk + 4 * TRX_BLOCK_WORDS);
         uint16_t flags = le16(blk + 4 * TRX_BLOCK_WORDS + 2);
         uint32_t pack = le32(blk + 4 * TRX_BLOCK_WORDS + 4);
-        if ((flags & 1) && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO)) {
+        if ((flags & 1) && (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK)) {
             st->turbo = true;
             st->turbo_pack = pack;
         } else if (flags & 1) {
@@ -4034,7 +4020,7 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
     if (!err) {
         // a file from a turbo-capable machine (TRX64 or a later board)
         int tb = json_key(js, t, n, cp, "turbo");
-        if (tb >= 0 && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO)) {
+        if (tb >= 0 && (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK)) {
             // T29: the file's turbo state goes in with the machine (state bus chip 0 word 1)
             uint32_t en = tok_int(js, t, json_key(js, t, n, tb, "enable")) & 7;
             uint32_t mi = tok_int(js, t, json_key(js, t, n, tb, "menuIndex")) & 15;
@@ -4061,9 +4047,9 @@ static const char *stage_entry(const char *path, const char *want, TrxC64reStage
         // A cartridge snapshot only fits the cartridge that is on: the banking
         // registers, the RAM window and the ROM image all belong to that type.
         int ft = trx_c64re_cart_type(js, t, n, cp);
-        if (ft >= 0 && ft != int(io_cart_rd(C64U_CART_TYPE))) {
+        if (ft >= 0 && ft != int(CART_RD(type))) {
             static char msg[80];
-            r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", ft, (int)io_cart_rd(C64U_CART_TYPE));
+            r_snprintf(msg, sizeof(msg), "The file is of cartridge type %02x; this machine has %02x", ft, (int)CART_RD(type));
             err = msg;
         }
         // cartFlash: the ROM / flash window as the file has it. It goes back
@@ -4265,8 +4251,8 @@ static void build_cartridge(const TrxMachineWant &mw, char *missed, int cap)
         note(missed, cap, "the cartridge");
         return;
     }
-    r_log("[C64RE] cartridge type %02x inserted from %s, now type %02x\n", mw.cart_type, mw.cart_src, (int)io_cart_rd(C64U_CART_TYPE));
-    if (int(io_cart_rd(C64U_CART_TYPE)) != mw.cart_type) {
+    r_log("[C64RE] cartridge type %02x inserted from %s, now type %02x\n", mw.cart_type, mw.cart_src, (int)CART_RD(type));
+    if (int(CART_RD(type)) != mw.cart_type) {
         note(missed, cap, "the cartridge");
     }
 }
@@ -4319,14 +4305,14 @@ static void build_settings(const TrxMachineWant &mw, char *missed, int cap)
         note(missed, cap, "UCI");
     }
     if (fpga_caps() & CAPAB_SAMPLER) {
-        io_cart_wr(C64U_CART_SAMPLER, mw.sampler ? 1 : 0);
+        CART_WR(sampler, mw.sampler ? 1 : 0);
     } else if (mw.sampler) {
         note(missed, cap, "the sampler");
     }
     // the REU is off in every state a ring can produce (A08); this only puts
     // back an "off" that the machine may currently contradict
-    io_cart_wr(C64U_CART_REU_ENABLE, mw.reu ? 1 : 0);
-    io_cart_wr(C64U_CART_REU_SIZE, mw.reu_size);
+    CART_WR(reu, mw.reu ? 1 : 0);
+    CART_WR(reu_size, mw.reu_size);
 }
 
 // The video standard, before anything else: it drives the PLL and the colour

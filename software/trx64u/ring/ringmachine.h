@@ -1,6 +1,6 @@
 // The machine a state file describes, read by the ring library itself (U18, MultiCore's decision "Machine info and menu close", 2026-11-22): the media
 // in the descriptor's slots (ctx.media_source), the cartridge in the port (export "c64cart"), drive A (export "cbm1541") and the System Mode (the video
-// format register through io, c64u_regs.h). Every dump, save, .trxring and load gets it from ring_machine_build(), whether the menu's operations or the
+// format, c64_video of c64_basic's TOML A, through the driver table). Every dump, save, .trxring and load gets it from ring_machine_build(), whether the menu's operations or the
 // exported table started it (ringfile.cc trx_c64re_source_begin).
 #ifndef RING_RINGMACHINE_H
 #define RING_RINGMACHINE_H

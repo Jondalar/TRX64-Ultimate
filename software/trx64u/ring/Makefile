@@ -20,3 +20,17 @@ LIB_EXPORTS = ring=1 ringsteps=1
 # nothing for it (api.md 8.4.3, 8.4.4). The counts: lib_register's record (ops 20, states 16, the poll ring.poll).
 LIB_BUDGET = image=148360 heap_keep=1486893 heap_peak=2931868 ops=20 states=16 events=0 nodes=0 file_actions=0 settings=0 tabs=0 polls=1
 include $(SDK)/mk/lib.mk
+
+# The driver table (api.md 6.17, MultiCore T239.3 D31): DRV_<block>_<property>_* of c64_basic's TOML A, made by the SDK's descrec.py with the shared
+# drivers' maps of the SDK (GATEWARE: ../build.sh passes the folder of the TOML A). descrec.py writes a file only when its text changes; every object
+# of the library waits for it.
+GATEWARE ?= ../../gateware
+DRV_TOOLS ?= $(SDK_TOOLS)
+DRV_MAPS ?= $(SDK)/maps
+drvtab.h: $(GATEWARE)/c64_basic.toml
+	python3 $(DRV_TOOLS)/descrec.py drivers $< . --maps $(DRV_MAPS)
+$(LIB_OBJS): drvtab.h
+clean: clean-drvtab
+clean-drvtab:
+	rm -f drvtab.h drvtab.c
+.PHONY: clean-drvtab

@@ -244,95 +244,34 @@ void r_copy(char *out, int outlen, const char *s, size_t n)
     out[l] = 0;
 }
 
-// ---- the TRX IO block ------------------------------------------------------------------------------------------------------------------------------------
+// ---- the registers ---------------------------------------------------------------------------------------------------------------------------------
 uint8_t trx_io_caps(void)
 {
-    return g_api->trx ? uint8_t(g_api->trx->caps) : 0;
-}
-
-uint8_t trx_rd8(uint32_t reg)
-{
-    return g_api->trx ? g_api->trx->regs[reg] : 0;
-}
-
-void trx_wr8(uint32_t reg, uint8_t v)
-{
-    if (g_api->trx) {
-        g_api->trx->regs[reg] = v;
-    }
-}
-
-// The sync group is there on every base this library loads on (ringsys.h); should it be null, the four accesses are made without the critical section.
-static void crit_enter(void)
-{
-    if (const SvcSync *s = g_api->sync) {
-        s->enter();
-    }
-}
-
-static void crit_leave(void)
-{
-    if (const SvcSync *s = g_api->sync) {
-        s->leave();
-    }
-}
-
-uint32_t trx_io_read32(uint32_t reg)
-{
-    if (!g_api->trx) {
-        return 0;
-    }
-    volatile uint8_t *r = g_api->trx->regs + reg;
-    crit_enter();
-    uint32_t v = r[0];
-    v |= uint32_t(r[1]) << 8;
-    v |= uint32_t(r[2]) << 16;
-    v |= uint32_t(r[3]) << 24;
-    crit_leave();
-    return v;
-}
-
-void trx_io_write32(uint32_t reg, uint32_t v)
-{
-    if (!g_api->trx) {
-        return;
-    }
-    volatile uint8_t *r = g_api->trx->regs + reg;
-    crit_enter();
-    r[0] = uint8_t(v);
-    r[1] = uint8_t(v >> 8);
-    r[2] = uint8_t(v >> 16);
-    r[3] = uint8_t(v >> 24);
-    crit_leave();
+    return HW_RD(ident_caps);
 }
 
 bool trx_io_slim(void)
 {
     static int slim = -1;                           // not looked yet
-    if (slim < 0) {
-        slim = (trx_io_caps() & TRX_CAPS_VIDEO) && (trx_io_read32(TRX_IO_BASE + 0x60C0) >> 24) >= 2;   // TX_CTRL: the text layer's version
+    if (slim < 0 && g_api->io) {
+        slim = (trx_io_caps() & DRV_ident_caps_video_MASK) &&
+               ((HW_RD(trx_text_ctrl) & DRV_trx_text_ctrl_version_MASK) >> DRV_trx_text_ctrl_version_SHIFT) >= 2;
     }
-    return slim != 0;
+    return slim > 0;
 }
 
 // ---- the C64 machine's registers -------------------------------------------------------------------------------------------------------------------------
-uint8_t io_cart_rd(uint32_t reg)
+uint8_t io_cart_rd(uint32_t off)
 {
     const SvcIo *io = g_api->io;
-    return io ? io->cart_rd(reg) : 0;
+    return io ? io->cart_rd(off) : 0;
 }
 
-void io_cart_wr(uint32_t reg, uint8_t v)
+void io_cart_wr(uint32_t off, uint8_t v)
 {
     if (const SvcIo *io = g_api->io) {
-        io->cart_wr(reg, v);
+        io->cart_wr(off, v);
     }
-}
-
-uint8_t io_bus_rd(uint32_t off)
-{
-    const SvcIo *io = g_api->io;
-    return io ? io->bus_rd(off) : 0;
 }
 
 void io_stop(bool on)

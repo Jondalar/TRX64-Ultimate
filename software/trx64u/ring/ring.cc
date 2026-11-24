@@ -2,37 +2,18 @@
 // that file's own header below). Changes here: the InitFunction is gone (the operation ring.start starts the engine with trx_ring_engine_init(), called
 // by the core's start hook), the log's start is the setting "Timewarp Ring" (ring_autostart). The menu is declarative (menu.toml, ring.* operations in
 // ringops.cc); no screen code comes along.
-// U18 (the ring library on the SDK): the TRX registers through api->trx and the C64's memory window through api->c64 (ringsys.h), the C64 machine's
-// registers through the io group (c64u_regs.h), the engine's lock through the sync group, the cartridge RAM through the export "c64cart", memory on the
-// library's own account, the poll task replaced by the library's poll (trx_ring_engine_poll).
+// U18 (the ring library on the SDK): the registers through the driver table of c64_basic's TOML A (ringsys.h, drvtab.h) and the C64's memory window
+// through api->c64, the cartridge port's page through the io group, the engine's lock through the sync group, the cartridge RAM through the export
+// "c64cart", memory on the library's own account, the poll task replaced by the library's poll (trx_ring_engine_poll).
 // U18 D6 (2026-11-22): brought to the firmware's state - the whowrote I/O address scan, the REU gate of trx_ring_reu.h, trx_ring_stream2_pos(),
 // C64_STOP let go before a restore's RAM load. Kept from MultiCore's copy: a .c64re load (trx_ring_load_state) refuses while the REU is on; the
 // cartridge image of a load goes in through TrxLoadMem::rom_put.
 // The frame ring, app side. See trx_ring.h.
 //
-// Hardware (TRX64-Ultimate designs/c64_basic: trx_engine.v page 2, trx_sys.v
-// pages 0/1, c64_core.v gate and state bus; 32-bit registers, trx_io.h rule):
-//   0x101A0100 GATE_CTRL   b0 the app's C64_STOP pauses the machine (else the
-//                          CPU only); R b8 halted
-//   0x101A0104 CAP_CTRL    b7:0 a capture every n frames
-//   0x101A0114 STOP_POS    b5:0 cycle, b8 arm: stop on line 0 one edge before
-//                          the phi2 fall that ends that cycle; W b9 release
-//                          the hold; R b16 holding there
-//   0x101A1000 SB_ADDR, 1004 SB_DATA (W: staged word, only with the gate
-//                          shut), 1008 SB_STATUS (b1 a write was refused),
-//                          100C SB_LOAD (b1 CPU, b3 CIA 1, b4 CIA 2)
-//   0x101A2000 LOG_CTRL    b0 on, b1 writes from outside, b2 cartridge RAM,
-//                          b3 colour RAM, b8 restart (counts to 0)
-//   0x101A2004 LOG_STAT    b1 a block is being copied, b2 mover busy, b3
-//                          records wait in the FIFO
-//   0x101A200C DROPPED, 2028+16s LOG_CNT[s] (R, records since the restart, mod 2^28).
-//   The areas are fixed in the engine (area_base/area_size below, SLIM D4): LOG_BASE/LOG_MASK are gone.
-//   0x101A2080 ENG_CMD     W 1 COPY ENG_LEN bytes ENG_SRC -> ENG_DST; R b0 busy
-//   0x101A2094 AP_START, 2098 AP_COUNT, 209C AP_CMD: APPLY (CAPS2 b5), see apply_run()
-//   0x101A2084 ENG_SRC, 2088 ENG_DST, 208C ENG_LEN (16-byte units)
-//   0x101A4028 CMD (page 4, a byte) b1: the cartridge drops its cached lines
-//   0x101A5000 SH_CTRL     b1:0 freeze sessions: 0 off, 1 auto, 2 every pause (cores before the slim
-//                          one; on it the register reads 0 and ignores writes)
+// Hardware: the blocks of ../gateware/c64_basic.toml, each with the RTL lines that decode it: trx_gate (the gate, the capture, the stop position),
+// trx_statebus, trx_engine (the log, the copy and the apply), trx_debug and trx_dbg_run, trx_turbo, trx_pixel (the still's count), c64cart (its
+// command: the cartridge drops its cached lines). The areas are fixed in the engine (area_base/area_size below, SLIM D4). c64_basic has no
+// session register (the firmware's SH_CTRL at page 5 +0: trx_sys.v decodes no word 0x1400), so a stop here is no freeze session.
 //
 // Record formats (trx_engine.v header): stream 0 {new, old, addr16} 4 bytes;
 // stream 1 8 bytes [27:0] address, [31:28] space (1 colour RAM, 2 cartridge
@@ -56,46 +37,24 @@
 #include "ringsys.h"
 #include <string.h>
 
-#define CAPS_ENGINE    0x04
-#define CAPS_DBG       0x08
+// The registers are the driver table's (ringsys.h HW_RD / HW_WR; c64_basic's TOML A: ident, trx_gate, trx_statebus, trx_engine, trx_debug,
+// trx_dbg_run, trx_turbo, trx_pixel, c64cart); the names below are the values and bits this file combines.
+#define GATE_FRZ       DRV_trx_gate_ctrl_frz_MASK              // the app's stop pauses the whole machine
+#define GATE_HALTED    DRV_trx_gate_ctrl_halted_MASK
+#define POS_ARM        DRV_trx_gate_stop_pos_arm_MASK
+#define POS_RELEASE    DRV_trx_gate_stop_pos_release_MASK
+#define POS_HOLDING    DRV_trx_gate_stop_pos_holding_MASK
+#define POS_CYCLE      DRV_trx_gate_stop_pos_cycle_MASK
+#define SB_REFUSED     DRV_trx_statebus_status_refused_MASK
+#define SB_LOAD_ALL    (DRV_trx_statebus_load_cpu_MASK | DRV_trx_statebus_load_cia1_MASK | DRV_trx_statebus_load_cia2_MASK)
 
-#define GATE_CTRL      (TRX_IO_BASE + 0x0100)
-#define GATE_HALTED    0x100
-#define CAP_CTRL       (TRX_IO_BASE + 0x0104)
-#define STOP_POS       (TRX_IO_BASE + 0x0114)
-#define POS_ARM        0x100
-#define POS_RELEASE    0x200
-#define POS_HOLDING    0x10000
-#define SB_ADDR        (TRX_IO_BASE + 0x1000)
-#define SB_DATA        (TRX_IO_BASE + 0x1004)
-#define SB_STATUS      (TRX_IO_BASE + 0x1008)
-#define SB_LOAD        (TRX_IO_BASE + 0x100C)
-#define SB_REFUSED     0x02
-#define SB_LOAD_ALL    0x1A
-#define SH_CTRL        (TRX_IO_BASE + 0x5000)
-#define CART_CMD       (TRX_IO_BASE + 0x4028)
-#define CART_INVAL     0x02
-
-#define P2             (TRX_IO_BASE + 0x2000)
-#define LOG_CTRL       (P2 + 0x000)
-#define LOG_STAT       (P2 + 0x004)
-#define DROPPED        (P2 + 0x00C)
-#define LOG_CNT(s)     (P2 + 0x028 + 16 * (s))
-#define ENG_CMD        (P2 + 0x080)
-#define ENG_SRC        (P2 + 0x084)
-#define ENG_DST        (P2 + 0x088)
-#define ENG_LEN        (P2 + 0x08C)
-#define AP_START       (P2 + 0x094)     // APPLY (T20 §17.3): stream 0 records through the second port
-#define AP_COUNT       (P2 + 0x098)
-#define AP_CMD         (P2 + 0x09C)     // W b0 1 undo (downwards, old bytes) / 0 redo; R b0 busy
-
-#define LOG_ON_ALL     0x00F   // on, outside writes, cartridge RAM, colour RAM
-#define LOG_RESTART    0x100
-#define LOG_TRACE      0x010   // b4: the trace former (T21 §4.11.1)
-#define LOG_FLUSH      0x200   // b9 (W): drop the pending instruction, the machine's flow is cut
-#define TRACE_CNT      (P2 + 0x058)   // records written (R), wraps at TRACE_WRAP
-#define STAT_COPYING   0x02
-#define STAT_FIFO      0x08
+#define LOG_ON_ALL     (DRV_trx_engine_log_ctrl_on_MASK | DRV_trx_engine_log_ctrl_taps_MASK)   // on, outside writes, cartridge RAM, colour RAM
+#define LOG_RESTART    DRV_trx_engine_log_ctrl_restart_MASK
+#define LOG_TRACE      DRV_trx_engine_log_ctrl_trace_MASK     // the trace former (T21 §4.11.1)
+#define LOG_FLUSH      DRV_trx_engine_log_ctrl_flush_MASK     // drop the pending instruction, the machine's flow is cut
+#define TRACE_STREAM   3                                      // log_cnt[3]: trace records written, wraps at TRACE_WRAP
+#define STAT_COPYING   DRV_trx_engine_log_stat_seq_busy_MASK
+#define STAT_FIFO      DRV_trx_engine_log_stat_fifo_MASK
 
 #define M28            0x0FFFFFFFu
 #define OPEN           0xFFFFFFFFu
@@ -144,7 +103,7 @@ static volatile bool scrubbing;     // a Timewarp scrub holds the machine (§16.
 static TrxReuGate reu_gate;         // A08: the REU is on, the ring is off
 // A08: the REU's enable, as the machine has it now. The ring does not record the REU's contents, so
 // while it is on there is no ring (trx_ring_reu_sync) and no way into it (E_REU).
-static inline bool reu_on(void) { return io_cart_rd(C64U_CART_REU_ENABLE) != 0; }
+static inline bool reu_on(void) { return CART_RD(reu) != 0; }
 static bool trace_on = true;       // the trace former runs with the log (trace_ctl)
 
 // LOG_CTRL as the log runs: every tap, the trace, and with flush the machine's flow cut (a
@@ -159,8 +118,6 @@ static inline uint32_t logctl(bool flush)
 // readable for the next step (a frame writes at most ~10 K records).
 #define SCRUB_MARGIN   0x8000
 
-static inline uint32_t r32(uint32_t a) { return trx_io_read32(a); }
-static inline void w32(uint32_t a, uint32_t v) { trx_io_write32(a, v); }
 
 static inline TrxFrame &ent(int i) { return tl[(tl_first + i) % TL_CAP]; }
 
@@ -190,12 +147,12 @@ static void unlock(void)
 // ---- the mover -------------------------------------------------------------------
 static void eng_copy(uint32_t src, void *dst, uint32_t len)
 {
-    w32(ENG_SRC, src);
-    w32(ENG_DST, (uint32_t)dst);
-    w32(ENG_LEN, len);
-    w32(ENG_CMD, 1);
+    HW_WR(trx_engine_eng_src, src);
+    HW_WR(trx_engine_eng_dst, (uint32_t)dst);
+    HW_WR(trx_engine_eng_len, len);
+    HW_WR(trx_engine_eng_cmd, DRV_trx_engine_eng_cmd_copy);
     uint16_t t0 = r_ms_timer();
-    while (r32(ENG_CMD) & 1) {
+    while (HW_RD(trx_engine_eng_cmd) & DRV_trx_engine_eng_cmd_busy_MASK) {
         if (uint16_t(r_ms_timer() - t0) > 200) {
             // the mover never answered: the data is not there, but the CPU must not wait forever
             r_log("[RING] COPY did not finish: %u bytes from 0x%07x\n", (unsigned)len, (unsigned)src);
@@ -295,7 +252,7 @@ static uint8_t *tbuf;       // TRACE_CHUNK records, and stream 0 records for the
 
 static inline uint32_t trace_cnt(void)
 {
-    return r32(TRACE_CNT) & M28;
+    return HW_RD_I(trx_engine_log_cnt, TRACE_STREAM) & M28;
 }
 
 static void ep_reset(void)
@@ -319,7 +276,7 @@ static void ep_anchor(void)
 // hw there. Called with the machine stopped, before the log is put on again with a flush.
 static void ep_push(uint64_t tc_start, uint32_t hw)
 {
-    if (!(trx_io_caps() & CAPS_DBG) || !ep_n) {
+    if (!(trx_io_caps() & DRV_ident_caps_debug_MASK) || !ep_n) {
         return;
     }
     Epoch &c = ep[ep_n - 1];
@@ -343,9 +300,9 @@ static void ep_push(uint64_t tc_start, uint32_t hw)
 // stream 2: every whole frame since the last call
 static void parse_locked(void)
 {
-    uint32_t cnt = r32(LOG_CNT(2)) & M28;
-    cnt_now[0] = r32(LOG_CNT(0)) & M28;
-    cnt_now[1] = r32(LOG_CNT(1)) & M28;
+    uint32_t cnt = HW_RD_I(trx_engine_log_cnt, 2) & M28;
+    cnt_now[0] = HW_RD_I(trx_engine_log_cnt, 0) & M28;
+    cnt_now[1] = HW_RD_I(trx_engine_log_cnt, 1) & M28;
     if (scrubbing) {
         // a scrub or a debugger land holds the machine: what runs from there
         // (a frame run, the debugger's steps) makes markers that are no
@@ -492,18 +449,12 @@ static void parse_locked(void)
 // of that load edge, so the next marker's cycle step is one frame and the
 // count stays the debug block's CYCLES (T21 relies on both). Without the
 // debug page (CYCLES reads 0) nothing changes.
-#define DBG_CYCLES     (TRX_IO_BASE + 0x0120)
-#define DBG_OWNER      (TRX_IO_BASE + 0x0118)
-#define DBG_CYC_CMP    (TRX_IO_BASE + 0x0130)
-#define DBG_CMD        (TRX_IO_BASE + 0x3000)
-#define DBG_STATUS     (TRX_IO_BASE + 0x3008)
-#define DBG_ST_NEW     0x08
-#define DBG_ST_OWNER   0x100000
-#define DBG_RUN        0x03
+#define DBG_ST_NEW     DRV_trx_debug_status_stop_new_MASK
+#define DBG_ST_OWNER   DRV_trx_debug_status_owner_MASK
 
 static void rebase_cycles(TrxFrame &e, uint32_t c24)
 {
-    if (!(trx_io_caps() & CAPS_DBG)) {
+    if (!(trx_io_caps() & DRV_ident_caps_debug_MASK)) {
         return;
     }
     e.c24 = c24 & 0xFFFFFF;
@@ -522,21 +473,22 @@ static void rebase_cycles(TrxFrame &e, uint32_t c24)
 // back.
 static bool dbg_handover(void)
 {
-    if (!(trx_io_caps() & CAPS_DBG) || !(r32(DBG_STATUS) & DBG_ST_OWNER)) {
+    if (!(trx_io_caps() & DRV_ident_caps_debug_MASK) || !(HW_RD(trx_debug_status) & DBG_ST_OWNER)) {
         return false;
     }
-    w32(GATE_CTRL, 1);
+    HW_WR(trx_gate_ctrl, GATE_FRZ);
     io_stop(true);
-    w32(DBG_OWNER, 0);
-    w32(DBG_CMD, DBG_RUN);
+    HW_WR(trx_dbg_run_owner, 0);
+    HW_WR(trx_debug_cmd, DRV_trx_debug_cmd_run);
     return true;
 }
 
 // ---- machine control -------------------------------------------------------------
+// addr: DRV_<block>_<property>_ADDR of a 32-bit register that reads (ringsys.h hw_rd32)
 static bool wait_reg(uint32_t addr, uint32_t mask, uint32_t want, int ms)
 {
     uint16_t t0 = r_ms_timer();
-    while ((r32(addr) & mask) != want) {
+    while ((hw_rd32(addr) & mask) != want) {
         if (uint16_t(r_ms_timer() - t0) > ms) {
             return false;
         }
@@ -547,34 +499,31 @@ static bool wait_reg(uint32_t addr, uint32_t mask, uint32_t want, int ms)
 static void drain(void)
 {
     // the drain empties the FIFO by itself; the sequencer's copy is ~8 us
-    wait_reg(LOG_STAT, STAT_FIFO | STAT_COPYING, 0, 20);
+    wait_reg(DRV_trx_engine_log_stat_ADDR, STAT_FIFO | STAT_COPYING, 0, 20);
 }
 
 struct Saved {
     uint32_t gate;
-    uint32_t sh;
     bool was_halted;
 };
 
 // Stops the machine on line 0 (STOP_POS) if it runs, so the VIC's
 // write-only registers keep the values a frame start has; then the stop is
-// held by the app's C64_STOP as a machine pause, sessions off.
+// held by the app's C64_STOP as a machine pause.
 static void stop_machine(Saved *sv, bool at_line0)
 {
-    sv->gate = r32(GATE_CTRL);
-    sv->sh = r32(SH_CTRL) & 3;
+    sv->gate = HW_RD(trx_gate_ctrl);
     sv->was_halted = (sv->gate & GATE_HALTED) != 0;
     if (!sv->was_halted && at_line0) {
-        w32(STOP_POS, POS_ARM | 12);
-        if (!wait_reg(STOP_POS, POS_HOLDING, POS_HOLDING, 60)) {
+        HW_WR(trx_gate_stop_pos, POS_ARM | 12);
+        if (!wait_reg(DRV_trx_gate_stop_pos_ADDR, POS_HOLDING, POS_HOLDING, 60)) {
             r_log("[RING] no stop on line 0, pausing anywhere\n");
-            w32(STOP_POS, 0);
+            HW_WR(trx_gate_stop_pos, 0);
         }
     }
-    w32(SH_CTRL, 0);                // ends a freeze session, no new one
-    w32(GATE_CTRL, 1);              // the app's stop = machine pause
+    HW_WR(trx_gate_ctrl, GATE_FRZ);              // the app's stop = machine pause
     io_stop(true);
-    wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+    wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
 }
 
 // ---- undo ------------------------------------------------------------------------
@@ -751,8 +700,8 @@ static uint32_t bits(const uint32_t *w, int lo, int n)
 // reads the raster line, so writing it would clear the compare's bit 8).
 static void replay_vic(const uint32_t *w, uint32_t *count)
 {
-    w32(SB_ADDR, (2 << 7) | 4);
-    uint32_t now11 = r32(SB_DATA);   // chip 2 word 4 = $D010-$D013
+    HW_WR(trx_statebus_addr, (2 << 7) | 4);
+    uint32_t now11 = HW_RD(trx_statebus_data);   // chip 2 word 4 = $D010-$D013
     auto vreg = [&](int r) { return uint8_t(w[W_VIC + r / 4] >> (8 * (r & 3))); };
     for (int r = 0; r <= 0x2E; r++) {
         if (r == 0x12 || r == 0x13 || r == 0x14 || r == 0x19 || r == 0x1E || r == 0x1F) {
@@ -873,7 +822,7 @@ static bool replay_cart(const uint32_t *w, uint32_t *count)
     if (!(w[W_GLUE] & GLUE_CART)) {
         return true;
     }
-    const TrxCartRow *r = cart_row(io_cart_rd(C64U_CART_TYPE));
+    const TrxCartRow *r = cart_row(CART_RD(type));
     if (!r) {
         return false;
     }
@@ -903,35 +852,35 @@ static uint32_t turbo_pack;
 void trx_ring_set_turbo(uint32_t pack)
 {
     turbo_pack = pack;
-    turbo_pending = (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO) != 0;
+    turbo_pending = (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK) != 0;
 }
 
 static bool stage_and_load(const uint32_t *w)
 {
-    w32(SB_STATUS, 0);
-    w32(SB_ADDR, (1 << 7) | 8);
+    HW_WR(trx_statebus_status, 0);
+    HW_WR(trx_statebus_addr, (1 << 7) | 8);
     for (int k = 0; k < 7; k++) {
-        w32(SB_DATA, w[W_CPUH + k]);
+        HW_WR(trx_statebus_data, w[W_CPUH + k]);
     }
-    w32(SB_ADDR, (3 << 7) | 8);
+    HW_WR(trx_statebus_addr, (3 << 7) | 8);
     for (int k = 0; k < 12; k++) {
-        w32(SB_DATA, w[W_CIA1H + k]);
+        HW_WR(trx_statebus_data, w[W_CIA1H + k]);
     }
-    w32(SB_ADDR, (4 << 7) | 8);
+    HW_WR(trx_statebus_addr, (4 << 7) | 8);
     for (int k = 0; k < 12; k++) {
-        w32(SB_DATA, w[W_CIA2H + k]);
+        HW_WR(trx_statebus_data, w[W_CIA2H + k]);
     }
     uint32_t mask = SB_LOAD_ALL;
     if (turbo_pending) {                // chip 0 word 1: the turbo state, loaded with the rest (bit 0)
-        w32(SB_ADDR, (0 << 7) | 1);
-        w32(SB_DATA, turbo_pack);
+        HW_WR(trx_statebus_addr, (0 << 7) | 1);
+        HW_WR(trx_statebus_data, turbo_pack);
         mask |= 1;
         turbo_pending = false;
     }
-    if (r32(SB_STATUS) & SB_REFUSED) {
+    if (HW_RD(trx_statebus_status) & SB_REFUSED) {
         return false;
     }
-    w32(SB_LOAD, mask);
+    HW_WR(trx_statebus_load, mask);
     return true;
 }
 
@@ -988,12 +937,12 @@ static int apply_err;       // the last apply_plan()'s result (E_NONE or E_APPLY
 // downwards (undo) or upwards (redo); false when it does not finish in time
 static bool apply_run(uint32_t start, uint32_t count, bool undo)
 {
-    w32(AP_START, start & M28);
-    w32(AP_COUNT, count);
-    w32(AP_CMD, undo ? 1 : 0);
+    HW_WR(trx_engine_ap_start, start & M28);
+    HW_WR(trx_engine_ap_count, count);
+    HW_WR(trx_engine_ap_cmd, undo ? DRV_trx_engine_ap_cmd_undo : DRV_trx_engine_ap_cmd_redo);
     uint32_t ms = 50 + count / 10000;       // the engine does 20 records per us and more
     uint16_t t0 = r_ms_timer();
-    while (r32(AP_CMD) & 1) {
+    while (HW_RD(trx_engine_ap_cmd) & DRV_trx_engine_ap_cmd_busy_MASK) {
         if (uint16_t(r_ms_timer() - t0) > ms) {
             r_log("[RING] APPLY did not finish: %u records from %u\n", (unsigned)count, (unsigned)start);
             return false;
@@ -1076,7 +1025,7 @@ static void clear_vic_latches(const uint32_t *w)
     uint8_t clr = ~uint8_t(w[W_VIC + 6] >> 8) & 0x0F;
     bool c1e = uint8_t(w[W_VIC + 7] >> 16) == 0, c1f = uint8_t(w[W_VIC + 7] >> 24) == 0;
     uint16_t t0 = r_ms_timer();
-    while (!(r32(STOP_POS) & POS_HOLDING) && uint16_t(r_ms_timer() - t0) < 60) {
+    while (!(HW_RD(trx_gate_stop_pos) & POS_HOLDING) && uint16_t(r_ms_timer() - t0) < 60) {
         int raster = c64_peek(0xD012) | ((c64_peek(0xD011) & 0x80) << 1);
         if (raster >= 300) {
             break;
@@ -1096,32 +1045,32 @@ static void clear_vic_latches(const uint32_t *w)
 static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn busmem, ram_fn ram,
                     void *ctx, uint32_t *bus_writes, uint16_t *pos_ms = NULL, bool *latch_ok = NULL)
 {
-    bool memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    bool memonly = HW_RD(c64_dma_mode_memonly) != 0;
     io_memonly(false);
-    c64_set_mode(C64U_MODE_ULTIMAX);
+    c64_set_mode(DRV_cart_regs_mode_ultimax);
     if (!replay_cart(w, bus_writes)) {
-        r_log("[RING] cartridge type %02x: banking registers not replayed\n", io_cart_rd(C64U_CART_TYPE));
+        r_log("[RING] cartridge type %02x: banking registers not replayed\n", CART_RD(type));
     }
     if (busmem) {
         busmem(ctx);
     }
     replay_vic(w, bus_writes);
     replay_cia(w, bus_writes);
-    c64_set_mode(C64U_MODE_NORMAL);
+    c64_set_mode(DRV_cart_regs_mode_normal);
 
     // hold the CPU (CPU-only pause), let the machine run to the snap position
-    w32(GATE_CTRL, 0);
-    w32(STOP_POS, POS_ARM | POS_RELEASE | ((x >> 3) & 0x3F));
+    HW_WR(trx_gate_ctrl, 0);
+    HW_WR(trx_gate_stop_pos, POS_ARM | POS_RELEASE | ((x >> 3) & POS_CYCLE));
     int err = E_NONE;
     clear_vic_latches(w);
-    if (!wait_reg(STOP_POS, POS_HOLDING, POS_HOLDING, 100)) {
+    if (!wait_reg(DRV_trx_gate_stop_pos_ADDR, POS_HOLDING, POS_HOLDING, 100)) {
         err = E_NOPOS;
     }
     if (latch_ok) {
         // the VIC's latches as they are now against the block's ($D019 in
         // chip 2 w6 byte 1, $D01E/$D01F w7 bytes 2/3)
-        w32(SB_ADDR, (2 << 7) | 6);
-        uint32_t v6 = r32(SB_DATA), v7 = r32(SB_DATA);
+        HW_WR(trx_statebus_addr, (2 << 7) | 6);
+        uint32_t v6 = HW_RD(trx_statebus_data), v7 = HW_RD(trx_statebus_data);
         *latch_ok = ((v6 >> 8) & 0x0F) == ((w[W_VIC + 6] >> 8) & 0x0F) && (v7 >> 16) == (w[W_VIC + 7] >> 16);
     }
     if (pos_ms) {
@@ -1147,13 +1096,12 @@ static int put_back(const uint32_t *w, uint16_t x, const Saved &sv, bus_mem_fn b
         err = E_STAGE;
     }
     if (err) {
-        w32(SB_LOAD, 0);
+        HW_WR(trx_statebus_load, 0);
     }
 
     // release: the hold of the stop position keeps the machine until b9
     io_stop(false);
-    w32(GATE_CTRL, sv.gate & 1);
-    w32(SH_CTRL, sv.sh);
+    HW_WR(trx_gate_ctrl, sv.gate & GATE_FRZ);
     return err;
 }
 
@@ -1173,7 +1121,7 @@ static void restore_bus(void *ctx)
     c->st->bus_writes += each(col_tch, 1024, col_val, [](int a, uint8_t v) { c64_poke(0xD800 + a, v); });
     c->st->cart_bytes = cart_ram_put(NULL, cart_tch, cart_val);
     if (c->st->cart_bytes) {
-        trx_wr8(CART_CMD, CART_INVAL);
+        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);
     }
 }
 
@@ -1209,7 +1157,7 @@ static int restore_locked(int idx, TrxRestoreStats *st)
     }
     uint32_t seq = ent(idx).seq;
     if (dbg_handover()) {
-        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+        wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
     }
     Saved sv;
     stop_machine(&sv, true);
@@ -1237,15 +1185,14 @@ static int restore_locked(int idx, TrxRestoreStats *st)
     }
     if (err) {
         io_stop(false);
-        w32(GATE_CTRL, sv.gate & 1);
-        w32(SH_CTRL, sv.sh);
-        if (r32(STOP_POS) & POS_HOLDING) {
-            w32(STOP_POS, POS_RELEASE);
+        HW_WR(trx_gate_ctrl, sv.gate & GATE_FRZ);
+        if (HW_RD(trx_gate_stop_pos) & POS_HOLDING) {
+            HW_WR(trx_gate_stop_pos, POS_RELEASE);
         }
         return err;
     }
-    w32(LOG_CTRL, 0);
-    w32(CAP_CTRL, 0);
+    HW_WR(trx_engine_log_ctrl, 0);
+    HW_WR(trx_gate_cap_ctrl, 0);
     log_on = false;
 
     TrxFrame f = ent(idx);
@@ -1271,11 +1218,11 @@ static int restore_locked(int idx, TrxRestoreStats *st)
     e.s0 = cnt_now[0];
     e.s1 = cnt_now[1];
     e.e0 = e.e1 = OPEN;
-    rebase_cycles(e, r32(DBG_CYCLES) + 1);   // + the load edge itself
-    w32(CAP_CTRL, 1);
-    w32(LOG_CTRL, logctl(true));
+    rebase_cycles(e, HW_RD(trx_dbg_run_cycles) + 1);   // + the load edge itself
+    HW_WR(trx_gate_cap_ctrl, 1);
+    HW_WR(trx_engine_log_ctrl, logctl(true));
     log_on = true;
-    w32(STOP_POS, POS_RELEASE);     // go on: the load is the first edge
+    HW_WR(trx_gate_stop_pos, POS_RELEASE);     // go on: the load is the first edge
     st->ms = uint16_t(r_ms_timer() - t0);
     st->next_seq = next_seq;
     r_log("[RING] restore to entry %d (seq %u): %u frames, %u + %u records, %u RAM / %u bus writes, "
@@ -1297,7 +1244,6 @@ static int restore_locked(int idx, TrxRestoreStats *st)
 // frame" and the still capture holds the picture the VIC drew from D.
 //
 // The walks mark pages, so a step costs its records, not 64 KB scans.
-#define STILL_STATUS   (TRX_IO_BASE + 0x6068)
 #define SCRUB_STOP_CYC 4        // line 0 cycle 4: before every snap (x >= 96)
 
 static struct {
@@ -1439,7 +1385,7 @@ static void scrub_bus(void *ctx)
     st->bus_writes += 3;
     st->cart_bytes = cart_ram_put(cart_pg, cart_tch, cart_val);
     if (st->cart_bytes) {
-        trx_wr8(CART_CMD, CART_INVAL);
+        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);
     }
 }
 
@@ -1465,7 +1411,7 @@ static void scrub_keyboard_io(void)
         return;
     }
     io_memonly(false);
-    c64_set_mode(C64U_MODE_ULTIMAX);
+    c64_set_mode(DRV_cart_regs_mode_ultimax);
     c64_poke(0xDC02, 0xFF);
     c64_poke(0xDC03, 0x00);
     c64_set_mode(scr.mode);
@@ -1481,8 +1427,8 @@ static int scrub_begin_locked(void)
     if (!tl_n) {
         return E_INDEX;
     }
-    scr.mode = io_cart_rd(C64U_CART_MODE);
-    scr.memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    scr.mode = CART_RD(mode);
+    scr.memonly = HW_RD(c64_dma_mode_memonly) != 0;
     stop_machine(&scr.sv, true);
     io_memonly(false);
     (void)c64_peek(0x0002);          // as restore_locked: the CPU's last writes logged
@@ -1495,7 +1441,7 @@ static int scrub_begin_locked(void)
     }
     scr.mark[0] = cnt_now[0];
     scr.mark[1] = cnt_now[1];
-    w32(CAP_CTRL, 0);
+    HW_WR(trx_gate_cap_ctrl, 0);
     log_on = false;                 // the ring records nothing now: the poll leaves it alone
     memset(ram_tch, 0, 65536);
     memset(cart_tch, 0, 65536);
@@ -1512,9 +1458,9 @@ static int scrub_begin_locked(void)
 static int scrub_walk_locked(int idx, Coll *cl)
 {
     drain();
-    w32(LOG_CTRL, 0);
-    cnt_now[0] = r32(LOG_CNT(0)) & M28;
-    cnt_now[1] = r32(LOG_CNT(1)) & M28;
+    HW_WR(trx_engine_log_ctrl, 0);
+    cnt_now[0] = HW_RD_I(trx_engine_log_cnt, 0) & M28;
+    cnt_now[1] = HW_RD_I(trx_engine_log_cnt, 1) & M28;
     n_runs = 0;
     plan_full = false;
     plan_range(scr.mark[0], cnt_now[0], false, cl);
@@ -1565,7 +1511,7 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
     st->other = cl.other;
     TrxFrame f = ent(idx);
     ScrubCtx sc = { st, f.w };
-    Saved pv = { 1, 0, true };      // released into a running machine, no sessions
+    Saved pv = { GATE_FRZ, true };  // released into a running machine
     apply_err = E_NONE;
     err = put_back(f.w, f.x, pv, scrub_bus, scrub_ram, &sc, &st->bus_writes);
     if (!err) {
@@ -1574,30 +1520,30 @@ static int scrub_show_locked(int idx, TrxRestoreStats *st)
     st->ms_pos = uint16_t(r_ms_timer() - t0);
 
     // one frame with the log on, stopped on line 0 of the next one
-    uint32_t still_n = r32(STILL_STATUS) >> 8;
-    w32(LOG_CTRL, logctl(true));
-    w32(STOP_POS, POS_ARM | POS_RELEASE | SCRUB_STOP_CYC);
-    if (!wait_reg(STOP_POS, POS_HOLDING, POS_HOLDING, 60) && !err) {
+    uint32_t still_n = ((HW_RD(trx_pixel_still_status) & DRV_trx_pixel_still_status_count_MASK) >> DRV_trx_pixel_still_status_count_SHIFT);
+    HW_WR(trx_engine_log_ctrl, logctl(true));
+    HW_WR(trx_gate_stop_pos, POS_ARM | POS_RELEASE | SCRUB_STOP_CYC);
+    if (!wait_reg(DRV_trx_gate_stop_pos_ADDR, POS_HOLDING, POS_HOLDING, 60) && !err) {
         err = E_NOPOS;
     }
-    w32(GATE_CTRL, 1);
+    HW_WR(trx_gate_ctrl, GATE_FRZ);
     io_stop(true);
-    wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+    wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
     io_memonly(false);
     (void)c64_peek(0x0002);          // the CPU's last writes into the log too
     c64_set_mode(scr.mode);
     io_memonly(scr.memonly);
     scrub_keyboard_io();
     drain();
-    p2 = r32(LOG_CNT(2)) & M28;     // the run's markers are no timeline entries
-    cnt_now[0] = r32(LOG_CNT(0)) & M28;
-    cnt_now[1] = r32(LOG_CNT(1)) & M28;
+    p2 = HW_RD_I(trx_engine_log_cnt, 2) & M28;     // the run's markers are no timeline entries
+    cnt_now[0] = HW_RD_I(trx_engine_log_cnt, 0) & M28;
+    cnt_now[1] = HW_RD_I(trx_engine_log_cnt, 1) & M28;
     scr.d_now = false;
     scr.d_seq = f.seq;
     trim();                         // the run used one frame of the areas
     // the still of that frame: complete at line 285 (60 Hz modes: line 262), long before the stop
     uint16_t t1 = r_ms_timer();
-    while ((r32(STILL_STATUS) >> 8) == still_n && uint16_t(r_ms_timer() - t1) < 10)
+    while ((((HW_RD(trx_pixel_still_status) & DRV_trx_pixel_still_status_count_MASK) >> DRV_trx_pixel_still_status_count_SHIFT)) == still_n && uint16_t(r_ms_timer() - t1) < 10)
         ;
     st->frames = 1;
     st->ms = uint16_t(r_ms_timer() - t0);
@@ -1624,14 +1570,13 @@ static int scrub_final_locked(int idx, TrxRestoreStats *st)
     if (err) {
         // nothing to go back to: the log and capture back on, the machine
         // released as it stands
-        w32(CAP_CTRL, 1);
-        w32(LOG_CTRL, logctl(true));
+        HW_WR(trx_gate_cap_ctrl, 1);
+        HW_WR(trx_engine_log_ctrl, logctl(true));
         log_on = true;
-        c64_set_mode(C64U_MODE_NORMAL);
+        c64_set_mode(DRV_cart_regs_mode_normal);
         io_stop(false);
-        w32(GATE_CTRL, scr.sv.gate & 1);
-        w32(SH_CTRL, scr.sv.sh);
-        w32(STOP_POS, POS_RELEASE);
+        HW_WR(trx_gate_ctrl, scr.sv.gate & GATE_FRZ);
+        HW_WR(trx_gate_stop_pos, POS_RELEASE);
         return err;
     }
     st->rec0 = cl.n0;
@@ -1651,12 +1596,12 @@ static int scrub_final_locked(int idx, TrxRestoreStats *st)
     e.s0 = cnt_now[0];
     e.s1 = cnt_now[1];
     e.e0 = e.e1 = OPEN;
-    p2 = r32(LOG_CNT(2)) & M28;
-    rebase_cycles(e, r32(DBG_CYCLES) + 1);
-    w32(CAP_CTRL, 1);
-    w32(LOG_CTRL, logctl(true));
+    p2 = HW_RD_I(trx_engine_log_cnt, 2) & M28;
+    rebase_cycles(e, HW_RD(trx_dbg_run_cycles) + 1);
+    HW_WR(trx_gate_cap_ctrl, 1);
+    HW_WR(trx_engine_log_ctrl, logctl(true));
     log_on = true;
-    w32(STOP_POS, POS_RELEASE);
+    HW_WR(trx_gate_stop_pos, POS_RELEASE);
     st->ms = uint16_t(r_ms_timer() - t0);
     st->next_seq = next_seq;
     r_log("[RING] scrub rewind to seq %u: %u + %u records, %u ms, %s\n", (unsigned)f.seq,
@@ -1676,21 +1621,12 @@ static int land_locked(int idx, TrxRestoreStats *st)
 {
     uint16_t t0 = r_ms_timer();
     memset(st, 0, sizeof(*st));
-    uint32_t gate0 = r32(GATE_CTRL) & 1;
-    // The session mode of the stop this land starts from: the stop it ends in gets it back.
-    // stop_machine's SH_CTRL 0 must not outlive the land; a debugger stop is a freeze session
-    // only with SH_MODE != 0 (T21 as-built 2026-10-05).
-    uint32_t sh0 = r32(SH_CTRL) & 3;
+    uint32_t gate0 = HW_RD(trx_gate_ctrl) & GATE_FRZ;
     // C64_STOP takes the machine over from the debugger's hold
     bool owned = dbg_handover();
-    w32(GATE_CTRL, 1);
+    HW_WR(trx_gate_ctrl, GATE_FRZ);
     io_stop(true);
-    wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
-    if (scrubbing) {
-        // a land from a land: the put-back's bus cycles must reach the chips, not a session's
-        // overlay (the first land's stop is a session); the first one has stop_machine do it
-        w32(SH_CTRL, 0);
-    }
+    wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
     int err = E_NONE;
     if (!scrubbing) {
         err = scrub_begin_locked();
@@ -1705,13 +1641,12 @@ static int land_locked(int idx, TrxRestoreStats *st)
     }
     if (err) {
         // the machine stays where it is, held by the debugger again
-        w32(DBG_OWNER, owned ? 1 : 0);
-        w32(DBG_CMD, 0x01);         // PAUSE_CB: the gate is shut, a record at once
+        HW_WR(trx_dbg_run_owner, owned ? 1 : 0);
+        HW_WR(trx_debug_cmd, DRV_trx_debug_cmd_pause_cb);   // the gate is shut, a record at once
         io_stop(false);
         if (!scrubbing) {
-            w32(GATE_CTRL, gate0);
+            HW_WR(trx_gate_ctrl, gate0);
         }
-        w32(SH_CTRL, sh0);          // the debugger's stop is a session again
         return err;
     }
     st->rec0 = cl.n0;
@@ -1719,7 +1654,7 @@ static int land_locked(int idx, TrxRestoreStats *st)
     st->other = cl.other;
     TrxFrame f = ent(idx);
     ScrubCtx sc = { st, f.w };
-    Saved pv = { 1, 0, true };
+    Saved pv = { GATE_FRZ, true };
     apply_err = E_NONE;
     err = put_back(f.w, f.x, pv, scrub_bus, scrub_ram, &sc, &st->bus_writes);
     if (!err) {
@@ -1727,26 +1662,23 @@ static int land_locked(int idx, TrxRestoreStats *st)
     }
     st->ms_pos = uint16_t(r_ms_timer() - t0);
     // the machine holds one edge before the snap's phi2 fall: CYC_CMP on that edge
-    uint32_t now = r32(DBG_CYCLES);
-    w32(DBG_CYC_CMP, now);
+    uint32_t now = HW_RD(trx_dbg_run_cycles);
+    HW_WR(trx_dbg_run_cyc_cmp, now);
     scr.land_c24 = now + 1;         // the count after the load edge, as F2 has it after a snap
     ep_push(f.cycles, scr.land_c24);
-    w32(DBG_OWNER, 1);
+    HW_WR(trx_dbg_run_owner, 1);
     // no bus cycle from here on: it would open the clock before the release
     c64_set_mode(scr.mode);
     io_memonly(scr.memonly);
-    w32(LOG_CTRL, logctl(true));      // what the debugger runs from here is undone by the next land
-    w32(STOP_POS, POS_RELEASE);
-    if (!wait_reg(DBG_STATUS, DBG_ST_NEW, DBG_ST_NEW, 100) && !err) {
+    HW_WR(trx_engine_log_ctrl, logctl(true));      // what the debugger runs from here is undone by the next land
+    HW_WR(trx_gate_stop_pos, POS_RELEASE);
+    if (!wait_reg(DRV_trx_debug_status_ADDR, DBG_ST_NEW, DBG_ST_NEW, 100) && !err) {
         err = E_NOPOS;
     }
     if (!owned) {
-        w32(DBG_OWNER, 0);
+        HW_WR(trx_dbg_run_owner, 0);
     }
-    // The machine stands on the load edge, held by the debugger: its session starts now, from
-    // the restored chips (the responder keeps no copy from before, ARCH 7.6).
-    w32(SH_CTRL, sh0);
-    p2 = r32(LOG_CNT(2)) & M28;
+    p2 = HW_RD_I(trx_engine_log_cnt, 2) & M28;
     scr.d_now = false;
     scr.d_seq = f.seq;
     st->frames = tl_n - 1 - idx;
@@ -1780,12 +1712,11 @@ static void commit_locked(void)
         e.e0 = e.e1 = OPEN;
         rebase_cycles(e, scr.land_c24);
     }
-    p2 = r32(LOG_CNT(2)) & M28;
-    w32(CAP_CTRL, 1);
-    w32(LOG_CTRL, logctl(true));
+    p2 = HW_RD_I(trx_engine_log_cnt, 2) & M28;
+    HW_WR(trx_gate_cap_ctrl, 1);
+    HW_WR(trx_engine_log_ctrl, logctl(true));
     log_on = true;
-    w32(GATE_CTRL, scr.sv.gate & 1);
-    w32(SH_CTRL, scr.sv.sh);
+    HW_WR(trx_gate_ctrl, scr.sv.gate & GATE_FRZ);
     r_log("[RING] commit: the timeline goes on from seq %u\n", d >= 0 ? (unsigned)ent(d).seq : 0u);
 }
 
@@ -1891,18 +1822,16 @@ static int mat_begin_locked(const int *idx, int n, bool carts, TrxMat **out)
     int *const at = m->at;
     // a pause (anywhere): RAM through the second port, colour RAM through the
     // freeze session (answered without a C64 cycle)
-    uint32_t gate = r32(GATE_CTRL);
-    uint32_t sh = r32(SH_CTRL) & 3;
+    uint32_t gate = HW_RD(trx_gate_ctrl);
     bool was = (gate & GATE_HALTED) != 0;
     if (!was) {
-        w32(SH_CTRL, 2);
-        w32(GATE_CTRL, 1);
+        HW_WR(trx_gate_ctrl, GATE_FRZ);
         io_stop(true);
-        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
-        c64_set_mode(C64U_MODE_ULTIMAX);
+        wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
+        c64_set_mode(DRV_cart_regs_mode_ultimax);
     }
     drain();
-    bool memonly = io_bus_rd(C64U_BUS_DMA_MEMONLY) != 0;
+    bool memonly = HW_RD(c64_dma_mode_memonly) != 0;
     io_memonly(true);
     g_api->c64->dma_read(0, ram, 65536);
     io_memonly(false);
@@ -1934,10 +1863,9 @@ static int mat_begin_locked(const int *idx, int n, bool carts, TrxMat **out)
         }
     }
     if (!was) {
-        c64_set_mode(C64U_MODE_NORMAL);
+        c64_set_mode(DRV_cart_regs_mode_normal);
         io_stop(false);
-        w32(GATE_CTRL, gate & 1);
-        w32(SH_CTRL, sh);
+        HW_WR(trx_gate_ctrl, gate & GATE_FRZ);
     }
     for (int i = 0; i < n; i++) {
         if (at[i] < 0 || !reachable(ent(at[i]))) {
@@ -2059,15 +1987,15 @@ static int materialize_locked(const int *idx, int n, uint8_t **rams, uint8_t **c
 // ---- API -------------------------------------------------------------------------
 static void start_locked(void)
 {
-    w32(LOG_CTRL, 0);
+    HW_WR(trx_engine_log_ctrl, 0);
     tl_clear();
     ep_reset();
     p2 = 0;
     cyc_have = false;
     cyc_acc = 0;
     resyncs = 0;
-    w32(CAP_CTRL, 1);
-    w32(LOG_CTRL, LOG_RESTART | logctl(false));
+    HW_WR(trx_gate_cap_ctrl, 1);
+    HW_WR(trx_engine_log_ctrl, LOG_RESTART | logctl(false));
     log_rd = 0;                       // the counters start again: the observer log reader goes on from the new beginning
     log_on = true;
 }
@@ -2076,7 +2004,7 @@ static void start_locked(void)
 // modes: 63 x 312 at the PAL clock
 static bool fmt_60hz(void)
 {
-    return (io_bus_rd(C64U_BUS_VIDEOFORMAT) & C64U_VIDEO_60_HZ) != 0;
+    return (HW_RD(c64_video_format) & DRV_c64_video_format_hz60_MASK) != 0;
 }
 
 bool trx_ring_apply_hw(int mode)
@@ -2084,7 +2012,7 @@ bool trx_ring_apply_hw(int mode)
     if (mode == 0) {
         apply_hw = false;
     } else if (mode == 1) {
-        apply_hw = (trx_rd8(TRX_CAPS2) & TRX_CAPS2_APPLY) != 0;
+        apply_hw = (HW_RD(ident_caps2) & DRV_ident_caps2_apply_MASK) != 0;
     }
     return apply_hw;
 }
@@ -2133,7 +2061,7 @@ void trx_ring_reu_sync(void)
     }
     switch (trx_reu_gate_step(&reu_gate, reu_on(), scrubbing, log_on)) {
     case TRX_REU_STOP:
-        w32(LOG_CTRL, 0);
+        HW_WR(trx_engine_log_ctrl, 0);
         log_on = false;
         pending = -1;
         tl_clear();
@@ -2159,7 +2087,7 @@ void trx_ring_stop(void)
     if (!lock()) {
         return;
     }
-    w32(LOG_CTRL, 0);
+    HW_WR(trx_engine_log_ctrl, 0);
     log_on = false;
     unlock();
 }
@@ -2185,10 +2113,10 @@ void trx_ring_status(TrxRingStatus *st)
         st->head_seq = ent(tl_n - 1).seq;
     }
     for (int s = 0; s < 3; s++) {
-        st->log_cnt[s] = r32(LOG_CNT(s)) & M28;
+        st->log_cnt[s] = HW_RD_I(trx_engine_log_cnt, s) & M28;
     }
-    st->dropped = r32(DROPPED) & 0xFFFF;
-    st->log_stat = r32(LOG_STAT);
+    st->dropped = HW_RD(trx_engine_dropped) & 0xFFFF;
+    st->log_stat = HW_RD(trx_engine_log_stat);
     st->resyncs = resyncs;
     st->spurious_f4 = spurious_f4;
     unlock();
@@ -2200,12 +2128,12 @@ void trx_ring_poll(void)
     if (!lock()) {
         return;
     }
-    if (log_on && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TURBO)) {
+    if (log_on && (HW_RD(ident_caps2) & DRV_ident_caps2_turbo_MASK)) {
         // the engine ran faster than 1 MHz since the last look: its RAM writes are not in the log,
         // the ring cannot be walked back across them; start it over once the engine is off
-        uint32_t ts = r32(TRX_TURBO_STAT);
-        if ((ts & TRX_TURBO_RAN) && !(ts & TRX_TURBO_ON)) {
-            w32(TRX_TURBO_CTRL, 1);
+        uint32_t ts = HW_RD(trx_turbo_stat);
+        if ((ts & DRV_trx_turbo_stat_ran_MASK) && !(ts & DRV_trx_turbo_stat_on_MASK)) {
+            HW_WR(trx_turbo_ctrl, DRV_trx_turbo_ctrl_ran_clr_MASK);
             start_locked();
             r_log("[RING] ring restarted: the machine ran in turbo\n");
         }
@@ -2213,8 +2141,8 @@ void trx_ring_poll(void)
     if (log_on) {
         parse_locked();
         // the splash's READY watch (trx_ui.cc) borrows CAP_CTRL; take it back
-        if ((r32(CAP_CTRL) & 0xFF) != 1) {
-            w32(CAP_CTRL, 1);
+        if ((HW_RD(trx_gate_cap_ctrl) & 0xFF) != 1) {
+            HW_WR(trx_gate_cap_ctrl, 1);
         }
     }
     unlock();
@@ -2447,7 +2375,7 @@ static void load_bus(void *ctx)
         cart_touched = true;
     }
     if (cart_touched) {
-        trx_wr8(CART_CMD, CART_INVAL);         // the cartridge drops its cached lines
+        HW_WR(c64cart_cmd, DRV_c64cart_cmd_inval_MASK);         // the cartridge drops its cached lines
     }
 }
 
@@ -2467,7 +2395,7 @@ int trx_ring_load_state(const TrxLoadMem *mem, const uint32_t *w, uint16_t x)
         return E_REU;
     }
     if (dbg_handover()) {
-        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+        wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
     }
     if (scrubbing) {
         scrubbing = false;          // the file replaces whatever a land or scrub held
@@ -2475,12 +2403,12 @@ int trx_ring_load_state(const TrxLoadMem *mem, const uint32_t *w, uint16_t x)
     Saved sv;
     stop_machine(&sv, true);
     drain();
-    w32(LOG_CTRL, 0);
-    w32(CAP_CTRL, 0);
+    HW_WR(trx_engine_log_ctrl, 0);
+    HW_WR(trx_gate_cap_ctrl, 0);
     LoadCtx c = { mem, 0 };
     int err = put_back(w, x, sv, load_bus, load_ram, &c, &c.bus);
     start_locked();                 // a file replaces the machine: the ring starts over
-    w32(STOP_POS, POS_RELEASE);
+    HW_WR(trx_gate_stop_pos, POS_RELEASE);
     unlock();
     return err;
 }
@@ -2510,12 +2438,12 @@ void trx_ring_area_write(int s, uint32_t off, const void *src, uint32_t len)
         return;
     }
     // the mover's COPY takes two DDR2 byte addresses, and the app's own memory is in DDR2 too: the same call the other way round
-    w32(ENG_SRC, (uint32_t)src);
-    w32(ENG_DST, area_base[s] + off);
-    w32(ENG_LEN, len);
-    w32(ENG_CMD, 1);
+    HW_WR(trx_engine_eng_src, (uint32_t)src);
+    HW_WR(trx_engine_eng_dst, area_base[s] + off);
+    HW_WR(trx_engine_eng_len, len);
+    HW_WR(trx_engine_eng_cmd, DRV_trx_engine_eng_cmd_copy);
     uint16_t t0 = r_ms_timer();
-    while (r32(ENG_CMD) & 1) {
+    while (HW_RD(trx_engine_eng_cmd) & DRV_trx_engine_eng_cmd_busy_MASK) {
         if (uint16_t(r_ms_timer() - t0) > 200) {
             r_log("[RING] COPY back did not finish: %u bytes to area %d + 0x%x\n", (unsigned)len, s, (unsigned)off);
             break;
@@ -2549,7 +2477,7 @@ int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_are
         return E_REU;
     }
     if (dbg_handover()) {
-        wait_reg(GATE_CTRL, GATE_HALTED, GATE_HALTED, 100);
+        wait_reg(DRV_trx_gate_ctrl_ADDR, GATE_HALTED, GATE_HALTED, 100);
     }
     if (scrubbing) {
         scrubbing = false;
@@ -2557,9 +2485,9 @@ int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_are
     Saved sv;
     stop_machine(&sv, true);
     drain();
-    w32(LOG_CTRL, 0);
-    w32(CAP_CTRL, 0);
-    w32(LOG_CTRL, LOG_RESTART);     // counts, positions and lost counters to 0, log still off
+    HW_WR(trx_engine_log_ctrl, 0);
+    HW_WR(trx_gate_cap_ctrl, 0);
+    HW_WR(trx_engine_log_ctrl, LOG_RESTART);     // counts, positions and lost counters to 0, log still off
     int err = areas ? areas(ctx) : 0;
     if (!err) {
         tl_clear();
@@ -2579,14 +2507,14 @@ int trx_ring_install(const TrxFrame *ents, int n, const TrxLoadMem *mem, trx_are
         err = put_back(ents[n - 1].w, ents[n - 1].x, sv, load_bus, load_ram, &c, &c.bus);
     }
     if (!err) {
-        w32(CAP_CTRL, 1);
-        w32(LOG_CTRL, logctl(false));   // on, without a restart: the history stays
+        HW_WR(trx_gate_cap_ctrl, 1);
+        HW_WR(trx_engine_log_ctrl, logctl(false));   // on, without a restart: the history stays
         log_on = true;
     } else {
         tl_clear();                     // nothing half-installed stays reachable
         start_locked();
     }
-    w32(STOP_POS, POS_RELEASE);
+    HW_WR(trx_gate_stop_pos, POS_RELEASE);
     unlock();
     return err;
 }
@@ -2754,7 +2682,7 @@ static int trace_segs(TraceSeg *sg, uint32_t cnt, uint32_t *total, bool *gap)
 
 static bool trace_ready(void)
 {
-    return present && (trx_rd8(TRX_CAPS2) & TRX_CAPS2_TRACE) && tbuf;
+    return present && (HW_RD(ident_caps2) & DRV_ident_caps2_trace_MASK) && tbuf;
 }
 
 bool trx_ring_trace_present(void)
@@ -2770,7 +2698,7 @@ int trx_ring_trace_ctl(int on)
     if (on >= 0) {
         trace_on = on != 0;
         if (log_on) {
-            w32(LOG_CTRL, logctl(false));
+            HW_WR(trx_engine_log_ctrl, logctl(false));
         }
     }
     bool r = trace_on;
@@ -2788,7 +2716,7 @@ bool trx_ring_trace_status(TrxTraceStatus *st)
     st->present = true;
     st->on = trace_on && log_on;
     st->capacity = TRACE_CAP - TRACE_SAFETY;
-    st->lost = r32(DROPPED) & 0xFFFF;
+    st->lost = HW_RD(trx_engine_dropped) & 0xFFFF;
     TraceSeg sg[MAX_EP];
     uint32_t cnt = trace_cnt(), total;
     bool gap;
@@ -2890,7 +2818,7 @@ int trx_ring_log_read(uint64_t *out, int max, uint32_t *lost)
     if (!lock()) {
         return 0;
     }
-    uint32_t cnt = r32(LOG_CNT(1)) & M28;
+    uint32_t cnt = HW_RD_I(trx_engine_log_cnt, 1) & M28;
     if (!log_have || !max || ((cnt - log_rd) & M28) > (M28 >> 1)) {
         log_rd = cnt;
         log_have = true;
@@ -3092,11 +3020,11 @@ const char *trx_ring_engine_init(void)
     }
     tried = true;
     const SvcSync *sync = g_api->sync;
-    if (!(trx_io_caps() & CAPS_ENGINE) || !g_api->c64 || !sync) {
+    if (!(trx_io_caps() & DRV_ident_caps_engine_MASK) || !g_api->c64 || !sync) {
         return NULL;
     }
-    f4_after_blocks = !(trx_rd8(TRX_CAPS2) & TRX_CAPS2_F4);
-    apply_hw = (trx_rd8(TRX_CAPS2) & TRX_CAPS2_APPLY) != 0;
+    f4_after_blocks = !(HW_RD(ident_caps2) & DRV_ident_caps2_f4_after_f3_MASK);
+    apply_hw = (HW_RD(ident_caps2) & DRV_ident_caps2_apply_MASK) != 0;
     bounce = (uint8_t *)alloc_aligned(BOUNCE);
     ram_val = (uint8_t *)r_malloc(65536);
     tbuf = (uint8_t *)r_malloc(TRACE_CHUNK * 24);

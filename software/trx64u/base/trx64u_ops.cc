@@ -2,14 +2,13 @@
 // ROM settings, the machine's own actions. The register sequences of the cartridge port are Gideon's (vendor/gideon/software/io/c64/c64.cc
 // ConfigureU64SystemBus and set_emulation_flags, GPL-3.0), the fast reset patch is his (c64.cc fastresetPatch).
 // U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read through the settings group
-// (setting.cc), the files through api->fs, the TRX block through api->trx, the C64's memory window through api->c64, the running core's state, the REU's
-// memory, the C64U's register blocks (offsets in c64u_regs.h) and the board through the 3.3 groups ctx, io and board (g_api->ctx, io, board), the cartridge port,
+// (setting.cc), the files through api->fs, the C64's memory window through api->c64, the registers through the driver table of c64_basic's TOML A
+// (trx64u_lib.h), the running core's state, the REU's memory and the board through the 3.3 groups ctx, io and board (g_api->ctx, io, board), the cartridge port,
 // drive A, the command interface, the SID file and the temp disk through the exports of MultiCore's shared libraries (X_GET). lib_trx64u.cc lists the
 // operations and states of this file with their names and arguments.
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "trx64u_lib.h"
-#include "c64u_regs.h"
 #include <string.h>
 
 // ---- the shared libraries' calls this file makes, each answering as "none there" when its library is not loaded ------------------------------------
@@ -81,21 +80,21 @@ static const uint8_t bus_mode_values[] = { 0x00, 0x01, 0x02, 0x03, 0x05 };     /
 // Gideon's fast reset: the KERNAL's RAM test at $FD6C (offset 0x1D6C of the image) is replaced by a short loop that tests one page and sets the top of memory
 static const uint8_t fast_patch[22] = { 0xa2, 0x00, 0xa0, 0xa0, 0xad, 0x00, 0x80, 0x49, 0xff, 0x8d, 0x00, 0x80, 0xcd, 0x00, 0x80, 0xf0, 0x02, 0xa0, 0x80, 0x4c, 0x8c, 0xfd };
 static const uint8_t fast_org[47] = { 0xe6, 0xc2, 0xb1, 0xc1, 0xaa, 0xa9, 0x55, 0x91, 0xc1, 0xd1, 0xc1, 0xd0, 0x0f, 0x2a, 0x91, 0xc1, 0xd1, 0xc1, 0xd0, 0x08, 0x8a, 0x91, 0xc1, 0xc8, 0xd0, 0xe8, 0xf0, 0xe4, 0x98, 0xaa, 0xa4, 0xc2, 0x18, 0x20, 0x2D, 0xfe, 0xa9, 0x08, 0x8d, 0x82, 0x02, 0xa9, 0x04, 0x8d, 0x88, 0x02, 0x60 };
-static uint8_t kernal_copy[C64_KERNAL_BYTES];
+static uint8_t kernal_copy[DRV_c64_roms_kernal_COUNT];
 static bool kernal_known, kernal_patched;
 
 // c64.put_kernal (c64core.cc) calls this with every KERNAL image it puts into the aperture: the copy is what the patch is made against (the aperture is write
 // only)
 void trx64u_kernal_put(CoreCtx *, const uint8_t *data, uint32_t n)
 {
-    if (n != C64_KERNAL_BYTES) {
+    if (n != DRV_c64_roms_kernal_COUNT) {
         return;
     }
     memcpy(kernal_copy, data, n);
     kernal_known = true;
     kernal_patched = false;
     if (setting_ix("Fast Reset", 0) && !memcmp(kernal_copy + 0x1d6c, fast_org, sizeof(fast_org))) {
-        c64_rom_write(C64_ROM_KERNAL + 0x1d6c, fast_patch, sizeof(fast_patch));
+        c64_rom_write(DRV_OFF(c64_roms, kernal) + 0x1d6c, fast_patch, sizeof(fast_patch));
         kernal_patched = true;
     }
 }
@@ -107,30 +106,29 @@ static void fast_reset(void)
     }
     bool want = setting_ix("Fast Reset", 0) != 0 && !memcmp(kernal_copy + 0x1d6c, fast_org, sizeof(fast_org));
     if (want && !kernal_patched) {
-        c64_rom_write(C64_ROM_KERNAL + 0x1d6c, fast_patch, sizeof(fast_patch));
+        c64_rom_write(DRV_OFF(c64_roms, kernal) + 0x1d6c, fast_patch, sizeof(fast_patch));
         kernal_patched = true;
     } else if (!want && kernal_patched) {
-        c64_rom_write(C64_ROM_KERNAL + 0x1d6c, kernal_copy + 0x1d6c, sizeof(fast_patch));
+        c64_rom_write(DRV_OFF(c64_roms, kernal) + 0x1d6c, kernal_copy + 0x1d6c, sizeof(fast_patch));
         kernal_patched = false;
     }
 }
 
 static int reu_load(const char *path, char *msg, int msglen, bool at_zero = true);
 static void mp3_forget(void);
-#define TRX_SLOT_CTRL 0x7000                                       // the TRX block's slot control
-
-// TRX_SLOT_STATUS (TRX block +0x7004, 32 bit): b31 the slot block is in the bitstream, b16 the port is armed for a cartridge. b31 is the bitstream's and is
-// read once (the firmware's trx_slot_present keeps it the same way, software/ultimate-app/software/io/c64/trx_cart.cc); b16 is read each time, one byte.
+// The slot's status (trx_slot, gateware/c64_basic.toml): `block` the slot block is in the bitstream, `armed` the port is armed for a cartridge. `block` is the
+// bitstream's and is read once (the firmware's trx_slot_present keeps it the same way, software/ultimate-app/software/io/c64/trx_cart.cc); `armed` each time.
+// The register is 32 bit: one read latches it at byte 0 (trx_sys.v), which byte reads of +6 and +7 alone never did.
 static bool slot_armed(void)
 {
     static int8_t block = -1;
-    if (!g_api->trx) {
+    if (!g_api->io) {
         return false;
     }
     if (block < 0) {
-        block = (trx_rd(0x7007) & 0x80) ? 1 : 0;
+        block = (HW_RD(trx_slot_status) & DRV_trx_slot_status_block_MASK) ? 1 : 0;
     }
-    return block && (trx_rd(0x7006) & 0x01);
+    return block && (HW_RD(trx_slot_status) & DRV_trx_slot_status_armed_MASK);
 }
 
 // c64.cc:421: the expansion port is taken when a .crt runs, a cartridge was seen in the port at the last bus setup (trx_ext_cart_seen: GAME or EXROM pulled low) or the slot is armed for one.
@@ -145,8 +143,9 @@ static bool port_taken(void)
 int fx_io(CoreCtx *, const OpArgs &, OpOut &)
 {
     g_ext_cart_seen = g_api->c64 && (g_api->c64->cart_detect() & 3) != 3;         // U64_CART_DETECT: GAME and EXROM both high = nothing in the port
-    trx_wr(TRX_SLOT_CTRL, 2);                                                        // T228 R20 29: CPU writes reach a real cartridge (TRX-Ultimate trx_cart.cc:364-406 keeps it at 2)
-    c64_bus_wr(C64U_BUS_BRIDGE, bus_mode_values[setting_ix("Bus Operation Mode", 0)]);
+    HW_WR(trx_slot_ctrl, DRV_trx_slot_ctrl_rom_wr_en_MASK);                          // T228 R20 29: CPU writes reach a real cartridge (TRX-Ultimate trx_cart.cc:364-406 keeps
+                                                                                     // ROM_WR_EN set); one 32-bit write, which commits at byte 3 (a byte write of +0 alone never did)
+    HW_WR(c64_bus_bridge, bus_mode_values[setting_ix("Bus Operation Mode", 0)]);
     bool cart = cart_active();
     if (!cart) {
         uint8_t internal = 0, external = 0;
@@ -173,13 +172,13 @@ int fx_io(CoreCtx *, const OpArgs &, OpOut &)
             }
             }
         }
-        c64_bus_wr(C64U_BUS_INTERNAL, internal);
-        c64_bus_wr(C64U_BUS_EXTERNAL, external);
+        HW_WR(c64_bus_internal, internal);
+        HW_WR(c64_bus_external, external);
         // one module in the expansion port: the REU, the Ultimate Audio and the UCI are the machine's only while no cartridge runs
         bool taken = port_taken();                                                   // a cartridge in the port (seen or armed): off, whatever the settings say
-        c64_cart_wr(C64U_CART_REU_ENABLE, !taken && setting_ix("RAM Expansion Unit", 0) == 1 ? 1 : 0);
-        c64_cart_wr(C64U_CART_REU_SIZE, (uint8_t)setting_ix("REU Size", 4));
-        c64_cart_wr(C64U_CART_SAMPLER, taken ? 0 : (uint8_t)setting_ix("Map Ultimate Audio $DF20-DFFF", 0));
+        CART_WR(reu, !taken && setting_ix("RAM Expansion Unit", 0) == 1 ? DRV_cart_regs_reu_on : DRV_cart_regs_reu_off);
+        CART_WR(reu_size, setting_ix("REU Size", 4));
+        CART_WR(sampler, taken ? DRV_cart_regs_sampler_off : setting_ix("Map Ultimate Audio $DF20-DFFF", 0));
         uci_slot(!taken && setting_ix("Command Interface (UCI)", 0), true);        // the server itself was started by the start hook (uci.start)
     } else {
         uci_slot(false, false);                                                     // c64.cc:426-445: a running cartridge has the port, the UCI is off (the saved value stays)
@@ -364,9 +363,9 @@ static const char *rom_choices(char *t, int tlen, const char *builtin, uint64_t 
     }
     return t;
 }
-const char *state_roms_kernal(CoreCtx *) { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", C64_KERNAL_BYTES, C64_KERNAL_BYTES); }
-const char *state_roms_basic(CoreCtx *)  { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", C64_BASIC_BYTES, C64_BASIC_BYTES); }
-const char *state_roms_char(CoreCtx *)   { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", C64_CHAR_BYTES, C64_CHAR_BYTES); }
+const char *state_roms_kernal(CoreCtx *) { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", DRV_c64_roms_kernal_COUNT, DRV_c64_roms_kernal_COUNT); }
+const char *state_roms_basic(CoreCtx *)  { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", DRV_c64_roms_basic_COUNT, DRV_c64_roms_basic_COUNT); }
+const char *state_roms_char(CoreCtx *)   { static char t[24 * 60]; return rom_choices(t, sizeof(t), "", DRV_c64_roms_char_COUNT, DRV_c64_roms_char_COUNT); }
 const char *state_roms_1541(CoreCtx *)   { static char t[24 * 60]; return rom_choices(t, sizeof(t), "1541.rom", 16384, 32768); }   // "1541.rom" is the built-in one (drive.fx_misc)
 
 // The built-in image of a ROM role back in through the role's put operation (the base's "machine.put_builtin_rom"). 0, or the reason in msg.
@@ -392,9 +391,9 @@ int fx_roms(CoreCtx *, const OpArgs &, OpOut &o)
             return OPE_FAILED;
         }
     }
-    if (load_rom("Kernal ROM", "c64.put_kernal", C64_KERNAL_BYTES, o.msg, o.msglen) ||
-        load_rom("Basic ROM", "c64.put_basic", C64_BASIC_BYTES, o.msg, o.msglen) ||
-        load_rom("Char ROM", "c64.put_char", C64_CHAR_BYTES, o.msg, o.msglen)) {
+    if (load_rom("Kernal ROM", "c64.put_kernal", DRV_c64_roms_kernal_COUNT, o.msg, o.msglen) ||
+        load_rom("Basic ROM", "c64.put_basic", DRV_c64_roms_basic_COUNT, o.msg, o.msglen) ||
+        load_rom("Char ROM", "c64.put_char", DRV_c64_roms_char_COUNT, o.msg, o.msglen)) {
         return OPE_FAILED;
     }
     return OPE_OK;
@@ -478,18 +477,18 @@ int fx_drive_misc(CoreCtx *, const OpArgs &, OpOut &o)
 // (TRX-Ultimate filetype_bin.cc:95, 242-257: C64_SET_KERNAL, then MENU_C64_RESET). "Reload ROMs, reset" brings the chosen / built-in KERNAL back.
 int op_load_kernal(CoreCtx *, const OpArgs &a, OpOut &o)
 {
-    uint8_t *buf = (uint8_t *)g_api->mem->malloc(C64_KERNAL_BYTES);
+    uint8_t *buf = (uint8_t *)g_api->mem->malloc(DRV_c64_roms_kernal_COUNT);
     if (!buf) {
         snprintf(o.msg, o.msglen, "No memory to read %s", a.s(0));
         return OPE_FAILED;
     }
-    int n = g_api->fs->load(a.s(0), buf, C64_KERNAL_BYTES);
-    if (n != (int)C64_KERNAL_BYTES) {
+    int n = g_api->fs->load(a.s(0), buf, DRV_c64_roms_kernal_COUNT);
+    if (n != (int)DRV_c64_roms_kernal_COUNT) {
         g_api->mem->free(buf);
-        snprintf(o.msg, o.msglen, "%s: a KERNAL is %u bytes", a.s(0), (unsigned)C64_KERNAL_BYTES);
+        snprintf(o.msg, o.msglen, "%s: a KERNAL is %u bytes", a.s(0), (unsigned)DRV_c64_roms_kernal_COUNT);
         return OPE_FAILED;
     }
-    OpIn in[1] = { in_blob("data", buf, C64_KERNAL_BYTES) };
+    OpIn in[1] = { in_blob("data", buf, DRV_c64_roms_kernal_COUNT) };
     OpResult r;
     int rc = g_api->ops->call("c64.put_kernal", in, 1, &r);
     g_api->mem->free(buf);

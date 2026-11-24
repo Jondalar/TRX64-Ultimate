@@ -1,8 +1,8 @@
 // What every file of the trx64u library shares: the base's table (lib_trx64u.cc keeps it), the log, the settings as the base holds them (setting.cc), the
 // groups of base 3.3 (g_api->sync, settings, ctx, io, board), the exports of MultiCore's shared libraries, and small helpers over them. A group or an
 // export the base does not give (null) makes its helper do nothing and read 0; the code that needs one checks it first. Nothing is read at the
-// registration: the groups and the exports are read at each use (api->trx and api->c64 are filled after the libraries are loaded, io once the core is
-// handed to the base, the shared libraries load in any order).
+// registration: the groups and the exports are read at each use (api->c64 is filled after the libraries are loaded, io once the core is handed to
+// the base, the shared libraries load in any order). The registers are the driver table's (drvtab.h, below), generated from c64_basic's TOML A.
 #ifndef TRX64U_LIB_H
 #define TRX64U_LIB_H
 
@@ -72,28 +72,46 @@ static inline void ddr_write(uint32_t off, const void *p, uint32_t n)
     }
 }
 
-// The C64U's register blocks through the io group, offsets in c64u_regs.h: the cartridge-port control block (cart_rd / cart_wr), the C64 I/O block
-// (bus_wr), the machine stop, the reset, the memory-only mode of the RAM window, the video format and the ROM aperture. Without the group a write does
-// nothing and a read gives 0.
-static inline uint8_t c64_cart_rd(uint32_t reg)
+// The registers of the bitstream: every address, field and value is a name of the driver table, drvtab.h, which the build generates from c64_basic's
+// TOML A (../gateware/c64_basic.toml; MultiCore T239.3 D31, D34, api.md 6.17): DRV_<block>_<property>_RD() / _WR(v), a run's _RD(i) / _WR(i, v),
+// _<field>_MASK / _SHIFT, _<state>. HW_RD, HW_WR and HW_WR_I take a block and property as one name (HW_RD(cart_regs_stop)) and touch the register only
+// once the base has handed the core over (g_api->io is set then, api.md 4.15.1); before that a write does nothing and a read gives 0. A 16- or
+// 32-bit register is one access: the bus converter splits it into its bytes, byte 0 first (gateware/c64_basic.toml has the RTL lines).
+#include "drvtab.h"
+#define HW_RD(bp) (g_api->io ? DRV_##bp##_RD() : 0)
+#define HW_WR(bp, v)                                                                                                                         \
+    do {                                                                                                                                       \
+        if (g_api->io) {                                                                                                                       \
+            DRV_##bp##_WR(v);                                                                                                                  \
+        }                                                                                                                                      \
+    } while (0)
+#define HW_WR_I(bp, i, v)                                                                                                                    \
+    do {                                                                                                                                       \
+        if (g_api->io) {                                                                                                                       \
+            DRV_##bp##_WR(i, v);                                                                                                               \
+        }                                                                                                                                      \
+    } while (0)
+// The offset of a property in its block, for the io group's calls that take one (cart_rd, cart_wr, rom_read, rom_write): DRV_OFF(c64_roms, kernal).
+#define DRV_OFF(b, p) ((uint32_t)(DRV_##b##_##p##_ADDR - DRV_##b##_ADDR))
+
+// A block of the core (owner "core" in the TOML A) is touched through its accessors above. A block of the base that the base's io group has a call for
+// goes through that call, with the offset from the table: the cartridge port's page (cart_regs: CART_RD, CART_WR), the ROM apertures (c64_roms:
+// c64_rom_write, io.rom_read), the video format (c64_video: c64_video_format) and the DMA mode (c64_dma_mode: c64_ram_memonly); the stop and the reset
+// are the base's own operations on cart_regs (c64_stop, c64_mode_reset). Without the io group a write does nothing and a read gives 0.
+static inline uint8_t c64_cart_rd(uint32_t off)
 {
     const SvcIo *io = g_api->io;
-    return io ? io->cart_rd(reg) : 0;
+    return io ? io->cart_rd(off) : 0;
 }
-static inline void c64_cart_wr(uint32_t reg, uint8_t v)
+static inline void c64_cart_wr(uint32_t off, uint8_t v)
 {
     const SvcIo *io = g_api->io;
     if (io) {
-        io->cart_wr(reg, v);
+        io->cart_wr(off, v);
     }
 }
-static inline void c64_bus_wr(uint32_t off, uint8_t v)
-{
-    const SvcIo *io = g_api->io;
-    if (io) {
-        io->bus_wr(off, v);
-    }
-}
+#define CART_RD(p) c64_cart_rd(DRV_OFF(cart_regs, p))
+#define CART_WR(p, v) c64_cart_wr(DRV_OFF(cart_regs, p), (uint8_t)(v))
 static inline void c64_stop(bool on)
 {
     const SvcIo *io = g_api->io;
@@ -131,9 +149,12 @@ static inline void c64_rom_write(uint32_t off, const void *p, uint32_t n)
     }
 }
 
-// A register window of the bitstream (io.window; the ids, names and needed sizes are C64U_WINDOWS of c64u_regs.h): its base, kept once found. Null when
-// the io group is missing, desc.toml does not declare the window, the address map does not grant it, or it is shorter than the offsets need; the
-// first null of each window is logged, and the caller then writes nothing. One byte per access.
+// The four register windows that are still [[window]] rows of desc.toml (io.window): audio_mixer, speaker_mixer, c64_palette, hdmi_palette. Their blocks
+// lie in ranges MultiCore's host TOML A gives the base, so they are not in our TOML A until Alex decides who owns them (U18 §5, open); their names
+// and sizes are lib_trx64u.cc's, their offsets u64cfg.cc's, their addresses desc.toml's. c64u_win gives a window's base, kept once found; null when the io group is missing,
+// desc.toml does not declare it, the base does not grant it, or it is shorter than `need`; the first null of each window is logged, and the caller
+// then writes nothing. One byte per access.
+enum { WIN_AUDIO_MIXER, WIN_SPEAKER_MIXER, WIN_C64_PALETTE, WIN_HDMI_PALETTE, WIN_N };
 volatile uint8_t *c64u_win(int w);
 static inline void c64u_win_wr(int w, uint32_t off, uint8_t v)
 {
@@ -152,15 +173,6 @@ int op_call(const char *name, const OpIn *in, int nin, char *msg, int msglen);
 enum { X_CART, X_DRIVE, X_UCI, X_SID, X_TEMPDISK, X_PRG, X_N };   // "c64cart", "cbm1541", "uci", "sid", "tempdisk", "cbmprg"
 const void *x_table(int which, uint32_t off);
 #define X_GET(which, T, m) ((const T *)x_table((which), (uint32_t)offsetof(T, m)))
-
-// The TRX block, byte registers (api->trx->regs).
-static inline uint8_t trx_rd(uint32_t reg) { return g_api->trx ? g_api->trx->regs[reg] : 0; }
-static inline void trx_wr(uint32_t reg, uint8_t v)
-{
-    if (g_api->trx) {
-        g_api->trx->regs[reg] = v;
-    }
-}
 
 // The C64's memory window (api->c64): the bus as the machine sees it, or the RAM's second port while c64_ram_memonly is on.
 static inline bool c64_window(void) { return g_api->c64 != 0; }

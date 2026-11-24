@@ -8,6 +8,7 @@ TRX64 SDK (docs/specs/U18-trx64u-app-part-moves-here.md, D1-D5).
 | `base/` | `trx64u`, the base | the menu (`menu.toml`), its operations (`trx64u_ops`), the C64U settings (`u64cfg`) |
 | `ring/` | `ring` | the Timewarp ring, its files (`.c64re`, `.c64rering`, `.trxring`) and its operations |
 | `monitor/` | `monitor`, needs `ring` | the monitor, its RPC server on TCP 4312; the engine is trxmon, `software/ultimate-app/apps/trxmon/src` (D4: one source) |
+| `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 
 The cartridge tool `trex_crt` stays a sub-app (D5), `software/ultimate-app/apps/trex_crt`.
 
@@ -20,6 +21,16 @@ TOML, and `base/desc.toml`, the API TOML) compiles into record 6, and `cor_pack.
 run in ue2emu on MultiCore's shared 3.3 image (2026-11-23): the core is identified from our record 6 and all three
 libraries load; the start stops on gaps in the base (U18 §5). Not on the board yet.
 
+The registers (MultiCore T239.3 P1-7, 2026-11-24): `gateware/c64_basic.toml` is c64_basic's TOML A, written from what the
+RTL of `designs/c64_basic` decodes, one block per register range and driver (D34), each with the RTL lines that decode it.
+`base/` and `ring/` take every register address from its driver table, `drvtab.h` (`DRV_<block>_<property>_*`, api.md
+6.17), which the build makes with the SDK's `descrec.py drivers`; `c64u_regs.h` is gone, and `rtl_check.py lint-src` finds
+no literal I/O address in `base/`, `ring/` or `monitor/` (the SHA-256 constant of `ring/trx_sha256.c` allowed). The
+pinned SDK 0.3.0 has no `drivers` command, no `maps/` and no `rtl_check.py`: until `sdk.pin` moves to 0.4.0, `build.sh`
+stops at `drvtab.h` unless the table is made beforehand (U18 §5 has the commands). `base/desc.toml` keeps record 6's data
+and four register windows whose owner is open (audio_mixer, speaker_mixer, c64_palette, hdmi_palette; U18 §5). The
+monitor's engine (trxmon, submodule) still reaches the TRX block through `api->trx->regs` and its own offsets (U18 §5).
+
 The sources of `base/`, `ring/` and `monitor/` started as MultiCore's, copied from TRX64U-MultiCore commit `3b8e2955`
 (branch `t239.3-sdk`, the commit the SDK 0.1.0 was packed from; `coreapp/src` and `coreapp/cores/trx64u/menu.toml`), and
 were ported onto the SDK's public API on 2026-11-22. What they took from outside the SDK before the port is measured in
@@ -30,8 +41,10 @@ firmware's copy is frozen, bug fixes only, each also here).
 ## Build
 
 `./build.sh [trx64u] [ring] [monitor]` builds the libraries in `build/<name>/` (copies of the sources; the monitor
-also gets trxmon's files from the submodule). On a Mac it runs in the local `u64-build-env` container. `build.sh --check`
-only checks that the unpacked SDK matches `sdk.pin`.
+also gets trxmon's files from the submodule). The driver table of `base/` and `ring/` is made there first from
+`gateware/c64_basic.toml` (their Makefiles: `descrec.py drivers` of the SDK with the SDK's `maps/`; `DRV_TOOLS` and
+`DRV_MAPS` name others). On a Mac it runs in the local `u64-build-env` container. `build.sh --check` only checks that
+the unpacked SDK matches `sdk.pin`.
 
 trxmon itself builds as a library as it is (2026-11-22): every file compiles against the firmware's application ABI
 (`software/appsdk/include`), and what is left undefined are only the platform calls `plat_*` and `srv_*`, which
@@ -65,6 +78,7 @@ What goes in:
 | app core image (`coreapp.bin`), `cor_pack.py` | the SDK (`sdk.pin`) |
 | libraries `trx64u`, `ring`, `monitor` | `build.sh` |
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
+| the registers (built into the libraries) | `gateware/c64_basic.toml` through `drvtab.h`; not in the `.cor` yet: SDK 0.4.0 ships no app image, so packing on it waits for MultiCore's P3-3 (U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
 | record 8 (files the core installs) | `sidplayer/sidcrt.bin`, `muscrt.bin`, `musplayer.bin`, assembled from `software/ultimate-app/software/6502/sidcrt` by the submodule's 64tass |
 | bitstream | `--bit`, with `--bit-commit` |

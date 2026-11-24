@@ -5,7 +5,6 @@
 #include "trx64u_lib.h"
 #include "libfmt.h"
 #include "core_hooks.h"
-#include "c64u_regs.h"
 #include "trx64u_ops.h"
 #include "u64cfg.h"
 #include "c64core.h"
@@ -95,23 +94,25 @@ const void *x_table(int which, uint32_t off)
     return *(void *const *)(t + off) ? t : 0;
 }
 
-// ---- the register windows (c64u_regs.h C64U_WINDOWS, desc.toml, io.window) ---------------------------------------------------------------------------
+// ---- the four register windows still in desc.toml (trx64u_lib.h WIN_*, io.window) -------------------------------------------------------------------
 // The windows are the core's description (desc.toml in record 6 of the .cor), so a window found stays. One that is missing is looked for again at the next
-// use (the io group may come later than the first call) and logged once.
+// use (the io group may come later than the first call) and logged once. `need` is the bytes u64cfg.cc's offsets reach: the mixer's 10 channels of a
+// byte per side, the speaker's gains at +0x00, +0x01, +0x04, +0x05, 16 colours of 4 bytes with their YUV from +0x400, 16 colours of 4 bytes.
 static const struct {
     const char *name;
     uint32_t need;
-} g_win_def[C64U_W_N] = {
-#define X(id, name, need) { name, (uint32_t)(need) },
-    C64U_WINDOWS(X)
-#undef X
+} g_win_def[WIN_N] = {
+    { "audio_mixer", 2 * 10 },
+    { "speaker_mixer", 0x05 + 1 },
+    { "c64_palette", 0x400 + 16 * 4 },
+    { "hdmi_palette", 16 * 4 },
 };
-static volatile uint8_t *g_win[C64U_W_N];
-static bool g_win_said[C64U_W_N];
+static volatile uint8_t *g_win[WIN_N];
+static bool g_win_said[WIN_N];
 
 volatile uint8_t *c64u_win(int w)
 {
-    if (w < 0 || w >= C64U_W_N) {
+    if (w < 0 || w >= WIN_N) {
         return 0;
     }
     if (g_win[w]) {
@@ -358,7 +359,7 @@ static const LibStateDecl states[] = {
 #else
 #define LIB_ENTRY_ATTR
 #endif
-// The groups every handler uses (sys, mem, ops, fs) have to be there; api->trx, api->c64, the 3.3 groups and the exports are read at each use. The core
+// The groups every handler uses (sys, mem, ops, fs) have to be there; api->c64, the 3.3 groups and the exports are read at each use. The core
 // hooks are the export "corehooks", major 1.
 extern "C" LIB_ENTRY_ATTR int lib_register(const LibApi *api, LibRecord *out)
 {

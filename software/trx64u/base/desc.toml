@@ -6,7 +6,9 @@
 # What MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09) held as the TRX2 descriptor `c64_desc`, as the sections of their tools/descrec.py. Its code is
 # this library: the operations the data names (put_op, service_op, type_op, run_op, the hotkey's core_op) are lib_trx64u.cc's record, and init, release,
 # media_flush, media_pending and the [mount] slots' spec, mount and eject are the export "corehooks" (c64core.cc) of the library [core] hooks names. The
-# settings, tasks, media rows, file types, machine_info and the key table are menu.toml's. Register numbers are offsets in the core window (c64u_regs.h C64U_*).
+# settings, tasks, media rows, file types, machine_info and the key table are menu.toml's. The register numbers of [freeze] and [[report_reg]] are offsets
+# in the TRX block (trx_io at 0x101A0000 in c64_basic's TOML A, ../gateware/c64_basic.toml: ident +0x004 caps, +0x005 caps2; trx_gate +0x100 ctrl).
+# The registers our libraries drive are not here: they are the TOML A's blocks, which the libraries are linked against (drvtab.h).
 
 [core]
 id = "TRX2"                            # the ID block of the TRX64 Ultimate bitstream
@@ -43,7 +45,7 @@ reg_fb_base = 0
 reg_fb_stride = 0
 
 [freeze]
-reg_status = 0x101                     # C64U_GATE_STATUS: b8 (halted) of the 32 bit GATE_CTRL, read as a word
+reg_status = 0x101                     # trx_gate.ctrl's byte 1: its b8 (halted) of the 32 bit register, read as a word
 mask = 0x01
 timeout_ms = 200
 word = true
@@ -130,33 +132,13 @@ shared = true
 put_op = "drive.put_rom"
 
 # ---- the register windows -----------------------------------------------------------------------------------------------------------------------------
-# The blocks of the C64U's bitstream outside the core window that this core's libraries write (MultiCore's handover, "The windows of a core's API TOML",
-# base 3.3), each one `io.window(name, &size)` hands out. descrec refuses a window that covers a register of MultiCore's coreapp/src/basereg.def.
-#
-# The base refuses a window over a register it drives itself (power, RESTORE, the HDMI PLL reset, the keyboard scan, I2C, MDIO, the USB hub reset, the case
-# LED select), so the U64 block (FW U64_IO_BASE, 0xA0000400) is declared as the three runs this core writes; the case LEDs go through board.case_led_select.
-# Each name is the one in C64U_WINDOWS (c64u_regs.h), which also holds the offsets inside the window; each size covers the offsets that list needs. The
-# addresses are the firmware's (software/ultimate-app/software/system/u2p.h, u64.h; U2P_IO_BASE 0xA0000000).
-
-[[window]]
-name = "speaker_enable"         # FW U2PIO_SPEAKER_EN (U2P_IO_BASE + 0x0C); the rest of that block (I2C, MDIO, the USB hub reset) is the base's
-address = 0xA000000C
-size = 0x1
-
-[[window]]
-name = "u64_userport"           # FW U64_USERPORT_EN (U64_IO_BASE + 0x05)
-address = 0xA0000405
-size = 0x1
-
-[[window]]
-name = "u64_hdmi_connectors"    # FW U64_HDMI_ENABLE, U64_INT_CONNECTORS (U64_IO_BASE + 0x08, + 0x09)
-address = 0xA0000408
-size = 0x2
-
-[[window]]
-name = "u64_pwm_duty"           # FW U64_PWM_DUTY (U64_IO_BASE + 0x0D)
-address = 0xA000040D
-size = 0x1
+# What is left of this core's [[window]] rows after its registers moved into c64_basic's TOML A (../gateware/c64_basic.toml, MultiCore T239.3 P1-7): the
+# four whose blocks lie in ranges MultiCore's host TOML A gives the base. Who owns them is open (Alex, U18 §5); until then they stay as they were, and
+# `io.window(name, &size)` hands them out (lib_trx64u.cc c64u_win; the offsets are u64cfg.cc's). The addresses are the firmware's (U2P_IO_BASE 0xA0000000):
+# a base with MultiCore's t239.3 5f4adae0 (SDK 0.4.0) translates them to the I/O bus of the TOML A it is linked with (libsvc.cc window_to_toml_a); an older
+# base hands them out as they are, and the app's bus converter sends 0xA0xxxxxx to the memory path (bit 28 clear), not to these registers. In c64_basic,
+# ultimate_sys.vhd decodes the mixer at 0x1005xx (:1245-1268: +0x00-0x0B, +0x40, +0x41, +0x44, +0x45, writes only), the C64 palette at 0x180800-0x18083F
+# (:913-914, :973: RGB writes only, no YUV at +0x400), and no HDMI palette: 0x145000 is its overlay region (0x140000-0x147FFF, :903-904).
 
 [[window]]
 name = "audio_mixer"            # FW U64_AUDIO_MIXER: 10 channels, a byte per side
@@ -167,11 +149,6 @@ size = 0x14
 name = "speaker_mixer"          # FW U64_SPEAKER_MIXER: the bitstream decodes +0x00, +0x01, +0x04, +0x05 (designs/c64_basic/ultimate_sys.vhd spk_gain); 0xA0000550
 address = 0xA0000540            # and 0xA0000551 are the base's master volume and tone (MultiCore's basereg.def), outside the window
 size = 0x6
-
-[[window]]
-name = "resampler"              # FW U64_RESAMPLER: data +0 .. +3, reset +4, labor +8, flush +9
-address = 0xA0000580
-size = 0xA
 
 [[window]]
 name = "c64_palette"            # FW C64_PALETTE (U2P_IO_BASE + 0x80800): RGB of 16 colours at +0, their YUV at +0x400

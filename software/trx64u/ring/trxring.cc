@@ -325,9 +325,9 @@ static const char *save_body(const char *path, uint32_t *bytes, trx_progress_fn 
         return "Out of memory";
     }
     int hl = r_snprintf(hdr, HDR_MAX, "{\"kind\":\"trx64-ultimate-ring\",\"version\":%d,\"bitstreamId\":%lu", VERSION,
-                        (unsigned long)trx_io_read32(TRX_ID));
+                        (unsigned long)HW_RD(ident_id));
     hl += r_snprintf(hdr + hl, HDR_MAX - hl, ",\"caps\":%u,\"caps2\":%u,\"blockWords\":%d,\"frameBytes\":%u",
-                     (unsigned)trx_rd8(TRX_CAPS), (unsigned)trx_rd8(TRX_CAPS2), TRX_BLOCK_WORDS,
+                     (unsigned)HW_RD(ident_caps), (unsigned)HW_RD(ident_caps2), TRX_BLOCK_WORDS,
                      (unsigned)sizeof(TrxFrame));
     hl += r_snprintf(hdr + hl, HDR_MAX - hl, ",\"frames\":%d,\"oldestSeq\":%lu,\"headSeq\":%lu,\"headCycles\":%llu", n,
                      (unsigned long)ents[0].seq, (unsigned long)ents[n - 1].seq,
@@ -582,7 +582,7 @@ const char *trx_trxring_load(const char *path)
         } else if (hget(&j, "blockWords", NULL, -1) != TRX_BLOCK_WORDS ||
                    hget(&j, "frameBytes", NULL, -1) != int64_t(sizeof(TrxFrame))) {
             err = "A .trxring of another build (the timeline's shape differs)";
-        } else if (uint32_t(hget(&j, "bitstreamId", NULL, 0)) != trx_io_read32(TRX_ID)) {
+        } else if (uint32_t(hget(&j, "bitstreamId", NULL, 0)) != HW_RD(ident_id)) {
             err = "A .trxring of another bitstream";
         } else {
             int rb = json_key(j.hdr, j.tok, j.ntok, 0, "recBytes");
@@ -698,7 +698,7 @@ const char *trx_trxring_check(const char *path)
         } else if (hget(&j, "blockWords", NULL, -1) != TRX_BLOCK_WORDS ||
                    hget(&j, "frameBytes", NULL, -1) != int64_t(sizeof(TrxFrame))) {
             err = "A .trxring of another build (the timeline's shape differs)";
-        } else if (uint32_t(hget(&j, "bitstreamId", NULL, 0)) != trx_io_read32(TRX_ID)) {
+        } else if (uint32_t(hget(&j, "bitstreamId", NULL, 0)) != HW_RD(ident_id)) {
             err = "A .trxring of another bitstream";
         } else if (hget(&j, "frames", NULL, 0) < 1) {
             err = "The .trxring holds no frame";

@@ -27,15 +27,15 @@ static void slot_path(const char *slot, char *path, int n, int *mode)
     r_snprintf(path, n, "%s", p);
 }
 
-// The System Mode that runs, from C64_VIDEOFORMAT (u64_config.cc writes the colour timing's mode bits there): PAL 0, NTSC 1, PAL-60 2, NTSC-50 3. The /L
+// The System Mode that runs, from the video format (c64_video.format; u64cfg.cc writes the colour timing's mode bits there): PAL 0, NTSC 1, PAL-60 2, NTSC-50 3. The /L
 // timings (4, 5) have the mode bits of PAL-60 and NTSC-50 and read as those; the trx64u menu offers the first four only. -1 without the io group.
 static int machine_now(void)
 {
     if (!g_api->io) {
         return -1;
     }
-    uint8_t v = io_bus_rd(C64U_BUS_VIDEOFORMAT);
-    bool ntsc = (v & C64U_VIDEO_NTSC_ENCODING) != 0, hz60 = (v & C64U_VIDEO_60_HZ) != 0;
+    uint8_t v = HW_RD(c64_video_format);
+    bool ntsc = (v & DRV_c64_video_format_ntsc_encoding_MASK) != 0, hz60 = (v & DRV_c64_video_format_hz60_MASK) != 0;
     return ntsc ? (hz60 ? 1 : 3) : (hz60 ? 2 : 0);
 }
 
@@ -151,7 +151,7 @@ void ring_machine_build(RingMachine *m, bool load)
             }
             // U9 D3a: a GMod2's saved game is in the 93C86, outside the ROM window (FW trx_c64re_dump_ex: the same test on C64_CARTRIDGE_TYPE)
             const C64CartApi *e = R_TABLE(C64CartApi, RX_C64CART, eeprom_get);
-            if (e && trx_ring_cart_has_eeprom(io_cart_rd(C64U_CART_TYPE))) {
+            if (e && trx_ring_cart_has_eeprom(CART_RD(type))) {
                 e->eeprom_get(m->eeprom);
                 s->eeprom = m->eeprom;
             }

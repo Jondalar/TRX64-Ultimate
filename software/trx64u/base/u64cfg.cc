@@ -1,21 +1,21 @@
 // The C64U's hardware configuration from the core's settings (u64cfg.h). PROVENANCE: vendor/gideon/software/u64/u64_config.cc (Gideon Zweijtzer, GPL-3.0):
 // U64Config::effectuate_settings, setMixer, setSpeakerMixer, U64SidSockets/U64UltiSids/U64SidAddressing::effectuate_settings, setFilter, setSidEmuParams,
-// setCpuSpeed, setLedSelector, auto_mirror, SetResampleFilter, the palette programming; the register addresses are vendor/gideon/software/system/u64.h.
+// setCpuSpeed, setLedSelector, auto_mirror, the palette programming. The register addresses are not Gideon's (u64.h): every one is c64_basic's, from
+// its TOML A (../gateware/c64_basic.toml) through the driver table (drvtab.h, trx64u_lib.h). c64_basic has no resampler (ultimate_sys.vhd decodes none
+// at 0x10100580), so SetResampleFilter has no counterpart here.
 // What is different: the values come from this application's settings (menu.toml groups video, audio, sid, input, expert) instead of a ConfigStore, and
 // the system mode goes to the host's picture layer (board.video_set_system, which applies it through app/video/videomode.cc's video_apply).
 // U18: built as the trx64u library against the TRX64 SDK (base 3.3). The settings are read and written through the settings
-// group (setting.cc), the SID chips through the C64's memory window (api->c64), the reSID8 filter through the TRX block (api->trx), the keys, the SID
-// sockets' supply, the video PLL, the picture layer, the case LEDs and the ESP32 through the 3.3 groups io and board (g_api->io, board); the C64U's registers
-// through the io group's blocks and register windows (trx64u_lib.h), their offsets and window names in c64u_regs.h, the windows in desc.toml.
+// group (setting.cc), the SID chips through the C64's memory window (api->c64), the keys, the SID sockets' supply, the video PLL, the picture layer, the
+// case LEDs and the ESP32 through the 3.3 groups io and board (g_api->io, board); the registers through the driver table (the C64's I/O page, the U64
+// page, the speaker, reSID8, the cartridge port's page), and the mixers and palettes through the four register windows still in desc.toml (c64u_win).
 // lib_trx64u.cc lists the operations and states of this file with their names and arguments.
 #include "u64cfg.h"
 #include "trx64u_lib.h"
-#include "c64u_regs.h"
 #include "sid_decide.h"
 #include "resid8_filter.h"
 #include <string.h>
 
-#include "u64_resample.inc"
 
 // ---- the settings this file reads: id, key (the menu.toml `key`) -----------------------------------------------------------------------------------
 #define KEYS(X)                                                                                                                                      \
@@ -114,17 +114,20 @@ static uint8_t g_palette[16][3];
 static bool g_palette_valid;
 static char g_palette_name[64];
 
-// Colour i of the two palettes (the C64's RGB and YUV, the HDMI one), each written only where its window is there.
+// Colour i of the two palettes (the C64's RGB and YUV, the HDMI one), each written only where its window is there: 4 bytes per colour, the C64's YUV
+// 0x400 after its RGB (the offsets of the windows c64_palette and hdmi_palette, desc.toml).
+#define PAL_RGB 0x000
+#define PAL_YUV 0x400
 static void put_colour(int i, const uint8_t rgb[3])
 {
-    volatile uint8_t *c64 = c64u_win(C64U_W_C64_PALETTE);
-    volatile uint8_t *hdmi = c64u_win(C64U_W_HDMI_PALETTE);
+    volatile uint8_t *c64 = c64u_win(WIN_C64_PALETTE);
+    volatile uint8_t *hdmi = c64u_win(WIN_HDMI_PALETTE);
     uint8_t yuv[3];
     rgb_to_yuv(rgb, yuv);
     for (int k = 0; k < 3; k++) {
         if (c64) {
-            c64[C64U_PALETTE_RGB + 4 * i + k] = rgb[k];
-            c64[C64U_PALETTE_YUV + 4 * i + k] = yuv[k];
+            c64[PAL_RGB + 4 * i + k] = rgb[k];
+            c64[PAL_YUV + 4 * i + k] = yuv[k];
         }
         if (hdmi) {
             hdmi[4 * i + k] = rgb[k];
@@ -260,40 +263,8 @@ static int load_palette(const char *name, char *msg, int msglen)
     return 0;
 }
 
-// Gideon U64Config::SetResampleFilter: the coefficients of the system mode's audio clock (an audio divider of 77 is PAL's). Gideon stores each coefficient
-// as one 32-bit word; the application CPU's bus converter makes that four byte writes at +0 .. +3, low byte first, back to back (cores/gideon/fpga/
-// cpu_unit/rvlite/vhdl_source/bus_converter.vhd, io_access). The window takes one byte per access (svc_io.h), so the library writes the same four bytes
-// in the same order, inside sync.enter / leave so that no other task's access comes between them.
-static void set_resample_filter(uint8_t audio_div)
-{
-    volatile uint8_t *r = c64u_win(C64U_W_RESAMPLER);
-    if (!r) {
-        return;
-    }
-    int mode = (audio_div == 77) ? 0 : 1;
-    const int32_t *pf = (mode == 0) ? c_filter2_coef_pal_alt : c_filter2_coef_ntsc;
-    int size = (mode == 0) ? (int)(sizeof(c_filter2_coef_pal_alt) / sizeof(c_filter2_coef_pal_alt[0]))
-                           : (int)(sizeof(c_filter2_coef_ntsc) / sizeof(c_filter2_coef_ntsc[0]));
-    const SvcSync *sy = g_api->sync;
-    r[C64U_RESAMPLE_RESET] = 1;
-    r[C64U_RESAMPLE_FLUSH] = 1;
-    for (int i = 0; i < size; i++) {
-        uint32_t v = (uint32_t)pf[i];
-        if (sy) {
-            sy->enter();
-        }
-        for (int b = 0; b < 4; b++) {
-            r[C64U_RESAMPLE_DATA + b] = (uint8_t)(v >> (8 * b));
-        }
-        if (sy) {
-            sy->leave();
-        }
-    }
-    r[C64U_RESAMPLE_LABOR] = (mode == 0) ? 45 : 169;
-    r[C64U_RESAMPLE_FLUSH] = 0;
-}
-
-// The colour timing of each system mode (the position of "System Mode"), the three fields the C64's video registers and the resampler take. PROVENANCE:
+// The colour timing of each system mode (the position of "System Mode"): the video format, the phase increment, and the audio divider Gideon's resampler
+// filter is picked by (no resampler in c64_basic: audio_div is kept with its row, unused). PROVENANCE:
 // software/ultimate-app/software/u64/color_timings.cc (Gideon Zweijtzer, GPL-3.0), color_timings[] in its order: c_pal_50_283_5, c_ntsc_60_227_5,
 // c_pal_60_free, c_ntsc_50_free, c_pal_60_281_5, c_ntsc_50_228_5. mode_bits are its VIDEO_FMT_* (u64.h: NTSC_ENCODING 0x01, 60_HZ 0x02, NTSC_FREQ 0x08,
 // CYCLES_63 0x00, CYCLES_65 0x20), phase_inc includes its TABLE_520 bit 0x80. MultiCore keeps no copy for libraries (svc_board.h: this library keeps its own).
@@ -313,15 +284,15 @@ static int g_sys = -1, g_ppm = 0;                 // the host brought the pictur
 int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
 {
     int sys = V(K_SYSMODE);
-    c64_bus_wr(C64U_BUS_SCANLINES, (uint8_t)V(K_SCANLINES, 1));
+    HW_WR(c64_scanlines_on, (uint8_t)V(K_SCANLINES, 1));
     int dig = V(K_DIGITAL);
-    c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_HDMI_ENABLE, dig == 2 ? 0 : 1);  // Auto: the screen is HDMI unless the user says DVI (the EDID tells nothing a DVI monitor does not also say)
-    uint8_t format = V(K_ANALOG) ? VIDEO_FMT_RGB_OUTPUT : 0;
+    HW_WR(u64_connectors_hdmi_enable, dig == 2 ? 0 : 1);  // Auto: the screen is HDMI unless the user says DVI (the EDID tells nothing a DVI monitor does not also say)
+    uint8_t format = V(K_ANALOG) ? DRV_c64_video_format_rgb_output_MASK : 0;
     if (sys < 0 || sys >= (int)(sizeof(color_timing) / sizeof(color_timing[0]))) {
         snprintf(o.msg, o.msglen, "No colour timing for system mode %d", sys);
         return OPE_FAILED;
     }
-    c64_bus_wr(C64U_BUS_PHASE_INCR, color_timing[sys].phase_inc);
+    HW_WR(c64_phase_incr, color_timing[sys].phase_inc);
     int ppm = VN(K_PPM, 0);                           // the colour clock's offset, -100 .. 100 ppm
     c64_video_format((uint8_t)(color_timing[sys].mode_bits | format));
     const SvcBoard *b = g_api->board;
@@ -337,7 +308,6 @@ int fx_video(CoreCtx *, const OpArgs &, OpOut &o)
         }
         g_ppm = 0;
         g_sys = sys;
-        set_resample_filter(color_timing[sys].audio_div);
     }
     if (ppm != g_ppm && b) {
         b->video_set_pll(sys, ppm);                   // the colour clock's offset goes with the PLL setting (Gideon's setPllOffset is empty), then the HDMI PLL's reset
@@ -425,14 +395,20 @@ static uint8_t mixer_side(uint8_t source_raw, uint8_t master_raw, uint16_t pan)
 static const uint8_t spare_vol[3] = { 11, 4, 4 };
 static const uint8_t spare_pan[3] = { 7, 5, 5 };
 
+// The two mixer windows (desc.toml: audio_mixer, speaker_mixer): 10 channels of two bytes (right, left), and the speaker's gain, of which
+// ultimate_sys.vhd:1245-1268 decodes the bytes +0x00, +0x01, +0x04 and +0x05.
+#define MIXER_CHANNELS 10
+#define SPEAKER_GAINS 4
+static const uint8_t speaker_gain[SPEAKER_GAINS] = { 0x00, 0x01, 0x04, 0x05 };
+
 static void write_mixer(void)
 {
-    volatile uint8_t *mixer = c64u_win(C64U_W_AUDIO_MIXER);
+    volatile uint8_t *mixer = c64u_win(WIN_AUDIO_MIXER);
     if (!mixer) {
         return;
     }
     uint8_t master = volume_ctrl[V(K_MASTER, 24)];
-    for (int i = 0; i < C64U_MIXER_CHANNELS; i++) {
+    for (int i = 0; i < MIXER_CHANNELS; i++) {
         int vol = i < 7 ? V(K_VOL0 + i, i == 6 ? 11 : 24) : spare_vol[i - 7];
         int pan = i < 7 ? V(K_PAN0 + i, 5) : spare_pan[i - 7];
         uint8_t src = volume_ctrl[vol];
@@ -441,20 +417,20 @@ static void write_mixer(void)
     }
 }
 
-// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0) and setSpeakerMixer :1749-1765. The bitstream decodes four bytes of the speaker mixer
-// (c64u_speaker_gain) and plays the mono mix at the highest of them, so the one speaker volume goes to all four; the per-source volumes of the FW are
-// not decoded and stay out.
+// FW u64_config.cc:1445-1447 (U2PIO_SPEAKER_EN b0: speaker_enable) and setSpeakerMixer :1749-1765. ultimate_sys.vhd:1245-1268 decodes four bytes
+// of the speaker mixer (speaker_gain) and the bitstream plays the mono mix at the highest of them, so the one speaker volume goes to all four; the
+// per-source volumes of the FW are not decoded and stay out.
 static void write_speaker(void)
 {
     bool on = V(K_SPK_EN, 1) != 0;
-    c64u_win_wr(C64U_W_SPEAKER_EN, C64U_SPEAKER_EN, on ? 1 : 0);
-    volatile uint8_t *mixer = c64u_win(C64U_W_SPEAKER_MIXER);
+    HW_WR(speaker_enable_ctrl, on ? DRV_speaker_enable_ctrl_on_MASK : 0);
+    volatile uint8_t *mixer = c64u_win(WIN_SPEAKER_MIXER);
     if (!mixer) {
         return;
     }
     uint8_t vol = on ? volume_ctrl[V(K_SPK0, 0)] : 0;
-    for (int i = 0; i < C64U_SPEAKER_GAINS; i++) {
-        mixer[c64u_speaker_gain[i]] = vol;
+    for (int i = 0; i < SPEAKER_GAINS; i++) {
+        mixer[speaker_gain[i]] = vol;
     }
 }
 
@@ -492,10 +468,10 @@ void u64cfg_power_on_keys(void)
 void u64cfg_mute_sids(void)
 {
     for (int i = 0; i < 8; i++) {                                   // the four SIDs' channels, both sides
-        c64u_win_wr(C64U_W_AUDIO_MIXER, (uint32_t)i, 0);
+        c64u_win_wr(WIN_AUDIO_MIXER, (uint32_t)i, 0);
     }
-    for (int i = 0; i < C64U_SPEAKER_GAINS; i++) {                  // the speaker's four bytes, all of them inside those channels
-        c64u_win_wr(C64U_W_SPEAKER_MIXER, c64u_speaker_gain[i], 0);
+    for (int i = 0; i < SPEAKER_GAINS; i++) {                       // the speaker's four bytes
+        c64u_win_wr(WIN_SPEAKER_MIXER, speaker_gain[i], 0);
     }
 }
 
@@ -573,17 +549,17 @@ static void write_sid_addressing(void)
     if (V(K_MIRROR, 1)) {
         auto_mirror(base, mask, split, 4);
     }
-    c64_bus_wr(C64U_BUS_SID1_BASE, base[0]);
-    c64_bus_wr(C64U_BUS_SID2_BASE, base[1]);
-    c64_bus_wr(C64U_BUS_EMUSID1_BASE, base[2]);
-    c64_bus_wr(C64U_BUS_EMUSID2_BASE, base[3]);
-    c64_bus_wr(C64U_BUS_SID1_MASK, mask[0]);
-    c64_bus_wr(C64U_BUS_SID2_MASK, mask[1]);
-    c64_bus_wr(C64U_BUS_EMUSID1_MASK, mask[2]);
-    c64_bus_wr(C64U_BUS_EMUSID2_MASK, mask[3]);
-    c64_bus_wr(C64U_BUS_STEREO_ADDRSEL, (uint8_t)V(K_STEREO));
+    HW_WR_I(c64_sid_addr_base, 0, base[0]);
+    HW_WR_I(c64_sid_addr_base, 1, base[1]);
+    HW_WR_I(c64_sid_addr_base, 2, base[2]);
+    HW_WR_I(c64_sid_addr_base, 3, base[3]);
+    HW_WR_I(c64_sid_addr_mask, 0, mask[0]);
+    HW_WR_I(c64_sid_addr_mask, 1, mask[1]);
+    HW_WR_I(c64_sid_addr_mask, 2, mask[2]);
+    HW_WR_I(c64_sid_addr_mask, 3, mask[3]);
+    HW_WR(c64_sid_sock_stereo_addrsel, (uint8_t)V(K_STEREO));
     g_stereo_bak = (uint8_t)V(K_STEREO);
-    c64_bus_wr(C64U_BUS_EMUSID_SPLIT, (uint8_t)V(K_USPLIT));
+    HW_WR(c64_sid_cfg_split, (uint8_t)V(K_USPLIT));
     memcpy(g_base, base, 4);
     memcpy(g_mask, mask, 4);
     memcpy(g_split, split, 4);
@@ -626,17 +602,17 @@ static void sr_wr(int s, uint32_t r, uint8_t v) { c64_poke(0xD400u + 0x100u * (u
 static void detect_addresses(void)
 {
     // FW S_SetupDetectionAddresses: socket 1 at $D400, socket 2 at $D500, the UltiSIDs out of the way
-    c64_bus_wr(C64U_BUS_SID1_BASE, 0x40);
-    c64_bus_wr(C64U_BUS_SID2_BASE, 0x50);
-    c64_bus_wr(C64U_BUS_SID1_MASK, 0xF0);
-    c64_bus_wr(C64U_BUS_SID2_MASK, 0xF0);
-    c64_bus_wr(C64U_BUS_EMUSID1_BASE, 0x60);
-    c64_bus_wr(C64U_BUS_EMUSID2_BASE, 0x60);
-    c64_bus_wr(C64U_BUS_EMUSID1_MASK, 0xFE);
-    c64_bus_wr(C64U_BUS_EMUSID2_MASK, 0xFE);
-    c64_bus_wr(C64U_BUS_SID1_EN, 1);
-    c64_bus_wr(C64U_BUS_SID2_EN, 1);
-    c64_bus_wr(C64U_BUS_STEREO_ADDRSEL, 0);
+    HW_WR_I(c64_sid_addr_base, 0, 0x40);
+    HW_WR_I(c64_sid_addr_base, 1, 0x50);
+    HW_WR_I(c64_sid_addr_mask, 0, 0xF0);
+    HW_WR_I(c64_sid_addr_mask, 1, 0xF0);
+    HW_WR_I(c64_sid_addr_base, 2, 0x60);
+    HW_WR_I(c64_sid_addr_base, 3, 0x60);
+    HW_WR_I(c64_sid_addr_mask, 2, 0xFE);
+    HW_WR_I(c64_sid_addr_mask, 3, 0xFE);
+    HW_WR(c64_sid_sock_socket1_en, 1);
+    HW_WR(c64_sid_sock_socket2_en, 1);
+    HW_WR(c64_sid_sock_stereo_addrsel, 0);
     wait_ms(1);
 }
 
@@ -816,13 +792,13 @@ static bool sock_run(int s, void (*fn)(int))
     if (!c64_window()) {
         return false;
     }
-    bool was = (c64_cart_rd(C64U_CART_STOP) & C64U_STOPPED) != 0;
+    bool was = (CART_RD(stop) & DRV_cart_regs_stop_has_stopped_MASK) != 0;
     if (!was) {
         c64_stop(true);
         uint32_t t0 = now_ms();
-        while (!(c64_cart_rd(C64U_CART_STOP) & C64U_STOPPED) && now_ms() - t0 < 500) {
+        while (!(CART_RD(stop) & DRV_cart_regs_stop_has_stopped_MASK) && now_ms() - t0 < 500) {
         }
-        if (!(c64_cart_rd(C64U_CART_STOP) & C64U_STOPPED)) {
+        if (!(CART_RD(stop) & DRV_cart_regs_stop_has_stopped_MASK)) {
             c64_stop(false);
             return false;
         }
@@ -830,8 +806,8 @@ static bool sock_run(int s, void (*fn)(int))
     detect_addresses();
     fn(s);
     write_sid_addressing();
-    c64_bus_wr(C64U_BUS_SID1_EN, V(K_S1_EN) ? 1 : 0);
-    c64_bus_wr(C64U_BUS_SID2_EN, V(K_S2_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_socket1_en, V(K_S1_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_socket2_en, V(K_S2_EN) ? 1 : 0);
     if (!was) {
         c64_stop(false);
     }
@@ -1230,15 +1206,15 @@ static void sid_types_detect(void)
     g_detected = true;
     c64_mode_reset(false);                                            // C64_MODE_UNRESET
     uint32_t t0 = now_ms();
-    while ((c64_cart_rd(C64U_CART_RESET_SEEN) & C64U_RESET_SEEN) && now_ms() - t0 < 500) {     // while c64_reset_detect()
+    while ((CART_RD(clock_detect) & DRV_cart_regs_clock_detect_reset_seen_MASK) && now_ms() - t0 < 500) {     // while c64_reset_detect()
     }
-    c64_cart_wr(C64U_CART_STOP_MODE, C64U_STOP_COND_FORCE);
+    CART_WR(stop_mode, DRV_cart_regs_stop_mode_force);
     c64_stop(true);
     t0 = now_ms();
-    while (!(c64_cart_rd(C64U_CART_STOP) & C64U_STOPPED) && now_ms() - t0 < 500) {
+    while (!(CART_RD(stop) & DRV_cart_regs_stop_has_stopped_MASK) && now_ms() - t0 < 500) {
     }
     int t[2] = { 0, 0 };
-    bool stopped = (c64_cart_rd(C64U_CART_STOP) & C64U_STOPPED) != 0;
+    bool stopped = (CART_RD(stop) & DRV_cart_regs_stop_has_stopped_MASK) != 0;
     if (stopped) {
         detect_sids(t);
     } else {
@@ -1291,15 +1267,15 @@ static void write_sid_sockets(void)
             lib_logf("[u64cfg] SID socket %d: the board refused its settings (%d)", s + 1, rc);
         }
     }
-    c64_bus_wr(C64U_BUS_SID1_EN, V(K_S1_EN) ? 1 : 0);
-    c64_bus_wr(C64U_BUS_SID2_EN, V(K_S2_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_socket1_en, V(K_S1_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_socket2_en, V(K_S2_EN) ? 1 : 0);
 }
 
-// The reSID8 filter of the TRX block (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): page 0 0x040-0x04D, written only
-// when CAPS3 (0x006) b0 says the SID is the 8-SID reDIP. Byte registers, one at a time.
+// The reSID8 filter (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the block resid8 (the SDK's map sid), written
+// only when ident's caps3 says the SID is the 8-SID reDIP.
 static bool trx_resid8(void)
 {
-    return g_api->trx && g_api->trx->caps && (trx_rd(0x006) & 0x01);
+    return g_api->io && (DRV_ident_caps3_RD() & DRV_ident_caps3_resid8_MASK);
 }
 
 static void trx_resid8_filter(int u, uint8_t src, uint8_t auto_bits, int base, int offset)
@@ -1310,18 +1286,16 @@ static void trx_resid8_filter(int u, uint8_t src, uint8_t auto_bits, int base, i
     u &= 1;
     base &= 0x1FF;
     offset &= 0x7FF;
-    trx_wr(0x040 + (uint32_t)u, src & 3);                              // RS8_FCSEL
-    trx_wr(0x042 + (uint32_t)u, auto_bits & 3);                        // RS8_AUTO
-    trx_wr(0x044 + 4u * (uint32_t)u, (uint8_t)base);                   // RS8_BASE, 9 bit little endian
-    trx_wr(0x045 + 4u * (uint32_t)u, (uint8_t)(base >> 8));
-    trx_wr(0x046 + 4u * (uint32_t)u, (uint8_t)offset);                 // RS8_OFFSET, 11 bit little endian
-    trx_wr(0x047 + 4u * (uint32_t)u, (uint8_t)(offset >> 8));
+    DRV_resid8_fcsel_WR(u, src & 3);
+    DRV_resid8_auto_WR(u, auto_bits & 3);
+    DRV_resid8_curve_base_WR(u, (uint16_t)base);                       // 9 bit, one 16-bit write: low byte first
+    DRV_resid8_curve_offset_WR(u, (uint16_t)offset);                   // 11 bit
 }
 
 static void trx_resid8_bypass(int u, bool bypass)
 {
     if (trx_resid8()) {
-        trx_wr(0x04C + (uint32_t)(u & 1), bypass ? 1 : 0);             // RS8_BYPASS
+        DRV_resid8_bypass_WR(u & 1, bypass ? 1 : 0);
     }
 }
 
@@ -1333,17 +1307,17 @@ static void write_ultisid(void)
         Resid8Plan p = resid8_plan(V(u ? K_U2_FILTER : K_U1_FILTER), V(u ? K_U2_RES : K_U1_RES), V(u ? K_U2_DIGI : K_U1_DIGI),
                                    VN(u ? K_U2_BASE : K_U1_BASE, 245), VN(u ? K_U2_OFFS : K_U1_OFFS, -780), V(u ? K_U2_FON : K_U1_FON) == 0);
         if (u == 0) {
-            c64_bus_wr(C64U_BUS_EMUSID1_RES, p.res_reg);
-            c64_bus_wr(C64U_BUS_EMUSID1_DIGI, p.digi_reg);
+            HW_WR(c64_sid_cfg_res1, p.res_reg);
+            HW_WR(c64_sid_cfg_digi1, p.digi_reg);
         } else {
-            c64_bus_wr(C64U_BUS_EMUSID2_RES, p.res_reg);
-            c64_bus_wr(C64U_BUS_EMUSID2_DIGI, p.digi_reg);
+            HW_WR(c64_sid_cfg_res2, p.res_reg);
+            HW_WR(c64_sid_cfg_digi2, p.digi_reg);
         }
         trx_resid8_filter(u, p.src, p.auto_bits, p.base, p.offset);
         trx_resid8_bypass(u, p.bypass != 0);
     }
-    c64_bus_wr(C64U_BUS_EMUSID1_WAVES, (uint8_t)V(K_U1_WAVES));
-    c64_bus_wr(C64U_BUS_EMUSID2_WAVES, (uint8_t)V(K_U2_WAVES));
+    HW_WR(c64_sid_cfg_waves1, (uint8_t)V(K_U1_WAVES));
+    HW_WR(c64_sid_cfg_waves2, (uint8_t)V(K_U2_WAVES));
 }
 
 int fx_sid(CoreCtx *, const OpArgs &, OpOut &)
@@ -1351,7 +1325,7 @@ int fx_sid(CoreCtx *, const OpArgs &, OpOut &)
     write_sid_sockets();
     write_sid_addressing();
     write_ultisid();
-    c64_bus_wr(C64U_BUS_PADDLE_EN, (uint8_t)V(K_PADDLE, 1));
+    HW_WR(c64_sid_sock_paddle_en, (uint8_t)V(K_PADDLE, 1));
     return OPE_OK;
 }
 
@@ -1437,13 +1411,11 @@ const char *state_fsid2_new(CoreCtx *) { return g_fsid[1].dev && g_fsid[1].rev >
 
 static void unmap_all_sids(void)
 {
-    static const uint8_t base_reg[4] = { C64U_BUS_SID1_BASE, C64U_BUS_SID2_BASE, C64U_BUS_EMUSID1_BASE, C64U_BUS_EMUSID2_BASE };
-    static const uint8_t mask_reg[4] = { C64U_BUS_SID1_MASK, C64U_BUS_SID2_MASK, C64U_BUS_EMUSID1_MASK, C64U_BUS_EMUSID2_MASK };
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++) {                                   // socket 1, socket 2, UltiSID 1, UltiSID 2
         g_base[i] = UNMAPPED_BASE;
         g_mask[i] = UNMAPPED_MASK;
-        c64_bus_wr(base_reg[i], UNMAPPED_BASE);
-        c64_bus_wr(mask_reg[i], UNMAPPED_MASK);
+        HW_WR_I(c64_sid_addr_base, i, UNMAPPED_BASE);
+        HW_WR_I(c64_sid_addr_mask, i, UNMAPPED_MASK);
     }
 }
 
@@ -1486,12 +1458,8 @@ static bool set_sid_address(int slot, bool single, uint8_t actual_type, uint8_t 
         }
         g_base[slot] = base;
         g_mask[slot] = (uint8_t)(0xFE & ~other);
-        switch (slot) {
-        case 0: c64_bus_wr(C64U_BUS_SID1_BASE, g_base[0]); c64_bus_wr(C64U_BUS_SID1_MASK, g_mask[0]); break;
-        case 1: c64_bus_wr(C64U_BUS_SID2_BASE, g_base[1]); c64_bus_wr(C64U_BUS_SID2_MASK, g_mask[1]); break;
-        case 2: c64_bus_wr(C64U_BUS_EMUSID1_BASE, g_base[2]); c64_bus_wr(C64U_BUS_EMUSID1_MASK, g_mask[2]); break;
-        case 3: c64_bus_wr(C64U_BUS_EMUSID2_BASE, g_base[3]); c64_bus_wr(C64U_BUS_EMUSID2_MASK, g_mask[3]); break;
-        }
+        HW_WR_I(c64_sid_addr_base, slot, g_base[slot]);
+        HW_WR_I(c64_sid_addr_mask, slot, g_mask[slot]);
         return true;
     }
     switch (slot) {                                                 // the odd ones: the existing mapping of the other channel
@@ -1506,17 +1474,17 @@ static bool set_sid_address(int slot, bool single, uint8_t actual_type, uint8_t 
 // access_socket_post: the registers go back to the mapping so far
 static void restore_detection_addresses(void)
 {
-    c64_bus_wr(C64U_BUS_SID1_BASE, g_base[0]);
-    c64_bus_wr(C64U_BUS_SID2_BASE, g_base[1]);
-    c64_bus_wr(C64U_BUS_SID1_MASK, g_mask[0]);
-    c64_bus_wr(C64U_BUS_SID2_MASK, g_mask[1]);
-    c64_bus_wr(C64U_BUS_EMUSID1_BASE, g_base[2]);
-    c64_bus_wr(C64U_BUS_EMUSID2_BASE, g_base[3]);
-    c64_bus_wr(C64U_BUS_EMUSID1_MASK, g_mask[2]);
-    c64_bus_wr(C64U_BUS_EMUSID2_MASK, g_mask[3]);
-    c64_bus_wr(C64U_BUS_SID1_EN, V(K_S1_EN) ? 1 : 0);
-    c64_bus_wr(C64U_BUS_SID2_EN, V(K_S2_EN) ? 1 : 0);
-    c64_bus_wr(C64U_BUS_STEREO_ADDRSEL, g_stereo_bak);
+    HW_WR_I(c64_sid_addr_base, 0, g_base[0]);
+    HW_WR_I(c64_sid_addr_base, 1, g_base[1]);
+    HW_WR_I(c64_sid_addr_mask, 0, g_mask[0]);
+    HW_WR_I(c64_sid_addr_mask, 1, g_mask[1]);
+    HW_WR_I(c64_sid_addr_base, 2, g_base[2]);
+    HW_WR_I(c64_sid_addr_base, 3, g_base[3]);
+    HW_WR_I(c64_sid_addr_mask, 2, g_mask[2]);
+    HW_WR_I(c64_sid_addr_mask, 3, g_mask[3]);
+    HW_WR(c64_sid_sock_socket1_en, V(K_S1_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_socket2_en, V(K_S2_EN) ? 1 : 0);
+    HW_WR(c64_sid_sock_stereo_addrsel, g_stereo_bak);
 }
 
 // U64Config::SetSidType (the socket's chip is told its type): FW's device classes by the detected type
@@ -1532,8 +1500,8 @@ static void set_sid_type(int slot, uint8_t sid_type)
     c64_ram_memonly(false);                                         // the chips are on the bus
     detect_addresses();                                             // access_socket_pre
     int s = slot;                                                   // socket 1 at $D400, socket 2 at $D500
-    uint8_t pre_mode = c64_cart_rd(C64U_CART_MODE);
-    c64_cart_wr(C64U_CART_MODE, C64U_MODE_ULTIMAX);                 // force the I/O range on
+    uint8_t pre_mode = CART_RD(mode);
+    CART_WR(mode, DRV_cart_regs_mode_ultimax);                      // force the I/O range on
     int t = sid_type - 1;                                           // received 1 = 6581, 2 = 8580 => 0 and 1
     switch (chip) {
     case 3:                                                         // FPGASID
@@ -1572,7 +1540,7 @@ static void set_sid_type(int slot, uint8_t sid_type)
         wait_ms(5);
         break;
     }
-    c64_cart_wr(C64U_CART_MODE, pre_mode);
+    CART_WR(mode, pre_mode);
     restore_detection_addresses();                                  // access_socket_post
 }
 
@@ -1622,7 +1590,7 @@ static void set_mixer_auto_sid(const uint8_t *slots, int count)
     for (int i = 0; i < 4; i++) {
         vol[i] = combine_gain(volume_ctrl[sel[i]], master);
     }
-    volatile uint8_t *mixer = c64u_win(C64U_W_AUDIO_MIXER);
+    volatile uint8_t *mixer = c64u_win(WIN_AUDIO_MIXER);
     if (!mixer) {
         return;
     }
@@ -1703,8 +1671,8 @@ static const uint8_t c_iec_connectors[] = { 0x70, 0x60, 0x30, 0x50 };      // 4:
 int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
 {
     uint8_t en = V(K_USERPORT, 1) ? 3 : 0;
-    c64u_win_wr(C64U_W_U64_USERPORT, C64U_U64_USERPORT_EN, en);
-    c64u_win_wr(C64U_W_U64_PWM_DUTY, C64U_U64_PWM_DUTY, en ? 0xD8 : 0x00);
+    HW_WR(u64_userport_en, en);
+    HW_WR(u64_pwm_duty, en ? 0xD8 : 0x00);
     // turbo (setCpuSpeed)
     uint8_t prefReg, turboRegs;
     int tc = V(K_TURBO);
@@ -1715,11 +1683,11 @@ int fx_misc(CoreCtx *, const OpArgs &, OpOut &)
         prefReg = (uint8_t)(V(K_SPEED) | (V(K_BADLINE, 1) << 7));
         turboRegs = (uint8_t)(speedregs_regvalues[tc] + (V(K_SUPERCPU) ? 0x02 : 0x00));
     }
-    c64_bus_wr(C64U_BUS_TURBOREGS_EN, turboRegs);
-    c64_bus_wr(C64U_BUS_SPEED_PREFER, prefReg);
-    c64_bus_wr(C64U_BUS_SPEED_UPDATE, 1);
+    HW_WR(c64_turbo_en_regs, turboRegs);
+    HW_WR(c64_bus_speed_prefer, prefReg);
+    HW_WR(c64_bus_speed_update, 1);
     // serial bus, burst mode, the parallel cable
-    c64u_win_wr(C64U_W_U64_HDMI_CONNECTORS, C64U_U64_INT_CONNECTORS, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
+    HW_WR(u64_connectors_internal, (uint8_t)(V(K_PARCABLE) | (V(K_BURST) << 1) | c_iec_connectors[V(K_IECMODE)]));
     // the case LEDs' sources: the low nibble LED 1 ("LED Select Top"), the high nibble LED 2 ("LED Select Bot"); a base without the member writes nothing
     const SvcBoard *b = g_api->board;
     if (SVC_HAS(SvcBoard, b, case_led_select)) {

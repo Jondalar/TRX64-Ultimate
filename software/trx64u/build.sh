@@ -6,7 +6,8 @@
 # The SDK is .sdk/trx64-sdk-<sdk_version>/; its VERSION must name the pinned commit, base API and hashes (a dev build
 # and the release of the same version unpack to the same folder).
 # Each library is built in build/<name>/ from copies of its sources (lib.mk writes its objects next to the sources,
-# and the monitor's engine is trxmon's own folder in the application submodule, D4). In the build image
+# and the monitor's engine is trxmon's own folder in the application submodule, D4); the driver table of c64_basic's
+# TOML A (gateware/c64_basic.toml) is made there by the SDK's descrec.py (api.md 6.17, SDK 0.4.0 and later). In the build image
 # (riscv32-unknown-elf-g++ on PATH) it runs make directly; elsewhere it runs itself in the u64-build-env container.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -57,6 +58,6 @@ for lib in $LIBS; do
     fi
     echo "== $lib"
     make -C "$B" SDK="$SDK" APPSDK="$APP/software/appsdk/include" APPLOADER="$APP/software/app_loader" \
-        RV_PREFIX=riscv32-unknown-elf- || rc=1
+        GATEWARE="$HERE/gateware" RV_PREFIX=riscv32-unknown-elf- || rc=1
 done
 exit $rc

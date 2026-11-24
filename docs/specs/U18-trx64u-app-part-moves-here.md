@@ -718,3 +718,44 @@ Nothing decided yet.
     fields differ. Open for the move: the stages lint, apptests and emu (rig from the pinned `t239.3` commit, sorting of the
     18 apptest sources ours), trx64u's peak heap (D15: measure, keep in our core TOML `heap`, `pack_cor.sh` passes it),
     MultiCore's base image without core code (announced).
+- **2026-11-24: P1-7 of MultiCore's T239.3 D28 plan: c64_basic's TOML A, our libraries on its driver table** (Alex's go
+  2026-11-24; MultiCore advises; the SDK tools used are 0.4.0's, `c5ca4556`, an unpinned copy, `sdk.pin` stays 0.3.0).
+  - `software/trx64u/gateware/c64_basic.toml` (record version 7) is written from what the RTL of `designs/c64_basic`
+    decodes, each block with the lines that decode it; one block per register range and driver (D34). 33 blocks. Base:
+    `ident`, `resid8` (map `sid`), `c64cart` (map `c64cart`), `cart_regs`, `drive_a`, `cmd_if` (map `uci`), `dma` (map
+    `dma`), `gcr_coder` (map `gcr_coder`), `c64_video`, `c64_dma_mode`, `c64_joy`, `c64_debug`, `c64_roms`. Core:
+    `trx_gate`, `trx_dbg_run`, `trx_turbo`, `trx_statebus`, `trx_engine`, `trx_debug` (with the drive's half), `trx_pixel`,
+    `trx_text`, `trx_slot`, `speaker_enable`, `u64_userport`, `u64_connectors`, `u64_pwm`, `c64_scanlines`,
+    `c64_turbo_en`, `c64_phase`, `c64_sid_addr`, `c64_sid_sock`, `c64_sid_cfg`, `c64_bus`. No resampler: nothing decodes
+    0x10100580. `cart_regs` and `drive_a` carry their properties themselves, because the SDK's maps differ from this RTL:
+    `c64cart_regs` has no `stop_mode` and no `clock_detect` and calls rw registers write-only; `cbm1541` has the WD177x
+    registers from +0x1800 (no write reaches them here), `side` (reads 0) and `drivetype` (only with `g_multi_mode`).
+  - The libraries: `base/` and `ring/` take every address from `drvtab.h` (`HW_RD`/`HW_WR`; the base's `cart_regs` through
+    `io.cart_rd`/`cart_wr` and the ROMs through `io.rom_*`, the offsets from the table); both `c64u_regs.h` are deleted.
+    `rtl_check.py lint-src base ring monitor --toml-a gateware/c64_basic.toml --maps <SDK>/maps --allow
+    trx_sha256.c:0x106aa070u`: no literal I/O address in 48 files. Fixed on the way: the slot status is read as one 32-bit
+    word (the byte reads of +6 and +7 had no byte 0 latch) and ROM_WR_EN written as one (a byte write of +0 never
+    committed); the speaker enable and the U64 page's bytes now reach their registers (as windows at 0xA0xxxxxx they went
+    to the memory path, bit 28 clear); the resampler code and its tables are gone; ring's SH_CTRL accesses are gone
+    (trx_sys.v decodes no word 0x1400: no session register in c64_basic).
+  - `base/desc.toml`: record 6's data and four windows; `speaker_enable`, `u64_userport`, `u64_hdmi_connectors` and
+    `u64_pwm_duty` became TOML A blocks, `resampler` has none; its wrong comments (addresses "the firmware's", the
+    registers "in c64u_regs.h") are fixed.
+  - rtl_check of SDK 0.4.0 on the whole file: `an RTL pattern I do not know: designs/c64_basic/trx_sys.v:267: a genvar
+    construct`. Per block (each with `ident`): 20 blocks, 66 properties agree (`rtl_check.py check --design
+    designs/c64_basic --toml-a <those 20> --maps <SDK>/maps`, 21 s); 13 the tool cannot follow: the seven of `trx_sys.v`
+    (genvar), `trx_pixel` and `trx_text` (`pix_layer.v:80`), `drive_a` (`c1541_drive.vhd:272` if generate), `cmd_if`
+    (`synchronizer_gzw.vhd:48` attribute), `gcr_coder` (`gcr_codec.vhd:63` for generate), `speaker_enable` (`u2p_io`: "a
+    record io_resp used as a value"). The V branch's rtl_check (`t239.3-v`) also says the 13 core blocks in the U2P, U64 and
+    C64 I/O pages are "not handed over to the core by the RTL".
+  - Built: `base/` and `ring/` compile and pack on SDK 0.3.0's headers with `drvtab.h` made by 0.4.0's `descrec.py drivers`
+    beforehand (`trx64u` image 86,260 bytes, `ring` 131,404); `monitor` unchanged.
+  - Open, not ours to decide: the four windows `audio_mixer`, `speaker_mixer`, `c64_palette`, `hdmi_palette` (Alex: they lie
+    over blocks MultiCore's host TOML A gives the base; `hdmi_palette`, translated to 0x10145000, lands in ultimate_sys's
+    overlay region, and the C64 palette decodes RGB writes only); `resid8` is a base block by MultiCore's plan (the SID
+    library), but `u64cfg.cc` writes it and the SID library has no call for it (0.3.0 and 0.4.0); the monitor's engine
+    (trxmon, submodule, D4) still uses `api->trx->regs` and its own offsets; whether the 13 core blocks in the ultimate_sys
+    pages may stay core blocks (the V branch's check).
+  - Waits for the pin switch to SDK 0.4.0 (with P2-5, P3-3, P4-1): `sdk.pin`, `build.sh` green on the pin (its `descrec.py
+    drivers` and `maps/`), `rtl_check` and `lint-src` in our lint stage (0.3.0 has no `rtl_check.py`; `check` green needs
+    the 13 blocks followable), the TOML A in the `.cor` (0.4.0 ships no app image), a CI run.

@@ -12,7 +12,7 @@
 #include "c64cart_api.h"
 #include "cbm1541_api.h"
 #include "uci_api.h"
-#include "c64u_regs.h"
+#include "drvtab.h"
 
 // Set by lib_register (lib_ring.cc) before anything else runs.
 extern const LibApi *g_api;
@@ -55,46 +55,47 @@ int64_t r_strtoll(const char *s);              // decimal, an optional sign
 // At most n characters of s into out (outlen bytes, NUL included): a string precision without a format.
 void r_copy(char *out, int outlen, const char *s, size_t n);
 
-// ---- the TRX IO block (FW io/c64/trx_io.h, trx_io.cc) ----------------------------------------------------------------------------------------------------
-// api->trx->regs is the block, byte wide; the register macros of this library are offsets into it (TRX_IO_BASE 0). Without the block (api->trx null)
-// every read gives 0 and every write is dropped.
-#define TRX_IO_BASE        0u
-#define TRX_ID             (TRX_IO_BASE + 0x000)
-#define TRX_CAPS           (TRX_IO_BASE + 0x004)
-#define TRX_CAPS2          (TRX_IO_BASE + 0x005)
-#define TRX_CAPS_VIDEO     0x40 // page 6: pixel layer and still capture
-#define TRX_CAPS2_F4       0x01 // the drain writes stream 2's F4 only after an F3 marker
-#define TRX_CAPS2_APPLY    0x20 // b5: the engine applies stream 0 records itself (AP_START/AP_COUNT/AP_CMD)
-#define TRX_CAPS2_TURBO    0x40 // b6: the turbo engine (T29): TURBO_STAT, TURBO_W1/W2
-#define TRX_CAPS2_TRACE    0x80 // b7: the instruction trace former (LOG_CTRL b4/b9, LOG_CNT[3], T21 §4.11.1)
-#define TRX_TURBO_STAT     (TRX_IO_BASE + 0x140) // b30 engine on, b28 ran since cleared, b22:16 CPU cycles per PHI2
-#define TRX_TURBO_CTRL     (TRX_IO_BASE + 0x144) // W b0 clears "ran"
-#define TRX_TURBO_W1       (TRX_IO_BASE + 0x148) // {$D031 b31:24, $D030 bit 0 b11, enable word b10:8, PREFER b7:0}
-#define TRX_TURBO_W2       (TRX_IO_BASE + 0x14C) // reset hold left in PHI2 cycles
-#define TRX_TURBO_ON       (1u << 30)
-#define TRX_TURBO_RAN      (1u << 28)
+// ---- the registers: the driver table of c64_basic's TOML A (drvtab.h from ../gateware/c64_basic.toml; MultiCore T239.3 D31, api.md 6.17) -----------
+// DRV_<block>_<property>_RD() / _WR(v), a run's _RD(i) / _WR(i, v), _<field>_MASK / _SHIFT, _<state>. HW_RD, HW_RD_I and HW_WR take block and
+// property as one name and touch the register only once the base has handed the core over (g_api->io); before that a read gives 0 and a write is
+// dropped. A 32-bit register is one access: the bus converter makes it four byte accesses, byte 0 first, inside the one instruction (byte 3 commits a
+// write, byte 0 latches a read: trx_sys.v), so no other task's access comes between them.
+#define HW_RD(bp) (g_api->io ? DRV_##bp##_RD() : 0)
+#define HW_RD_I(bp, i) (g_api->io ? DRV_##bp##_RD(i) : 0)
+#define HW_WR(bp, v)                                                                                                                         \
+    do {                                                                                                                                       \
+        if (g_api->io) {                                                                                                                       \
+            DRV_##bp##_WR(v);                                                                                                                  \
+        }                                                                                                                                      \
+    } while (0)
+// A 32-bit register by its address, DRV_<block>_<property>_ADDR of an "r" or "rw" property, for a helper that waits on one (ring.cc wait_reg).
+static inline uint32_t hw_rd32(uint32_t addr) { return g_api->io ? *DRV_PTR(uint32_t, addr) : 0; }
+// The offset of a property in its block, for the io group's calls that take one (cart_rd, cart_wr).
+#define DRV_OFF(b, p) ((uint32_t)(DRV_##b##_##p##_ADDR - DRV_##b##_ADDR))
 
-uint8_t trx_io_caps(void);                     // CAPS, 0 without the block
-uint8_t trx_rd8(uint32_t reg);
-void trx_wr8(uint32_t reg, uint8_t v);
-// The 32-bit registers over the byte bus: writing byte 3 commits bytes 0-2, reading byte 0 takes bytes 1-3; the four accesses are one critical section
-// (sync.enter / sync.leave), as the firmware's trx_io_read32 / trx_io_write32 make them.
-uint32_t trx_io_read32(uint32_t reg);
-void trx_io_write32(uint32_t reg, uint32_t v);
-// The slim core: TX_CTRL (page 6, +0C0) b31:24 reads 2 or more; false without page 6.
+uint8_t trx_io_caps(void);                     // ident.caps, 0 before the hand-over
+// The slim core: the text layer's version (trx_text.ctrl b31:24) reads 2 or more; false without the video layers (ident.caps video).
 bool trx_io_slim(void);
 
-// ---- the C64 machine's registers (c64u_regs.h) through the io group (g_api->io); without the group a read gives 0 and a write is dropped -------------
-uint8_t io_cart_rd(uint32_t reg);                // the cartridge-port control block
-void io_cart_wr(uint32_t reg, uint8_t v);
-uint8_t io_bus_rd(uint32_t off);                 // the bus bridge's block
-void io_stop(bool on);                           // C64_STOP: the app's stop holds the machine
-void io_memonly(bool on);                        // C64_DMA_MEMONLY: the memory window sees RAM only (true) or the C64's memory map
+// The ITU capability bits of board.fpga_caps (the firmware's itu.h CAPAB_*; a library keeps its own, api.md 4.16.2.1).
+#define CAPAB_COMMAND_INTF 0x00040000u
+#define CAPAB_SAMPLER      0x00200000u
+#define CAPAB_EEPROM       0x00400000u
+
+// ---- the base's blocks through the io group (g_api->io); without the group a read gives 0 and a write is dropped ---------------------------------------
+// The cartridge port's page (cart_regs) by the io group's cart_rd / cart_wr, the offset from the table: CART_RD(p), CART_WR(p, v). The video format
+// (c64_video) and the DMA mode (c64_dma_mode) are read through the table directly (HW_RD); the base writes them.
+uint8_t io_cart_rd(uint32_t off);
+void io_cart_wr(uint32_t off, uint8_t v);
+#define CART_RD(p) io_cart_rd(DRV_OFF(cart_regs, p))
+#define CART_WR(p, v) io_cart_wr(DRV_OFF(cart_regs, p), (uint8_t)(v))
+void io_stop(bool on);                           // the base's stop: the app's stop holds the machine
+void io_memonly(bool on);                        // the DMA mode: the memory window sees RAM only (true) or the C64's memory map
 
 // ---- the C64's memory window (api->c64) ------------------------------------------------------------------------------------------------------------------
 static inline uint8_t c64_peek(uint32_t a) { return g_api->c64->peek(uint16_t(a)); }
 static inline void c64_poke(uint32_t a, uint8_t v) { g_api->c64->poke(uint16_t(a), v); }
-static inline void c64_set_mode(uint8_t m) { g_api->c64->cart_mode(m); }   // C64_MODE: C64U_MODE_NORMAL, C64U_MODE_ULTIMAX
+static inline void c64_set_mode(uint8_t m) { g_api->c64->cart_mode(m); }   // cart_regs.mode: DRV_cart_regs_mode_normal, _ultimax
 
 // ---- files: api->fs with a position, as the firmware's File reads and writes ----------------------------------------------------------------------------
 struct RFile {
