@@ -1199,8 +1199,13 @@ Nothing decided yet.
     - D50 (Alex: "Ok. 1"): a core's own library reads base blocks through the driver table and writes only blocks its
       core owns; 0.4.6 gives it only read macros for base blocks. The ring's `trx_pixel.still_status` read stays. Our
       one direct write to a base block is the ring's `c64cart.cmd` = inval (`ring.cc` :1132, :1396, :2386, after
-      `cart_ram_put`). Asked MultiCore which call replaces it, and to keep the base blocks' `_ADDR` (for `DRV_OFF`) for
-      the io group's offset-taking calls (`cart_wr`/`cart_rd` on `cart_regs`, `rom_write`/`rom_read` on `c64_roms`).
+      `cart_ram_put`). MultiCore: the owner does it. In 0.4.6 the shared c64cart driver drops the cached lines itself
+      after every `ram_write` and every `image_write`, which covers all three: :1132 and :1396 follow `ram_write`, :2386
+      follows `ram_write` or the image a ring-file load puts back (`rom_put`, `ringfile.cc`, through `cart_rom_write`,
+      `ringmachine.cc`, to `image_write`). The three writes go with the 0.4.6 pin, not before: 0.4.5's driver does not
+      drop the lines. 0.4.6 leaves out only the base blocks' `_WR` macros; `_ADDR`, `_RD`, masks and values stay, so
+      `DRV_OFF` and the io group's offset-taking calls (`cart_wr`/`cart_rd` on `cart_regs`, `rom_write`/`rom_read` on
+      `c64_roms`) stay, and those writes are the base's.
     - The SDK's generic `trx64u_ops.cc` leaves the SDK with `uci` in 0.4.6; the rest of trx64u's code set goes with P2-6.
     - `PX_OSIZE`: intended. The base's `video.cc` writes it only when the VIC scaler gateware answers, with `PX_CTRL`'s
       scale bits for a layer without it; on c64_basic the write lands on an undecoded address.
