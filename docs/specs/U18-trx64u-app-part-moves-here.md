@@ -759,3 +759,14 @@ Nothing decided yet.
   - Waits for the pin switch to SDK 0.4.0 (with P2-5, P3-3, P4-1): `sdk.pin`, `build.sh` green on the pin (its `descrec.py
     drivers` and `maps/`), `rtl_check` and `lint-src` in our lint stage (0.3.0 has no `rtl_check.py`; `check` green needs
     the 13 blocks followable), the TOML A in the `.cor` (0.4.0 ships no app image), a CI run.
+- **2026-11-24: the window `hdmi_palette` stays; the reSID8 write is interim** (step 2a of the D28 plan).
+  - Checked on the code, against the claim that c64_basic has no HDMI palette: the base of SDK 0.4.0 translates the
+    window's 0xA0045000 to 0x10145000 (`libsvc.cc` `window_to_toml_a`, our TOML A's `u2p_io_base` 0x10100000);
+    `ultimate_sys.vhd` decodes 0x140000-0x147FFF as the overlay (:903-904, `ovl_we` :966, `ovl_addr` :971), and
+    `overlay.v` writes +0x5000-0x503F into its 16-colour palette (:105-111, R G B at 4n), the colours of the overlay's
+    characters (:288). `u64cfg.cc` `put_colour` writes exactly those bytes. So c64_basic has the HDMI palette and the
+    window hits it: not removed. `desc.toml`'s sentence "no HDMI palette" was wrong and is fixed. Its owner stays open
+    with `audio_mixer`, `speaker_mixer` and `c64_palette` (Alex).
+  - reSID8 (Alex's placement: base, the SID library; MultiCore adds a filter call to that library in a later SDK):
+    `u64cfg.cc` keeps its direct write, marked interim. Open: the write moves to the SID library's filter call once the
+    SDK has it.

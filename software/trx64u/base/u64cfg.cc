@@ -1273,6 +1273,7 @@ static void write_sid_sockets(void)
 
 // The reSID8 filter (software/ultimate-app/software/io/c64/trx_io.cc trx_io_resid8, _filter, _bypass): the block resid8 (the SDK's map sid), written
 // only when ident's caps3 says the SID is the 8-SID reDIP.
+// Interim (U18 §5): resid8 is the SID library's block (base); these writes move to its filter call once the SDK has one.
 static bool trx_resid8(void)
 {
     return g_api->io && (DRV_ident_caps3_RD() & DRV_ident_caps3_resid8_MASK);
