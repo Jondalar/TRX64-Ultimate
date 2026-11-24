@@ -350,7 +350,12 @@ port (
     -- address (top.v, cpu_mem_bridge): the caches fill whole 16-byte lines from it
     dc_ext_tgl      : in  std_logic := '0';
     dc_line         : in  std_logic_vector(127 downto 0) := (others => '0');
-    dc_line_adr     : in  std_logic_vector(21 downto 0) := (others => '0') );
+    dc_line_adr     : in  std_logic_vector(21 downto 0) := (others => '0');
+    -- The ICAP loader (MultiCore T239.3 D37: the host's T79 loader, region 0x060600-0x0606FF), the way back to the MultiCore host: the
+    -- base sends IPROG with WBSTAR 0 through it ("Return to host menu"). icap_data is a 32-bit word of the bitstream file (first byte
+    -- in bits 31:24, bits not swapped; top.v swaps), valid with the one-clock pulse icap_we.
+    icap_we         : out std_logic;
+    icap_data       : out std_logic_vector(31 downto 0) );
 end entity;
 
 architecture rtl of ultimate_sys is
@@ -422,9 +427,14 @@ architecture rtl of ultimate_sys is
     signal c64_reset_n  : std_logic;
 
     type t_region is (r_none, r_itu, r_iec, r_drive, r_page, r_dma, r_u2p, r_mig, r_ovl, r_eth, r_udp, r_wifi,
-                      r_sd, r_flash, r_gcr, r_bl, r_i2c, r_usb, r_cw, r_sidcv, r_uci, r_rom, r_pal);
+                      r_sd, r_flash, r_gcr, r_bl, r_i2c, r_usb, r_cw, r_sidcv, r_uci, r_rom, r_pal, r_icap);
     signal region       : t_region;
     signal region_r     : t_region := r_none;
+    -- the ICAP loader (D37): byte assembler, enable, word counter
+    signal icap_sh      : std_logic_vector(31 downto 0) := (others => '0');
+    signal icap_n       : unsigned(1 downto 0) := (others => '0');
+    signal icap_en      : std_logic := '0';
+    signal icap_cnt     : unsigned(31 downto 0) := (others => '0');
     signal cw_win       : std_logic;
     signal page         : unsigned(2 downto 0);  -- which 256-byte register page
     signal page_r       : unsigned(2 downto 0) := "000";
@@ -882,6 +892,8 @@ begin
             region <= r_flash;
         elsif a(23 downto 8) = X"0605" then                 -- 0x060500-0x0605FF
             region <= r_gcr;
+        elsif a(23 downto 8) = X"0606" then                 -- 0x060600-0x0606FF: the ICAP loader (D37)
+            region <= r_icap;
         elsif a(23 downto 6) = "000001100000100000" then    -- 0x060800-0x06083F
             region <= r_eth;
         elsif a(23 downto 4) = X"06090" then                -- 0x060900-0x06090F
@@ -1359,10 +1371,52 @@ begin
         end case;
     end process;
 
-    process(region_r, offset_r, page_data, ovl_rdata, ddr_ready, dma_stub, dma_rdata_r, bl_rdata, i2c_rdata, cw_rdata)
+    -- The ICAP loader (MultiCore T239.3 D37, the host's T79 loader without its partition registers +0x20/+0x21: c64_basic has no
+    -- partition and no port lock). Gideon's Spartan offsets (+00 FPGA type, +04 pulse, +08 write: W25Q_Flash::reboot) stay inert;
+    -- the loader is +10..+1B. A byte at +10 counts only while the enable (+14 bit 0) is 1; four make one word, the first byte in
+    -- bits 31:24. Setting the enable from 0 clears the word counter; any write of +14 restarts the byte count.
+    process(clock)
+    begin
+        if rising_edge(clock) then
+            icap_we <= '0';
+            if reset = '1' then
+                icap_en <= '0';
+                icap_n  <= (others => '0');
+            elsif io_req.write = '1' and region = r_icap then
+                if io_req.address(7 downto 0) = X"10" and icap_en = '1' then
+                    icap_sh <= icap_sh(23 downto 0) & io_req.data;
+                    icap_n  <= icap_n + 1;
+                    if icap_n = "11" then
+                        icap_we  <= '1';
+                        icap_cnt <= icap_cnt + 1;
+                    end if;
+                elsif io_req.address(7 downto 0) = X"14" then
+                    icap_en <= io_req.data(0);
+                    icap_n  <= (others => '0');
+                    if io_req.data(0) = '1' and icap_en = '0' then
+                        icap_cnt <= (others => '0');
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+    icap_data <= icap_sh;
+
+    process(region_r, offset_r, page_data, ovl_rdata, ddr_ready, dma_stub, dma_rdata_r, bl_rdata, i2c_rdata, cw_rdata,
+            icap_en, icap_cnt)
     begin
         fixed_data <= X"00";
         case region_r is
+        when r_icap =>                      -- +00 ID 0x7A, +14 the enable, +18..+1B the word count (little endian); the rest reads 0
+            case to_integer(offset_r(7 downto 0)) is
+            when 16#00# => fixed_data <= X"7A";
+            when 16#14# => fixed_data <= "0000000" & icap_en;
+            when 16#18# => fixed_data <= std_logic_vector(icap_cnt(7 downto 0));
+            when 16#19# => fixed_data <= std_logic_vector(icap_cnt(15 downto 8));
+            when 16#1A# => fixed_data <= std_logic_vector(icap_cnt(23 downto 16));
+            when 16#1B# => fixed_data <= std_logic_vector(icap_cnt(31 downto 24));
+            when others => null;
+            end case;
         when r_iec =>                       -- IEC processor idle: version, both FIFOs empty
             case to_integer(offset_r(11 downto 0)) is
             when 0 => fixed_data <= X"25";

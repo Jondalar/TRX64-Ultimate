@@ -609,6 +609,20 @@ module top #(
     wire         dc_ext_tgl;
     wire [127:0] cpu_done_rline, dc_line;
     wire [21:0]  dc_line_adr;
+    // The ICAP loader (MultiCore T239.3 D37, the host's T79 loader): the RISC-V streams bytes through ultimate_sys 0x10060610; the
+    // base's "Return to host menu" sends IPROG with WBSTAR 0 and the FPGA loads the MultiCore host from flash 0x0. icap_data holds the
+    // file's 32-bit word (first byte in 31:24); ICAPE2 wants every byte bit-reversed (UG470: the file is MSB first, the port is not).
+    // cpu_clk is 100 MHz, the ICAPE2's maximum.
+    wire        icap_we;
+    wire [31:0] icap_data;
+    wire [31:0] icap_i;
+    genvar      icap_g;
+    generate for (icap_g = 0; icap_g < 4; icap_g = icap_g + 1) begin : icap_swap
+        assign icap_i[8*icap_g +: 8] = {icap_data[8*icap_g], icap_data[8*icap_g+1], icap_data[8*icap_g+2],
+                                        icap_data[8*icap_g+3], icap_data[8*icap_g+4], icap_data[8*icap_g+5],
+                                        icap_data[8*icap_g+6], icap_data[8*icap_g+7]};
+    end endgenerate
+    ICAPE2 #(.ICAP_WIDTH("X32")) icap_i0 (.CLK(cpu_clk), .CSIB(~icap_we), .RDWRB(1'b0), .I(icap_i), .O());
     ultimate_sys #(.g_capabilities({2'b00, FPGA_TYPE, 28'h5E40202})) ult (
         .clock(cpu_clk), .reset(cpu_rst),
         .mem_request(m_request), .mem_tag(m_tag), .mem_read_writen(m_rwn),
@@ -675,7 +689,8 @@ module top #(
         .rv_tap(rv_tap),
         .drv_mem_tgl(drv_tgl), .drv_mem_addr(drv_addr), .drv_mem_we(drv_we), .drv_mem_wdata(drv_wdata),
         .drv_mem_be(drv_be), .drv_mem_done(drv_done_tgl), .drv_mem_rdata(drv_done_rdata),
-        .dc_ext_tgl(dc_ext_tgl), .dc_line(dc_line), .dc_line_adr(dc_line_adr)
+        .dc_ext_tgl(dc_ext_tgl), .dc_line(dc_line), .dc_line_adr(dc_line_adr),
+        .icap_we(icap_we), .icap_data(icap_data)
     );
 
     // ---- serial bus: the C64, the app's drive A, the board's IEC port -------------

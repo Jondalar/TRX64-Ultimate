@@ -966,3 +966,43 @@ Nothing decided yet.
   (palette, place, Scale, like D3's text helper), the ring library paints frame and bar as the still (D10), and the base's
   timeline bar leaves with the trx64u code set (P2-6). MultiCore sends the helper's exact shape before T-3 is built on it;
   until that SDK, T-3 waits.
+- **2026-11-24: who owns the four windows, Alex: answer C, "sauber trennen".** "Laut/Leise und der Mini Equalizer ->
+  base im SDK. UCI Befehle, konkrete SID Einstellungen usw bitte erst mal als lib hierher. Ggfs leihen wir die dann c128
+  und c64scpu."
+  - The base: master volume and the mini EQ (`master_volume`/`master_tone`, 0xA0000550/551 in basereg.def). c64_basic
+    gets no RTL for them (Alex: no; `ultimate_sys.vhd` decodes neither 0x100550 nor 0x100551), so trx64u has no Volume
+    and no EQ of the base, a decision with Alex. MultiCore makes the base offer them only where a TOML A has their blocks.
+  - Ours: the UCI commands as a library here (MultiCore T239.3 D36: its exports and API are ours alone; trx64u's TOML B
+    drops their shared `uci`, and `cmd_if` becomes a core block), the SID settings with reSID8 (`resid8` becomes a core
+    block: no filter call of the SID library is needed), the mixer's SID and socket gains (0x10100500-0B) and speaker
+    gains (+0x40, +0x41, +0x44, +0x45), both palettes (core blocks; `desc.toml` loses its four windows).
+  - With the same TOML A change `trx_pixel` (0x101A6060) becomes owner "base": the base's `video.cc` drives the still
+    capture and the pixel layer through it (MultiCore confirmed; P1-7 had it core). The "13 core blocks" of the step
+    above are no owner question: rtl_check `--core-in-design` (`t239.3-v` `rtl_check.py` :4219-4221) checks the core
+    blocks c64_basic decodes itself like base blocks (our TOML A has 11 of them in the U2P, U64 and C64 pages).
+  - Not built yet: the TOML A, `desc.toml`, `u64cfg.cc` and the UCI library.
+- **2026-11-24: SDK 0.4.2 and 0.4.3 (MultiCore), not pinned.** 0.4.2 (`307c3382...`, commit 028553da): record 8 is
+  installed before the scan of `apps/` (`run.cc`), `include/online_api.h`, windows and core blocks only inside the board's
+  I/O span [0x10000000, 0x11000000); our record 6 and `drvtab.h` are byte for byte those of 0.4.1. 0.4.3 (`5b5820f4...`,
+  commit e45fbb97) adds T-3's helper, as agreed with MultiCore: `api->overlay->frame(name, surface)` paints the frame
+  the machine drew last into a library surface in the caller's task (no wait for the UI task; OVL_E_NOFRAME leaves it
+  unchanged), and `still_palette(f)` makes the library the source of the still's colours. Under trx64u the base's still
+  paints Colodore today: `Video::set_still_palette` is called only by `u64cfg_register` of MultiCore's c64 core, and
+  both are in the discarded sections of our `app.map`. `menu_video` stays T-3's enter and leave signal. The pin waits
+  for Alex.
+- **2026-11-24: an ICAP loader in c64_basic, the way back to the MultiCore host (Alex: A; MultiCore T239.3 D37).**
+  - RTL: a port of MultiCore's host loader. `ultimate_sys.vhd` decodes region `r_icap` 0x060600-0x0606FF (free between
+    `r_gcr` and `r_eth`): ID 0x7A at +0x00, data +0x10 (four bytes, first byte in bits 31:24, one word to the ICAPE2),
+    enable +0x14 (set from 0: the word counter clears), word counter +0x18..+0x1B; Gideon's +0x04/+0x08 stay inert;
+    no decouple +0x20 and no release +0x21 (no partition, no port lock). `top.v`: ICAPE2 X32 on `cpu_clk` (100 MHz, its
+    maximum) with the host's byte bit reversal.
+  - Bench: `sim/dma_bus` checks the ID, the enable, the words, the counter and a new session (GHDL 5.0.1, PASS).
+  - The way back is the base's `hw_return_to_host`: IPROG with WBSTAR 0 after the menu marker of the hand-over page
+    (MultiCore T135 D3); the host lies at flash 0x0 (ADR-0055). The contract (`docs/contracts/trx64u-firmware-handover.md`
+    §1, §7, §8) is MultiCore's `f3dcf4a78` byte for byte: "started by the host" is the ICAP loader plus a valid hand-over
+    page. Under the host trx64u offers "Return to host menu" (the base's row) and our "Power cycle"; standalone (c64_basic
+    at flash 0x0, no page) only "Power cycle", with its settings in the flash. "Power off" stays beside them.
+  - The `.cfw` run keeps its refusal under the host (`cfwrun.cc`, state `host.multicore`).
+  - Open: the TOML A block `icap` (owner base) comes with SDK 0.4.4, which splits the host's region into `icap` and
+    `partition` and brings the profile rule; until then the app is linked without `icap`, so the base sees no loader and
+    trx64u stays standalone. A CI bitstream run, then the board test (Alex): "Return to host menu" reaches the host's menu.

@@ -110,7 +110,7 @@ present), WD177x, UCI.
 | 0x10060304/05 | profiler sub/task (written on every context switch) | — | OPT (WI) |
 | 0x10060400-0F | RTC seconds timer | `ip/clock/real_time_clock.vhd` | OPT (0 = 1970 dates) |
 | 0x10060500-0F | GCR codec | `1541/gcr_codec.vhd` | OPT |
-| 0x10060604/08 | ICAP pulse/write (reboot after update) | `io/icap/*` (Spartan only; needs ICAPE2) | OPT |
+| 0x10060600-FF | ICAP: Gideon's pulse/write at +04/+08 (reboot after an update; `io/icap/*` is Spartan only) are inert. c64_basic decodes MultiCore's loader here (T239.3 D37): ID 0x7A, data +10, enable +14, word count +18..1B, ICAPE2 X32 in `top.v` | MultiCore host `ultimate_sys.vhd` `r_icap` | REAL on c64_basic (the way back to the MultiCore host) |
 | 0x10060700 | audio select | `io/audio_select/audio_select.vhd` | OPT |
 | 0x10060800-2F | **RMII MAC** | `io/rmii/ethernet_rmii.vhd` + `ip/free_queue/free_queue.vhd` | **REQ, REAL** |
 | 0x10060900-0F | WiFi DMA UART to the ESP32 | `io/uart_lite/uart_dma.vhd` | REAL (see §4.8) |

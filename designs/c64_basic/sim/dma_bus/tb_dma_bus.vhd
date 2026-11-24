@@ -22,6 +22,8 @@ architecture tb of tb_dma_bus is
     signal dma_addr : std_logic_vector(15 downto 0);
     signal dma_done_tgl : std_logic := '0';
     signal req_s : std_logic := '0';
+    signal icap_we : std_logic;
+    signal icap_data : std_logic_vector(31 downto 0);
 begin
     clock <= not clock after 5 ns when not finished;
     reset <= '0' after 100 ns;
@@ -188,7 +190,21 @@ begin
         drv_mem_wdata => open,
         drv_mem_be => open,
         drv_mem_done => '0',
-        drv_mem_rdata => (others => '0') );
+        drv_mem_rdata => (others => '0'),
+        icap_we => icap_we,
+        icap_data => icap_data );
+
+    -- D37: the ICAP port, every one-clock word pulse counted and kept for the BFM
+    process(clock)
+    begin
+        if rising_edge(clock) then
+            if icap_we = '1' then
+                ic_cnt <= ic_cnt + 1;
+                if ic_cnt = 0 then ic_first <= icap_data; end if;
+                ic_last <= icap_data;
+            end if;
+        end if;
+    end process;
 
     -- the C64 side: every request is answered at once; what the window asked for is kept for the BFM
     process(clock)
