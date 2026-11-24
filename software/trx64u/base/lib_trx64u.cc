@@ -174,12 +174,12 @@ static void hook_menu_closed(void)
     }
 }
 
-// menu_video: the base shows the machine's picture through its layer's key colour (1: the Timewarp timeline, the PAUSED tag) or covers it again (0);
-// the menu task, no core lock. The hook only logs the call. c64_basic has no surface under the base's layer to put a picture on: the only layer that
-// shows a picture from memory is pix_layer.v, and that is the base's menu layer (it writes PX_FRONT, PX_KEY, PX_CTRL). Under it are overlay.v (a
-// character box) and vic_scaler.v, which shows black while the whole machine is halted (top.v: .blank(c64_halted); "Freeze mode" Whole machine sets
-// GATE_CTRL b0, so C64_STOP halts CPU, VIC, CIAs and SID). With "CPU only" the VIC keeps drawing and the picture shows through the key without a hook.
-// The firmware shows Timewarp's still by drawing the captured frame into the pixel layer in software (trx_video.cc grab_still, draw_still).
+// menu_video: the base's Timewarp page (layout "timeline") came up (1) or went (0); the menu task, no core lock. SDK 0.4.1's base calls it from no
+// other screen: only screens.cc's timeline turns ui_live_key on, and the PAUSED tag is an element of the overlay service (T256 T-2). The hook only
+// logs the call. Under the page lies the base's still, its capture of the menu's stop: a scrub step does not change it, and the ring library cannot
+// paint the frame of the scrub position, because no call of SDK 0.4.1 gives a library the still capture (U18 section 5, T-3). c64_basic shows no
+// picture of a halted machine by itself: vic_scaler.v shows black while the whole machine is halted (top.v: .blank(c64_halted)); the firmware drew
+// Timewarp's still into the pixel layer in software (trx_video.cc grab_still, draw_still).
 static void hook_menu_video(int behind)
 {
     lib_logf("[trx64u] menu_video(%d)", behind);

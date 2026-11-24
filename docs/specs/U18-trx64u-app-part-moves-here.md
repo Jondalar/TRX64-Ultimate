@@ -900,3 +900,44 @@ Nothing decided yet.
     board test. `8ff28ba9` is no longer on MultiCore's local `t239.3`: it became `2b6d6a56b`, which differs from it only
     in `tests/loader/test_libload.cc` (the SDK, `apps/` and `online_api.h` are the same). `sdk.pin`, the registry package
     names and the provenance lines still name `8ff28ba9`; they follow once MultiCore has pushed.
+- **2026-11-24: T-3 of the D28 plan (T256 S6: the ring library shows the Timewarp still and bar through `api->overlay`) is
+  not built: SDK 0.4.1 lacks the picture, and the base draws a bar of its own** (Alex's go 2026-11-24). Nothing of the
+  code changed.
+  - The picture. A library's still is a surface the library paints and owns (api.md 4.17.6, 4.17.8.3). Timewarp's frame
+    is what the host's still capture holds after the scrub step's frame (`ring.cc` `scrub_show_locked` waits for the
+    `still_status` count). A library cannot read it on 0.4.1: the capture's two slots are the base's own (MultiCore
+    `8ff28ba9` `video.cc` `Video::still_start` :346-357 mallocs them and writes STILL_BASE); `still_base` reads nothing
+    (`pix_layer.v` `cur` :159-166 reads 0x068 and 0x0A4 only; TOML A `trx_pixel`, `dir = "w"`); no member of
+    `svc_overlay.h` or `svc_io.h` and no base export returns the picture; the base takes its own still only when the
+    machine stops (`overlay.cc` `settle` :377-383), and a scrub step runs its frame through `trx_gate` without telling
+    the base. Slots of ours behind `still_base` would leave the base's capture stale for its own still and the PAUSED tag
+    (the base writes the register once, at the core's start).
+  - Measured in ue2emu 0.7.4 on `trx64u.cor` `c3c9a481` (step 2b): `10 print ti` / `20 goto 10` runs 6 s, the menu
+    opens, Timewarp...: the page shows the base's still (the frame of the menu's stop, `TI` 564 in the last line) behind
+    the base's bar ("now", frame 268 / 268). After UP (-1.0 s, 218 / 272), UP (-2.0 s, 168 / 272) and LEFT (-2.1 s,
+    167 / 272) everything above the bar is the same pixel for pixel, only the bar changes; the ring logs the three
+    scrubs (seq 218, 168, 167, ok). S6 fails today: the picture does not follow the scrub.
+  - The bar. The base's timeline page draws a bar of its own on every build of layout `timeline` (`screens.cc`
+    `build_timeline` :930-978: 768 x 48 at (96, 476) of 960 x 540, the glyph, the texts, the track); over a still the
+    screen is drawn with the person's Overlay Transparency (`ui.cc` `ov_apply` :1430; the default 25 % is opacity 192).
+    A bar painted into our still lies under it: the firmware's `tw_layout` (`trx_video.cc` :653-672) gives the same
+    rectangle. T256 D3 moves `tw_draw_bar` into the ring library and keeps `build_timeline`; one of the two has to go.
+  - What T-3 needs of MultiCore (found here, not asked yet): (a) a call that paints the picture the machine drew last
+    into a library's surface as the base paints its own still (the person's palette, the place and Scale of the running
+    picture); (b) the timeline page without its bar when the library paints it into the still, or the bar stays the
+    base's and (a) becomes "take your still again". With both: `menu_video(1)` (the page is up, `lib_trx64u.cc`
+    `hook_menu_video`) lets the ring library take its surface, paint the picture and the bar (`tw_draw_bar`'s place and
+    look) and `show("still")`; each scrub operation paints again and calls `update`; `menu_video(0)` and `ring.unfreeze`
+    call `remove` and free it.
+  - Memory (api.md 4.17.6: the surface is the library's): the still element is 960 x 540 RGB565, 1,036,800 B of the ring
+    library's `api->mem` while Timewarp shows; with its keep 2,523,693 B, under the declared peak 2,931,868 B, which is
+    the keep plus the `.trxring` save (1,444,975); the save and the surface at once would be 3,968,668 B. The base holds
+    its own still beside it on its heap while the machine stands (the picture's rectangle, at most 1,036,800 B; in this
+    run 960 x 540: ue2emu has no gateware scaler, so the still fills its element).
+  - Comments the code contradicts, fixed: `lib_trx64u.cc` `hook_menu_video` (the base calls it for the timeline only,
+    the PAUSED tag is an element since T-2; "CPU only" shows nothing through the key while a still lies under the menu),
+    `ringops.cc`'s head (the page is F1/timewarp, its keys are `menu.toml`'s `[[key]]` rows). `build.sh trx64u ring`
+    makes both images byte for byte as before (`trx64u.u2a` `b70c8f7b...`, `ring.u2a` `0afb3061...`), so the `.cor`
+    and its `pack_cor.sh --emu` check of step 2b stand; not run again.
+  - For MultiCore beside (a) and (b): `core_hooks.h` and api.md 9.7.13 still say `menu_video` is on for the PAUSED tag;
+    SDK 0.4.1's base turns it on for the timeline only.
