@@ -60,25 +60,20 @@ does not hold, reopen the issue and report only that. Anything new from a retest
 
 ## Pull requests
 
-**This repository is an export.** The work happens on our own Gitea in the LAN, with its branches and its CI.
-GitHub gets `main` from there: every commit since release 0.2.0 is an export commit here, with its message,
-author and date, and with the tree as it stands on Gitea, less Commodore's ROMs, Gideon's pin constraints for
-the C64 Ultimate and four third-party files. The specifications (`docs/specs`), the decisions (`docs/adr`) and
-the task list (`TODO.md`) come along. The export is pushed with each release and now and then in between; the
-history before 0.2.0 stays on Gitea, because it carries the ROMs.
+The work happens here on GitHub. Changes go from a feature branch to `integration`, and from there to `main`; only the
+maintainer merges into `integration` and `main`. Open your pull request against `integration`.
 
-A pull request here is therefore a patch, not something we can merge — a merge on GitHub is overwritten by the
-next export, which writes the tree as it stands on Gitea, and nothing warns you. What we do instead: we take the
-patch, apply it on Gitea with your name on the commit, run it through our CI and ship it in a release; the
-export then brings your commit here. The pull request is closed, naming the build that carries it.
-**Closed does not mean refused.** A refusal says so in words, with the reason.
-
-One thing follows from the export for the diff itself (every file reads here as it does with us; Gideon's
-application, the firmware submodule, is not in the tree since U20 A5, and the bench ROMs are fetched since A6,
-`roms/README.md`):
-
-- The specifications are written on Gitea, with the code they describe. Point the PR at the spec it touches
-  and describe the behaviour you want; we change the spec.
+- **CI runs on your pull request**, once the maintainer has approved the workflow run (every pull request from a fork needs that
+  approval). The bitstream is built by our own Vivado machine and only after the maintainer has approved that step too; you do not
+  need Vivado for a software change.
+- **The public-tree check** runs on every push and pull request (`tools/check_public_tree.py`): no internal host names, private
+  addresses or paths, no personal mail addresses, no ROM bytes. Run it before you push, or let git run it for you with
+  `git config core.hooksPath .githooks`.
+- **Closed does not mean refused.** A refusal says so in words, with the reason.
+- The specifications (`docs/specs`), the decisions (`docs/adr`) and the task list (`TODO.md`) are written by us, with the code they
+  describe. Point the pull request at the spec it touches and describe the behaviour you want; we change the spec.
+- The history before release 0.2.0 is not here, because it carries ROMs. Gideon's application (the firmware's former submodule) is not
+  in the tree; the bench ROMs are fetched by the benches themselves (`roms/README.md`).
 
 The rules for the patch itself:
 
