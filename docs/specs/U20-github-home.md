@@ -9,7 +9,9 @@ F-a (D17's experiment) built and dry-run tested, not run: Alex defers F until Mu
 into `u18` ad96228c, CI run 485 green): the public-tree check (tool, pre-push hook, workflow, lint), the one cleanup of the tree, the replay's scrub
 and `--rewrite` (§6 "A8"); the check stays after the switch (D20). C: MultiCore's T261 published `sdk-0.4.6-6e280710` (our `fetch_sdk.sh --release`
 fetched and checked it), the contract (copied 50e49dec), the builder's `fw` row deployed (keycode ref `u20` until the switch PR is merged; its
-`SOURCES` switch waits for `u20` on GitHub). D done 2026-11-25 (§6 "D"). Next: E.
+`SOURCES` switch waits for `u20` on GitHub). D done 2026-11-25 (§6 "D"). E: `u18` 9d93d185 replayed as 121 export commits onto GitHub `main` 2b545a8 (part a with the tool of 92645aeb,
+part b with the current one, the one rewrite: §6 "E"), branch `u20` pushed to GitHub 2026-11-25 (head 26be21a); from here the work is native on
+GitHub, Gitea `u18` is the archive. Next: the first green matrix run on `u20`, `integration` cut, Alex merges the switch PR.
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -484,6 +486,21 @@ For part E:
    rewrite of GitHub main removes them: Alex's decision (MultiCore's D8, D32).
 5. Board tests and NAS tools now need their addresses from the environment (`TRX64_HOST`, `TM_IP`, `TRX_HOST`, `--host`; `TRX_NAS`, `TRX_NAS_DATA`,
    `TRX_NAS_DOCKER`; `GITEA_URL` or the tea login): `CLAUDE.md` and the skills say so when E rewrites them.
+
+### E (the switch, 2026-11-25)
+
+- Base: GitHub `main` 2b545a8 is the export of Gitea 27984422 (its tree byte-equal to that export by the tool of 92645aeb).
+- Part a: `--replay 27984422 --ref 92645aeb` with the tool of 92645aeb (it flattens the submodule; the submodule's commits from the old
+  checkout's `.git`): 111 export commits. Then `--rewrite origin/main` over them: 33 files, 0 messages changed, check clean.
+- Part b: `--replay 9b3cdf6b --ref 7726ef7f --onto <part a>` with the current tool (fixed: the base commit carries 9b3cdf6b's own message and
+  a note on the 39 files whose placeholders it writes): 9 commits; then `--replay 7726ef7f --ref 9d93d185` (the tool fix's merge): 1 commit.
+  The rewrite over the whole branch changed nothing (every commit bit-identical).
+- Checks before the push: the pre-push hook as for a push of `u20` to GitHub (tree 1511 files, 120 commits, messages, authors: clean); every
+  author and committer the public address; `check_workflows.py`; `u20`'s tree equals `gh_export.py --check` of 7726ef7f (tree 605e32a3).
+  The bitstream key on `u20` equals `u18`'s: `c64u-0dce5fff4ef99009` (already in the builder's `/cache/bit`).
+- Push: `git push -u origin u20` from the GitHub clone (`core.hooksPath .githooks`, `user.email` the public address), as Alex's admin role
+  through `protected`. The head carried `[skip ci]`; the first native commit (this one: `GITEA_KEPT` emptied) starts the first run.
+- MultiCore's builder: `SOURCES=multicore,fw` set after the push; `FW_KEYCODE_REF=u20` until the switch PR is merged.
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 

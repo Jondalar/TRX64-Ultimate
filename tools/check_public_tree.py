@@ -93,14 +93,9 @@ _TEXT_ALLOW = (
     ("the export's tests plant the same generic examples for its scrub and rewrite", "*", ("tools/test_gh_export.py",)),
 )
 TEXT_ALLOW = {(p, r): why for why, r, ps in _TEXT_ALLOW for p in ps}
-# Hits the Gitea runners still need on u18 (D13: Gitea stays the archive and runs the Gideon-app line): the cache volume of every Gitea stage is
-# mounted by its host path, and the runners mount only the volumes their configuration lists. They pass the check here, and the replay and the
-# one rewrite (tools/gh_export.py, D15) write the placeholder into the public copy, so GitHub's tree never has them. Part E deletes this list.
-_GITEA_KEPT = (
-    ("the cache volume of the Gitea stages (host path of the runners)", "NAS share path", (
-        ".gitea/workflows/bitstream.yml", ".gitea/workflows/cor.yml", ".gitea/workflows/lint.yml", ".gitea/workflows/package.yml",
-        ".gitea/workflows/sims.yml")),
-)
+# Hits the Gitea runners needed on u18 (the host path of their cache volume) passed here while the replay wrote the placeholder into the public
+# copy (U20 D15). Part E emptied this list when GitHub became the home (2026-11-25); the mechanism stays for the selftest.
+_GITEA_KEPT = ()
 GITEA_KEPT = {(p, r): why for why, r, ps in _GITEA_KEPT for p in ps}
 
 
