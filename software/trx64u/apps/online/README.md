@@ -6,7 +6,7 @@ D22); Alex Damhuis' code in both repositories. MultiCore's `PROVENANCE.md` (rows
 GPL-3.0-or-later; the host name, the URLs, the headers of a request (`Client-Id`, `User-Agent`, `Connection: close`) and the URL encoding follow Gideon's
 `software/network/assembly.cc` and `components/pattern.cc` (`url_encode`), the Assembly64 query is built the way his `software/userinterface/assembly_search.cc`
 builds it; none of his client (BSD sockets, `HttpRequest`, the server library's body parser, `json.h`) is copied. U21 rewrote `online_search.cc` and `app.toml`
-on SDK 0.5.0 (now 0.5.1) and added the Beyond64 client (its public JSON API, https://beyond64.org/#help/json-api); MultiCore's copy is no longer the reference.
+on SDK 0.5.0 (now 0.5.2) and added the Beyond64 client (its public JSON API, https://beyond64.org/#help/json-api); MultiCore's copy is no longer the reference.
 
 The parts. `online_lib.cc` is `lib_register`: it registers the operations `online.*` and the state values of the form and the results (`online_search.cc`) and
 exports the table "online" (`online_api.h` of the SDK's `include/`, major 1), which the base's file manager (`netfs.cc`) reads the folder `/Online` through; the
@@ -24,10 +24,10 @@ without a network, the hint names F8 System > Network). The choices of Assembly6
 (`/api/c64/filters`) load by themselves when the form is shown with a network. Keys (the `[[key]]` rows of `app.toml`, base 3.6, each in its tab's foot legend): S the next
 source, X clear (form) / N new search, X clear (results). The texts are free (`ask_any`): Name / Text up to 120 characters, Group, Handle and Event up to
 47 (`ask_max`); Assembly64 and CommoServe refuse a `"` (their query quotes each text and has no escape), and a search whose request would not fit says so. The results tab: its title is "<source> • <text> • <count>", the node Results is a `list` (one row per
-result: title, the year or Beyond64's category, the side lines; Beyond64's last row asks for the next page), RETURN on a result opens its folder
-`/Online/<result>/` in Browse (`lib.show`, `goto_screen`), and RETURN on a file there is the Library's action sheet (Run downloads, the menu closes).
-A Beyond64 release with one loadable file lists it at once (the details of the search named it); Beyond64 names no size, the list shows "-". Opening the
-file's action sheet straight from a result (`ctx.browse_sheet`) waits for MultiCore's SDK 0.5.2 (U21 §7, finding 15).
+result: title, the year or Beyond64's category, the side lines; Beyond64's last row asks for the next page), RETURN on a result whose one file is known
+(Beyond64 names it with the search's details; Assembly64 and CommoServe once its entries are kept) opens that file's action sheet in Browse (`ctx.browse_sheet`,
+SDK 0.5.2); any other shows the list of its files (`ctx.ask_list`, filling while they load), and RETURN on a file opens its sheet (Run downloads, the menu
+closes). Beyond64 names no size: the list shows "-".
 Beyond64's Show: Loadable only (default, D8) lists the releases with a `.prg`, `.d64` or `.d81` (the files the download bridge serves; one details request per
 release, D5); All releases lists the others too, "Only on a computer", the whole row grey (tone `disabled`, base 3.6).
 

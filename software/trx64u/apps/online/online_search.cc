@@ -1,6 +1,6 @@
 // The online search as a sub-app (U21). The form is the F3 tab "Online" (app.toml): Source first, then the fields of that source, Search at its foot. The results are a tab of
-// their own, "Results", on the strip only while there are results (app.toml `show`); their list is a node of kind `list` (api.md 6.19), and RETURN on a result opens its files
-// in the Library, which reads them through the table "online" (online_api.h) as the folder "/Online". Three sources: Assembly64 and CommoServe (one server, ONLINE_HOST; the
+// their own, "Results", on the strip only while there are results (app.toml `show`); their list is a node of kind `list` (api.md 6.19), and RETURN on a result opens its file's action
+// sheet, or the list of its files (op_open), in the Library, which reads them through the table "online" (online_api.h) as the folder "/Online". Three sources: Assembly64 and CommoServe (one server, ONLINE_HOST; the
 // header Client-Id picks the library, "Ultimate" or "Commodore"; the query is built the way the firmware's assembly_search.cc builds it: (field:"value") joined by &, a choice
 // unquoted by its aqlKey) and Beyond64 (B64_HOST, its public JSON API, U21 §4). Every request to a server runs on a job (api->job->start): api.md 1.3.9 and 4.8.13.2 forbid
 // api->net connect, send and recv on the menu task and the executor task. Search is a node with `job`: the menu calls online.search again while it answers `more`. The choice
@@ -1735,9 +1735,34 @@ int op_search(CoreCtx *, const OpArgs &, OpOut &o)
     return OPE_OK;
 }
 
-// RETURN on a result (the list's `op`, api.md 6.19.3): its files in the Library, the folder "/Online/<result>" (lib.show, then the menu goes to F3, whose first tab is the
-// Library). A result of Beyond64 with no file this machine can load says so instead (D4). Not yet the file's action sheet: ctx.browse_sheet of base 3.6 is not acted on
-// when a list row's operation calls it (MultiCore SDK 0.5.1, U21 §7 finding 15).
+bool have_entries(int ri);
+
+int g_pick = -1, g_pick_gen = -1;          // the result whose files the list online.files shows (online.open asked for it)
+char g_pick_err[96];                       // why they did not come: the list says it and does not ask again (each RETURN on a result asks anew)
+
+// The file of a result in Browse with its action sheet open (browse_sheet, base 3.6), as RETURN on it there does. The folder must list at once: the result's entries are kept
+// (have_entries), else Browse finds the folder still loading and the cursor stays at the top.
+bool open_file(int i, const char *name, OpOut &o)
+{
+    if (!g_api || !SVC_HAS(g_api->ctx, browse_sheet)) {
+        return false;
+    }
+    char path[FS_PATH_MAX];
+    ot_copy(path, sizeof(path), "/Online/");
+    ot_cat(path, sizeof(path), g_res.r[i].folder);
+    ot_cat(path, sizeof(path), "/");
+    ot_cat(path, sizeof(path), name);
+    if (!g_api->ctx->browse_sheet(path)) {
+        return false;
+    }
+    ot_copy(o.msg, o.msglen, name);
+    return true;
+}
+
+// RETURN on a result (the list's `op`, api.md 6.19.3). A result whose one file is known (Beyond64 names it with the details; Assembly64 and CommoServe once its entries
+// are kept) opens that file's action sheet in Browse. Any other: the list of its files (ctx.ask_list, the state online.files), which fills while they load; RETURN on a file
+// (online.file) opens its action sheet. A result of Beyond64 with no file this machine can load says so instead (D4). Without browse_sheet or ask_list: its folder in the Library
+// as before (lib.show "/Online/<result>", then F3).
 int op_open(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     collect();
@@ -1752,6 +1777,22 @@ int op_open(CoreCtx *, const OpArgs &a, OpOut &o)
         ot_cat(o.msg, o.msglen, x.title);
         return OPE_OK;
     }
+    const bool kept = (ent_for == i && ent_gen == g_res.gen) || (g_res.src == S_B64 && x.nfiles == 1 && have_entries(i));
+    if (kept && nent == 1 && open_file(i, ent[0].name, o)) {
+        return OPE_OK;
+    }
+    if (g_api && SVC_HAS(g_api->ctx, ask_list) && SVC_HAS(g_api->ctx, browse_sheet)) {
+        g_pick = i;
+        g_pick_gen = g_res.gen;
+        g_pick_err[0] = 0;
+        if (!kept) {
+            have_entries(i);                                     // the request starts now; the list shows "Loading" until it has come
+        }
+        g_api->ctx->ask_list("online.file", i, x.title, "online.files");
+        ot_copy(o.msg, o.msglen, x.title);
+        ot_cat(o.msg, o.msglen, ": its files");
+        return OPE_OK;
+    }
     ot_copy(g_at, sizeof(g_at), "/Online/");
     ot_cat(g_at, sizeof(g_at), x.folder);
     ot_cat(g_at, sizeof(g_at), "/");
@@ -1764,6 +1805,33 @@ int op_open(CoreCtx *, const OpArgs &a, OpOut &o)
     ot_copy(o.msg, o.msglen, x.title);
     ot_cat(o.msg, o.msglen, ": its files");
     return OPE_OK;
+}
+
+// RETURN on a file of the list online.open asked for: phase is the result, answer the file's name.
+int op_file(CoreCtx *, const OpArgs &a, OpOut &o)
+{
+    collect();
+    int i = a.i(0);
+    if (i < 0 || i >= g_res.n || i != g_pick || g_pick_gen != g_res.gen) {
+        ot_copy(o.msg, o.msglen, "The results have changed: search again");
+        return OPE_FAILED;
+    }
+    if (!have_entries(i)) {
+        ot_copy(o.msg, o.msglen, err);
+        return OPE_FAILED;
+    }
+    for (int k = 0; k < nent; k++) {
+        if (ot_ieq(ent[k].name, a.s(1))) {
+            if (open_file(i, ent[k].name, o)) {
+                return OPE_OK;
+            }
+            ot_copy(o.msg, o.msglen, "Browse cannot open ");
+            ot_cat(o.msg, o.msglen, ent[k].name);
+            return OPE_FAILED;
+        }
+    }
+    ot_copy(o.msg, o.msglen, "No such file");
+    return OPE_FAILED;
 }
 
 // RETURN on the list's last row (`more`): Beyond64's next page, asked for in the background; the rows grow when it has come (the list reads its state again)
@@ -2197,7 +2265,7 @@ bool have_entries(int ri)
         return true;
     }
     const Res &x = g_res.r[ri];
-    if (g_res.src == S_B64 && x.nfiles == 1 && x.file1[0]) {        // the details of the search named its one file: the folder lists it at once, no request
+    if (g_res.src == S_B64 && x.nfiles == 1 && x.file1[0]) {        // the details of the search named its one file: no request (online.open puts the cursor on it at once)
         memset(&ent[0], 0, sizeof(ent[0]));
         ot_copy(ent[0].name, sizeof(ent[0].name), x.file1);
         ent[0].idx = x.file1_idx;
@@ -2289,6 +2357,43 @@ bool tab_stat(const char *rel, uint64_t *size, bool *dir)
     return false;
 }
 
+// The rows of the list online.open asks for (ctx.ask_list, api.md 4.14.14; read again about every half second while it is up): the files of the result g_pick, value and
+// title its name, the right column its size ("-" unknown); while they load, or when they failed, one note row that says so.
+const char *st_files(CoreCtx *)
+{
+    static char b[MAX_ENT * 96 + 128];
+    collect();
+    b[0] = 0;
+    if (g_pick < 0 || g_pick >= g_res.n || g_pick_gen != g_res.gen) {
+        return "!The results have changed: search again\n";
+    }
+    if (g_pick_err[0] || !have_entries(g_pick)) {
+        const bool running = g_w.state != 0 && g_w.kind == W_ENTRIES && g_w.ri == g_pick && g_w.gen == g_res.gen;
+        if (!g_pick_err[0] && !running) {
+            ot_copy(g_pick_err, sizeof(g_pick_err), err);    // failed (prefetch put the reason in err): said, not asked for again every half second
+        }
+        ot_copy(b, sizeof(b), "!");
+        ot_cat(b, sizeof(b), g_pick_err[0] ? g_pick_err : err);
+        ot_cat(b, sizeof(b), "\n");
+        return b;
+    }
+    for (int i = 0; i < nent; i++) {
+        char kb[24] = "-";                                     // as fsif.h fs_size_kb writes it (its snprintf is not in this sub-app's libc)
+        if (fs_size_known(ent[i].size)) {
+            kb[0] = 0;
+            ot_cat_int(kb, sizeof(kb), (long)((ent[i].size + 1023) >> 10));
+            ot_cat(kb, sizeof(kb), " KB");
+        }
+        ot_cat(b, sizeof(b), ent[i].name);
+        ot_cat(b, sizeof(b), "\t");
+        ot_cat(b, sizeof(b), ent[i].name);
+        ot_cat(b, sizeof(b), "\t");
+        ot_cat(b, sizeof(b), kb);
+        ot_cat(b, sizeof(b), "\n");
+    }
+    return b[0] ? b : "!No file of it loads here\n";
+}
+
 // The bytes of a file of a result in a block of the caller's allocator (the base frees it with its own free: a block of this sub-app's account is no block of the base's). A file that is not
 // kept yet is downloaded in the background: null, and tab_error says so; the call after the download has ended gets the bytes.
 uint8_t *tab_fetch(const char *rel, uint8_t *(*alloc)(uint32_t n), uint32_t *len)
@@ -2350,6 +2455,7 @@ uint8_t *tab_fetch(const char *rel, uint8_t *(*alloc)(uint32_t n), uint32_t *len
 
 static const ArgSpec set_args[] = { ARG_STRING("field", 16), ARG_STRING("text", 120) };
 static const ArgSpec row_args[] = { ARG_INT("index", 0, 9999), ARG_STRING("answer", 65) };
+static const ArgSpec file_args[] = { ARG_INT("phase", 0, 9999), ARG_STRING("answer", 64) };
 
 const LibOpDecl online_ops[] = {
     { "online.set", set_args, 2, op_set },
@@ -2357,6 +2463,7 @@ const LibOpDecl online_ops[] = {
     { "online.clear", 0, 0, op_clear },
     { "online.search", 0, 0, op_search },
     { "online.open", row_args, 2, op_open },
+    { "online.file", file_args, 2, op_file },
     { "online.more", row_args, 2, op_more },
     { "online.new", 0, 0, op_new },
     { "online.forget", 0, 0, op_forget },
@@ -2398,6 +2505,7 @@ const LibStateDecl online_states[] = {
     { "online.r.hidden", st_rhidden },
     { "online.r.nohidden", st_rnohidden },
     { "online.at", st_at },
+    { "online.files", st_files },
 };
 const int online_nstates = (int)(sizeof(online_states) / sizeof(online_states[0]));
 

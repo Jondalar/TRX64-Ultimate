@@ -1,22 +1,23 @@
 # The TRX64 SDK that software/trx64u builds against (U18). fetch_sdk.sh checks the tarball against this file and
 # unpacks it into software/trx64u/.sdk/ (not in git).
-# RELEASE: 0.5.1 (base 3.6), the GitHub release sdk_release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO), published
-# from their branch t239.3, commit 40f47ac8 (T262 D4): the fixes of the findings U21 sent on 0.5.0 and, new, ctx.browse_at and browse_sheet,
-# SVCFS_SIZE_UNKNOWN (fsif.h FS_SIZE_UNKNOWN), `[[key]]` rows in a library's menu record, the node keys ask_max and ask_any, a list row's tone
-# `disabled` (api.md 1.2, README "What is new in 0.5.1"). A library built against 0.4.x or 0.5.0 loads unchanged.
+# RELEASE: 0.5.2 (base 3.6), the GitHub release sdk_release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO), published
+# from their branch t239.3, commit 05fee8c7 (T262 D4): 0.5.1 (ctx.browse_at and browse_sheet, SVCFS_SIZE_UNKNOWN / fsif.h FS_SIZE_UNKNOWN,
+# `[[key]]` rows in a library's menu record, the node keys ask_max and ask_any, a list row's tone `disabled`) and the two fixes U21 asked for:
+# browse_at/browse_sheet act from a list row's operation and from an ask_list answer (finding 15), the Library's path header is one line
+# (finding 16) (api.md 1.2, README "What is new in 0.5.2"). A library built against 0.4.x or 0.5.x loads unchanged.
 # fetch_sdk.sh --release takes the tarball there and checks it against the SHA-256 GitHub lists and the release's SHA256SUMS. There is no copy in
 # our Gitea registry (U20: Gitea is the archive; a registry upload is Alex's), so the pin names no sdk_package and --download refuses.
 # build.sh checks the unpacked VERSION against source_commit and the hashes below. The SDK ships no app image (since 0.4.0): the app is linked
 # here from the base archive (pack_cor.sh), and base_archive_sha256 is the hash of its lib/libtrxbase.a as VERSION names it.
-sdk_version=0.5.1
-sdk_tarball=trx64-sdk-0.5.1.tar.gz
-sdk_tarball_sha256=86a3dcd2d1b0ad67db799b9820e36dea34db94e1679dbf2c7f18adefb0d285ca
+sdk_version=0.5.2
+sdk_tarball=trx64-sdk-0.5.2.tar.gz
+sdk_tarball_sha256=9b36e8d7fee872ffdcfb9901d34305257541073c179a7d18f4cfac2d81a2d847
 source_branch=t239.3
-source_commit=40f47ac8
+source_commit=05fee8c7
 base_api=3.6
 abi_major=3
 api_headers_sha256=176b3dbd37e17705eae830273e0b3de8e9da92d9d1c927318751c57562790e50
-base_archive_sha256=492c064f1696ea5b6446265859bbffd2286435f9cf470ed72e4f5f6b316bbf25
+base_archive_sha256=69d8a0c64d65699abbc48f940c2d6addf568f683a1326e722ba4307b52c1a0c4
 # The online sub-app is not pinned here (U20 D22): apps/online is built by build.sh against this SDK (online_api.h; the base takes the table only
 # when it is at least its own OnlineApi's size, netfs.cc online_api). The release's .u2a files (miniz, unzip, testlib) are not taken.
-sdk_release=sdk-0.5.1-40f47ac8
+sdk_release=sdk-0.5.2-05fee8c7

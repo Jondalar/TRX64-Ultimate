@@ -162,6 +162,7 @@ op	online.next_source
 op	online.clear
 op	online.search
 op	online.open	index:int:0:9999:0:	answer:string:0:0:65:
+op	online.file	phase:int:0:9999:0:	answer:string:0:0:64:
 op	online.more	index:int:0:9999:0:	answer:string:0:0:65:
 op	online.new
 op	online.forget
@@ -371,6 +372,7 @@ state	online.r.found
 state	online.r.hidden
 state	online.r.nohidden
 state	online.at
+state	online.files
 state	usb.mouse
 state	usb.mouse_mode
 state	usb.keyboard

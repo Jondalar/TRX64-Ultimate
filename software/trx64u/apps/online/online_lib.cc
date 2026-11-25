@@ -20,7 +20,7 @@ static const LibExportDecl k_exports[] = { { ONLINE_API_NAME, ONLINE_API_MAJOR, 
 extern "C" LIB_ENTRY_ATTR int ONLINE_ENTRY_NAME(const LibApi *api, LibRecord *out)
 {
     if (api->abi_major != U2A_ABI_MAJOR || api->abi_minor < 6 || !api->mem || !api->net || !api->job || !LIB_RECORD_COVERS(out->struct_size, export_list)) {
-        return 1;                                                    // needs the menu record of base 3.6 (its key rows, ask_max and ask_any; a list node, pick, show, busy of 3.5), the outgoing sockets and the jobs of 3.3 (every request runs on a job) and the named exports of 3.2
+        return 1;                                                    // needs the menu record of base 3.6 (its key rows, ask_max and ask_any; a list node, pick, show, busy of 3.5), ctx.browse_sheet and ask_list, the outgoing sockets and the jobs of 3.3 (every request runs on a job) and the named exports of 3.2
     }
     if (api->net->size < __builtin_offsetof(SvcNet, resolve) + sizeof(api->net->resolve)) {
         return 1;

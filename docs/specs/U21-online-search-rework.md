@@ -1,9 +1,9 @@
 # U21 — The online search of trx64u: a form, a results tab, and Beyond64 as a third source
 
-**Status:** BUILT 2026-11-25 on SDK 0.5.0, moved to SDK 0.5.1 the same day (branch `u21-online`), and run in ue2emu against the real servers (§7):
-the form and the results tab of D9, the three sources, Beyond64's filter and paging, Run from a result; on 0.5.1 the keys in the sub-app's own record,
-free texts, "-" as Beyond64's size, the grey rows. Open: the board test; a result that opens its file's action sheet at once (base defect of 0.5.1,
-finding 15, fixed in MultiCore's SDK 0.5.2, which U21 then pins). The UX review of the 0.4.6 screens (FAIL) and what became of each finding are in §3.
+**Status:** BUILT 2026-11-25 on SDK 0.5.0, moved to SDK 0.5.1 and 0.5.2 the same day (branch `u21-online`), and run in ue2emu against the real
+servers (§7): the form and the results tab of D9, the three sources, Beyond64's filter and paging, Run from a result; the keys in the sub-app's own
+record, free texts, "-" as Beyond64's size, the grey rows, and a result that opens its file's action sheet. Open: the board test. The UX review of
+the 0.4.6 screens (FAIL) and what became of each finding are in §3.
 **Repo:** TRX64-Ultimate, the sub-app `software/trx64u/apps/online/` (`app.toml`, `online_search.cc`, `online_http.cc`, `online_json.cc`).
 **Origin:** Alex, 2026-11-25 (translated): "The 'online' u2a app in the LVGL UI looks terrible. 1. Search should not be a tab of its own: in a
 form I say what I am looking for and from which source, and I start the search in the form; the result may then become a tab of its own.
@@ -110,7 +110,7 @@ What became of them on SDK 0.5.0 (U21, 2026-11-25; "base" = the base's part, Mul
 | 8 | RETURN blanks the content (~250 ms) | Base P9 (0.5.0) for rows; the list page still blanks on RETURN and is rebuilt about 1.5 s later (known, sent to MultiCore) |
 | 9 | No network: misleading error, Search enabled | Fixed: Search greyed (`when_state`), the hint "No network: set it up in F8 System > Network"; a choice list says "No network: F8 System > Network" |
 | 10 | "Nothing found" red | Fixed: "Nothing found in <source> for '<text>'" as a plain status, the form stays, Search keeps the focus |
-| 11 | Result list: focus on "..", no source, query, count, paging | Fixed: the results tab (title, side panel Source / Searched for / Found / Not loadable), the list page with the SELECTED panel, Beyond64's pages ('+' row); Assembly64 and CommoServe stay at 20 (D7, "20 (the most)"). The cursor on ".." when a result's folder opens: base `browse_sheet` (0.5.1), not acted on from a list row there (finding 15, 0.5.2) |
+| 11 | Result list: focus on "..", no source, query, count, paging | Fixed: the results tab (title, side panel Source / Searched for / Found / Not loadable), the list page with the SELECTED panel, Beyond64's pages ('+' row); Assembly64 and CommoServe stay at 20 (D7, "20 (the most)"). The cursor on ".." when a result's folder opens: fixed on 0.5.2: a result opens its file's action sheet (`browse_sheet`), or first the list of its files |
 | 12 | Names cut by a 56-byte buffer without ellipsis; duplicates "#5" | Fixed: titles to 61 characters, cut with "..."; a folder name that is taken gets " (2)", " (3)" |
 | 13 | Server keys as labels and in the status | Fixed: Archive, Subcategory, Year, Added within, File type, Sort by; the status says "Category: Games" |
 | 14 | Empty side panel | Fixed: form (Source, Last search, Result), results (above), list page (the result's side lines; Beyond64's description) |
@@ -152,6 +152,16 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
 
 ## 7. Status and history
 
+- **2026-11-25, SDK 0.5.2: a result opens its file.** `sdk.pin`: the release `sdk-0.5.2-05fee8c7` (MultiCore t239.3 `05fee8c7`, base 3.6, T262 D5;
+  the tarball's SHA-256 equals SHA256SUMS): finding 15 fixed (`browse_at`/`browse_sheet` act from a list row's operation and from an `ask_list`
+  answer), finding 16 fixed (the Library's path header is one line). The code taken out on 0.5.1 is back: RETURN on a result whose one file is
+  known (Beyond64 names it with the details; Assembly64 and CommoServe once its entries are kept) opens that file's action sheet in Browse; any
+  other shows the list of its files (`ctx.ask_list`, state `online.files`, "Loading the files from <source> ..." until they come, a failure said
+  once and not asked again every half second), and RETURN on a file (`online.file`) opens its sheet. `online.u2a` image 49,380 bytes; the golden
+  is 414 lines (199 operations, 215 states: `online.file`, `online.files`), none missing either way. ue2emu (slirp, the real servers):
+  Assembly64 "commando", RETURN on "Commando II +": its list filled ("Loading ...", then `commando2-palankvideo.d64`, 171 KB), RETURN: the
+  sheet of the file in Browse; back to the results, RETURN on it again: the sheet at once (entries kept); Run disk: `LOAD"*",8,1`. Beyond64
+  "infinite matter": one RETURN, the sheet of `Infinite Matter.prg` at once; Run: downloaded, `$0801-$080C, RUN`.
 - **2026-11-25, moved to SDK 0.5.1.** `sdk.pin`: the release `sdk-0.5.1-40f47ac8` (MultiCore t239.3 `40f47ac8`, base 3.6, T262 D4; the tarball's
   SHA-256 equals the release's SHA256SUMS). `online.u2a` needs `base>=3.6` (`APP_NEEDS`, `online_lib.cc` refuses an ABI minor under 6): image
   47,368 bytes. What changed:
@@ -171,7 +181,7 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
   - **Finding 15 (MultiCore, confirmed, fix in SDK 0.5.2):** `browse_at` and `browse_sheet` store their request, but the menu acts on it
     (`take_screen`) only after a task, a row's operation and the menu's open, not after a list row's operation (`list_call`) or an `ask_list`
     answer (`pick_list_take`). Measured: RETURN on a file of an `ask_list` that called `browse_sheet` left the menu where it was, and the
-    request stayed pending for the next row. So a result still opens its folder (cursor on ".."). Built and run, then taken out until 0.5.2: a
+    request stayed pending for the next row. So on 0.5.1 a result still opened its folder (cursor on ".."). Built and run, then taken out until 0.5.2: a
     result whose one file is known opens that file's action sheet; any other shows the list of its files (`ask_list`, filling while they
     load), and RETURN on a file opens its sheet.
 

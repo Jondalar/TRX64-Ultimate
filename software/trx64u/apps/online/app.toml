@@ -308,7 +308,7 @@ label = "Results"
 state = "online.rows"
 op = "online.open"
 order = 10
-ui = { more = "online.more", sub = "RETURN lists them, RETURN on one opens its files", tone = "violet" }
+ui = { more = "online.more", sub = "RETURN lists them, RETURN on one opens its file", tone = "violet" }
 
 [[node]]
 anchor = "F3/results"
