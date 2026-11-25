@@ -2,7 +2,8 @@
 
 **Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
 green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb0206e3, CI run 483 green: lint, bitstream, package, sims, cor; the ROM store on the builder filled from VICE's
-svn-mirror by the `dbgsess` bench). A7 and B built on branch `u20-b` (2026-11-25), checked on the Mac, the Gitea key unchanged; they run on
+svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
+the Gitea key unchanged and no job from `.github/workflows` started on Gitea; they run on
 GitHub after C (MultiCore's builder table, the SDK release) and D (Alex's setup); the names they use are proposals to MultiCore (§6 "B, A7").
 F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25).
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
