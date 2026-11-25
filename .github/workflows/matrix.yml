@@ -305,8 +305,9 @@ jobs:
     needs: [dispatch, core]
     if: ${{ !cancelled() && needs.dispatch.result == 'success' && needs.core.result == 'success' }}
     runs-on: ubuntu-latest
+    # MultiCore's emu image with ue2emu's `net` feature (T261 D8; libslirp 4.9.7 from source): emu_ops.py reads REST and the monitor over --net user
     container:
-      image: ghcr.io/jondalar/trx64u-emu@sha256:250f08bb1a00e66fccec6c136e3e132ad542b430ab668cd98ccf87b541382281
+      image: ghcr.io/jondalar/trx64u-emu@sha256:ba18a018b776cb3c96b9a7e62656fe7c2c190bf6b71bf36700c8615277da7984
     timeout-minutes: 30
     strategy:
       fail-fast: false

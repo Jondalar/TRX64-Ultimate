@@ -313,7 +313,7 @@ Built:
   `software/trx64u/fetch_sdk.sh --release` fetches `sdk_tarball` and `online_u2a` of `sdk.pin`'s new `sdk_release` through `tools/builds.sh`
   (a cached file with the pinned hash is kept); `--download` (Gitea) stays.
 - **3, images and caches.** MultiCore's digests of `t239.3`: `trx64u-build@sha256:706a976b…0c08` (dispatch, bits, core, prerelease),
-  `trx64u-sim@sha256:3e366a08…25e0` (lint, sims; the same OSS CAD Suite 2026-09-27 as our `trx64-sim-env:4`), `trx64u-emu@sha256:250f08bb…2281`
+  `trx64u-sim@sha256:3e366a08…25e0` (lint, sims; the same OSS CAD Suite 2026-09-27 as our `trx64-sim-env:4`), `trx64u-emu@sha256:250f08bb…2281` (since 2026-11-25 `ba18a018…7984`, built with ue2emu's `net` feature, MultiCore T261 D8: our emulator step needs the network)
   (emu: build image plus ue2emu v0.7.0); actions pinned at their SHAs (checkout v4.2.2, cache v4.2.3, upload v4.6.2, download v4.3.0). Caches:
   the SDK release files (key: hash of `sdk.pin`), the restored bitstream entry (key: the entry name, D40), the bench markers and ROM store
   (`ci-cache-sims-c64_basic-<sha>`, shared with the nightly), Gideon's ROM folder (key: its commit). Not taken: ccache (D41): the SDK's makefiles
