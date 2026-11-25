@@ -234,8 +234,8 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  # the core lane - 3 what has changed, 6 build (the SDK of the pinned release, our libraries), 11 package (5 and 7 inside pack_cor.sh), 13 deliver
-  # (the artifact deliver-<core>; 12 is the job emu)
+  # the core lane - 3 what has changed, 6 build (the SDK of the pinned release, our libraries and sub-apps), 11 package (5 and 7 inside pack_cor.sh),
+  # 13 deliver (the artifact deliver-<core>; 12 is the job emu)
   core:
     name: "${{ matrix.core }}: steps 3, 6, 11 (with 5 and 7), 13"
     needs: [dispatch, lint, bits]
@@ -285,11 +285,11 @@ jobs:
           path: ${{ env.CI_TEMP }}/bit
       - name: 3 What has changed
         run: ci/lane.sh "$LANE" changed
-      - name: 6 Build (the SDK of the pinned release, our libraries and the sub-app)
+      - name: 6 Build (the SDK of the pinned release, our libraries and the sub-apps trex_crt and online)
         run: ci/lane.sh "$LANE" build
       - name: 11 Package (the app linked with the TOML A and B, symbol check, the .cor with this commit's bitstream, its ops and heap checks)
         run: ci/lane.sh "$LANE" package
-      - name: 13 Deliver (the .cor, its app's ELF, deliver.json)
+      - name: 13 Deliver (the .cor, the sub-apps it carries, its app's ELF, deliver.json)
         run: ci/lane.sh "$LANE" deliver
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         with:

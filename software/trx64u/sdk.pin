@@ -22,17 +22,10 @@ base_api=3.4
 abi_major=3
 api_headers_sha256=22fd021dcfb654a4a933010080ddc33b5c88a7ebee5cd18f4712ec76992e30b3
 base_archive_sha256=65dc7f11d1bfc04204bb46278e942cee3e847a132078741cf96de289ec4f8080
-# The online sub-app (MultiCore T239.3 L-3, D12: online search is a shared sub-app): online.u2a of MultiCore's t239.3 6e280710 apps/online, not inside
-# the tarball (their .ci/sdk/online-6e280710.u2a, from that commit's trxapps build stage). 0.4.6's OnlineApi has two more members (loading and
-# loading_for, D41 L-3c), and the base takes the table only when it has that size (netfs.cc online_api), so the 8ff28ba9 build we had before
-# (970b0c2c..., rebuilt here byte for byte) gives no folder /Online on this SDK. trx64u.cor carries it in record 7 (pack_cor.sh --lib); it
-# registers the operations and states online.* and its menu record brings the F3 tab Online. fetch_sdk.sh checks it against online_u2a_sha256 and puts
-# it into .sdk/; a copy goes into our registry under online_package (TREX, generic; fetch_sdk.sh --download).
-online_u2a=online.u2a
-online_package=trx64-online/1.0-6e280710
-online_u2a_sha256=061c73943c4419233138714f52c5fc16b3c7f5e266a20c305189d8e0ab820968
-online_source_commit=6e280710
-# U20 B (D11): the release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO) that holds sdk_tarball and online_u2a with a
-# SHA256SUMS; fetch_sdk.sh --release takes them there (GitHub's runners reach no Gitea registry). The tag is U20's proposal to MultiCore (part C):
-# until their SDK lane publishes it, this release does not exist and --release fails.
+# The online sub-app is not pinned here since U20 D22 (MultiCore T261 D6, D7): apps/online is our copy of MultiCore's t239.3 6e280710 apps/online,
+# built by build.sh against this SDK (its OnlineApi has loading and loading_for, D41 L-3c, and the base takes the table only when it has that size,
+# netfs.cc online_api); its online.u2a equals the file pinned here before (061c7394..., MultiCore's .ci/sdk/online-6e280710.u2a) byte for byte.
+# U20 B (D11): the release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO) that holds sdk_tarball with a SHA256SUMS;
+# fetch_sdk.sh --release takes the tarball there (GitHub's runners reach no Gitea registry). Published by MultiCore's T261 (U20 part C); the
+# .u2a files it also holds are not taken.
 sdk_release=sdk-0.4.6-6e280710

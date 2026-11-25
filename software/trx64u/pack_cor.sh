@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from, its tools, and beside it MultiCore's online
-# sub-app (sdk.pin online_*, .sdk/online.u2a, fetch_sdk.sh); from here: c64_basic's TOML A (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our
-# three libraries and the sub-app TREX CRT (build.sh), our two TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565) and a c64_basic bitstream.
+# Pack trx64u.cor (U18) and check it. From the pinned SDK (sdk.pin): the base archive the app is linked from and its tools; from here: c64_basic's TOML A
+# (gateware/c64_basic.toml), the app's TOML B (app/toml_b.toml), our three libraries and the two sub-apps TREX CRT and online search (build.sh), our two
+# TOMLs (base/menu.toml, base/desc.toml), the icon (base/icon.rgb565) and a c64_basic bitstream.
 # Nothing of the firmware submodule (U20 A2, A3).
-#  - Record 7: our libraries trx64u, ring and monitor, and the online sub-app (a resident image: it registers online.* and brings the F3 tab Online, MultiCore
-#    T239.3 L-3), each checked against its pin first. Record 8, the files the core installs in its folder: our sub-app TREX CRT as apps/trex_crt.u2a
+#  - Record 7: our libraries trx64u, ring and monitor, and the online sub-app (apps/online, a resident image: it registers online.* and brings the F3 tab
+#    Online, MultiCore T239.3 L-3; ours since U20 D22). Record 8, the files the core installs in its folder: our sub-app TREX CRT as apps/trex_crt.u2a
 #    (T239.3 P2-5; the base finds a core's applications in <core folder>/apps/, appindex.h). No SID player (U20 D6: it is gone, its sidplayer/ files with
 #    it). No Softboot (Alex, 2026-11-24: it starts a .cfw's firmware application on the running bitstream, which c64_basic under this app is not; build.sh).
 #  - The app (MultiCore T239.3 D31, P3-3): record 6 is compiled against the TOML B's [sizes], then the SDK's tools/app_build.py links the app in
@@ -110,11 +110,9 @@ mkdir -p "$F/apps"
 for f in trex_crt; do
     cp "$HERE/build/$f/$f.u2a" "$F/apps/"
 done
-# record 7's online sub-app: the pinned file (fetch_sdk.sh put it there), checked again
-ONL="$HERE/.sdk/$(pin online_u2a)"
-[ -f "$ONL" ] || { echo "pack_cor.sh: no $ONL: run fetch_sdk.sh <tarball> <$(pin online_u2a)> or fetch_sdk.sh --download" >&2; exit 1; }
-SUM="$(sha256sum "$ONL" 2>/dev/null || shasum -a 256 "$ONL")"
-[ "${SUM%% *}" = "$(pin online_u2a_sha256)" ] || { echo "pack_cor.sh: $ONL has sha256 ${SUM%% *}, sdk.pin wants $(pin online_u2a_sha256)" >&2; exit 1; }
+# record 7's online sub-app: our build (build.sh online, U20 D22)
+ONL="$HERE/build/online/online.u2a"
+[ -s "$ONL" ] || { echo "pack_cor.sh: no $ONL: run build.sh (or pack_cor.sh without --no-build)" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUT")"
 python3 -I "$SDK/tools/cor_pack.py" pack-large -o "$OUT" --id trx64u --name TRX64U --version "$VER" \

@@ -2,7 +2,8 @@ name: Pipeline
 
 # U20 B (MultiCore T239.1, T239.5): the pipeline of this repository on GitHub. Its work is the matrix (matrix.yml: the dispatcher, lint per lane, the
 # benches on demand, the bitstream from the builder, the core trx64u, the emulator); a push to main or a v* tag then makes the pre-release of
-# trx64u.cor in the builds repository (job prerelease, environment `builds`). CI never makes a release: Alex tags, tools/release_trx64u.sh publishes.
+# trx64u.cor and its two sub-apps in the builds repository (job prerelease, environment `builds`). CI never makes a release: Alex tags,
+# tools/release_trx64u.sh publishes.
 # The builder (U20 D9: MultiCore's builder, serving N repositories) watches the runs of this file: it reads the work order of the dispatcher,
 # builds the missing bitstream entry and releases the environment `bitstreams`, where the bitstream job waits without a runner.
 # Pushes of this repository's branches run on `push`; a pull request from a fork runs on `pull_request` (a pull request from a branch of this
@@ -49,11 +50,11 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
     uses: ./.github/workflows/matrix.yml
 
-  # The pre-release of a push to main or a v* tag (U20 D10, D12): trx64u.cor and its manifest.json under <prefix><branch>-<sha8> in the builds repository,
-  # MultiCore's runners take trx64u.cor from there. The environment `builds` lets only those refs in; the job runs the commit's own scripts with the token
+  # The pre-release of a push to main or a v* tag (U20 D10, D12, D22): trx64u.cor, trex_crt.u2a, online.u2a and their manifest.json under
+  # <prefix><branch>-<sha8> in the builds repository; MultiCore's runners take the three files from there. The environment `builds` lets only those refs in; the job runs the commit's own scripts with the token
   # of that environment, so the push must be one of Alex's (rulesets of main and v* tags).
   prerelease:
-    name: Pre-release (trx64u.cor into the builds repository)
+    name: Pre-release (trx64u.cor, trex_crt.u2a, online.u2a into the builds repository)
     needs: [matrix]
     if: >-
       ${{ !cancelled() && needs.matrix.result == 'success'

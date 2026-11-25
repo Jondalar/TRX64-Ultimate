@@ -85,7 +85,7 @@ core:trx64u)
       fi
       printf '%s\n' "gateware=$gw" "toml_a=$ta" "app=$ap" > "$out/changed"
       say "the gateware: $gw, its TOML A: $ta, the app: $ap (base ${base:-none})" ;;
-    # 6: the SDK from its pinned release (sdk.pin sdk_release, D11), then our libraries and the sub-app (build.sh)
+    # 6: the SDK from its pinned release (sdk.pin sdk_release, D11), then our libraries and the two sub-apps, trex_crt and online (build.sh)
     build)
       sh "$T/fetch_sdk.sh" "${SDK_FETCH:---release}"
       sh "$T/build.sh" ;;
@@ -96,12 +96,25 @@ core:trx64u)
       ver="$(cor_version)"
       say "$e/c64_basic.bit, version $ver"
       sh "$T/pack_cor.sh" --no-build --bit "$bit" --bit-commit "$(git -C "$ROOT" rev-parse --short=8 HEAD)" --version "$ver" --out "$out/cor/trx64u.cor" ;;
-    # 13: the .cor, the app's ELF (the emulator's symbols) and deliver.json (what ci/prerelease.sh puts into manifest.json)
+    # 13: the .cor, the two sub-apps it carries (U20 D22: the fw- pre-release ships them beside it, checked to be the bytes in the .cor's records 7 and 8),
+    # the app's ELF (the emulator's symbols) and deliver.json (what ci/prerelease.sh puts into manifest.json)
     deliver)
       [ -s "$out/cor/trx64u.cor" ] || die "no trx64u.cor (step package)"
       e="$(entry)"
       rm -rf "$d"; mkdir -p "$d"
       cp "$out/cor/trx64u.cor" "$d/trx64u.cor"
+      cp "$T/build/trex_crt/trex_crt.u2a" "$T/build/online/online.u2a" "$d/"
+      python3 -I - "$T/tools" "$d" <<'PY' || die "the sub-apps are not the ones trx64u.cor carries"
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import emu_ops
+try:
+    _, recs, _ = emu_ops.read_cor(os.path.join(sys.argv[2], "trx64u.cor"))
+    emu_ops.check_subapps(recs, {n: open(os.path.join(sys.argv[2], n), "rb").read() for n in emu_ops.SUBAPPS})
+except emu_ops.Failed as e:
+    sys.exit("deliver: %s" % e)
+print("    " + ", ".join(sorted(emu_ops.SUBAPPS)) + ": the bytes trx64u.cor carries")
+PY
       cp "$T/build/app/app.elf" "$d/trx64u.elf"
       pin() { sed -n "s/^$1=//p" "$T/sdk.pin"; }
       python3 -I - "$d/deliver.json" "$(git -C "$ROOT" rev-parse HEAD)" "$(cor_version)" "$e" "${BUILDS_TAG_PREFIX}bit-$e" \
@@ -111,7 +124,7 @@ out, commit, ver, entry, tag, bitsha, sdkv, sdkc, sdkr, sdks = sys.argv[1:]
 json.dump({"commit": commit, "version": ver, "bitstream": {"entry": entry, "release": tag, "c64_basic.bit": bitsha},
            "sdk": {"version": sdkv, "commit": sdkc, "release": sdkr, "tarball_sha256": sdks}}, open(out, "w"), indent=2, sort_keys=True)
 PY
-      (cd "$d" && sha256sum trx64u.cor trx64u.elf deliver.json | tee SHA256SUMS) ;;
+      (cd "$d" && sha256sum trx64u.cor trex_crt.u2a online.u2a trx64u.elf deliver.json | tee SHA256SUMS) ;;
     # 12: the .cor in ue2emu with its own app (software/trx64u/tools/emu_ops.py: READY., the ping of the monitor library, the operations and states the
     # running app registers against base/ops_trx64u.txt, both ways)
     emu)

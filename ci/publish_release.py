@@ -13,8 +13,9 @@ release is immutable, so a half-made one must never be public; any failure after
          PUBLISH_API      default https://api.github.com (tests)
          CI_BRANCH, CI_REF_TYPE (else GITHUB_REF_NAME, GITHUB_REF_TYPE): the ref of the run
 
-DIR must hold SHA256SUMS naming every other file with its SHA-256 and nothing else (ci/prerelease.sh makes it). On main and a v* tag a missing token is an
-error; on any other ref nothing is published and the script ends green. Inside GitHub Actions it publishes only for a push of MC_SRC_REPO itself, to one of
+DIR must hold SHA256SUMS naming every other file with its SHA-256 and nothing else, and manifest.json whose `files` names every file but itself and
+SHA256SUMS with its SHA-256 and size and nothing else (MultiCore takes trx64u.cor and the sub-apps by both, U20 D12, D22); ci/prerelease.sh makes the two.
+On main and a v* tag a missing token is an error; on any other ref nothing is published and the script ends green. Inside GitHub Actions it publishes only for a push of MC_SRC_REPO itself, to one of
 those refs, for the commit the run is for. A release of that tag that is already published is left alone when it holds exactly these files; any other content
 is an error (immutable).
 """
@@ -34,7 +35,8 @@ TAG_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$")
 MAX_ASSET = 1900 * 1024 * 1024
 MAX_ASSETS = 200
 UPLOADS = "https://uploads.github.com/"
-BODY = "Pre-release of commit `%s` of %s, made by its pipeline (U20 B): trx64u.cor, manifest.json.\n\nSHA256SUMS lists every file; GitHub shows the same digests."
+BODY = ("Pre-release of commit `%s` of %s, made by its pipeline (U20 B, D22): trx64u.cor, the sub-apps trex_crt.u2a and online.u2a it carries, manifest.json."
+        "\n\nSHA256SUMS lists every file; GitHub shows the same digests; manifest.json gives each file's SHA-256 and size.")
 
 
 class PublishError(Exception):
@@ -132,6 +134,25 @@ def check_dir(d):
     return files, sums
 
 
+def check_manifest(files, sums):
+    """manifest.json of DIR names in `files` every file of DIR but itself and SHA256SUMS, each with the SHA-256 and the size it has, and nothing else."""
+    if "manifest.json" not in files:
+        raise PublishError("no manifest.json in the directory")
+    try:
+        m = json.load(open(files["manifest.json"]))
+    except ValueError as e:
+        raise PublishError("manifest.json is no JSON: %s" % e)
+    have = m.get("files") if isinstance(m, dict) else None
+    want = set(files) - {"SHA256SUMS", "manifest.json"}
+    if not isinstance(have, dict) or set(have) != want:
+        raise PublishError("manifest.json's files name %s, the directory holds %s" % (sorted(have) if isinstance(have, dict) else have, sorted(want)))
+    for n in sorted(want):
+        e = have[n] if isinstance(have[n], dict) else {}
+        if e.get("sha256") != sums[n] or e.get("size") != os.path.getsize(files[n]):
+            raise PublishError("%s: manifest.json says SHA-256 %s, size %s; the file is %s, %d bytes" % (
+                n, str(e.get("sha256"))[:16], e.get("size"), sums[n][:16], os.path.getsize(files[n])))
+
+
 def guard(args, env):
     """Whether this run may publish: True, or False for a ref that publishes nothing; raises for a run that must not. Reads only the arguments and the environment."""
     ref = env.get("CI_BRANCH") or env.get("GITHUB_REF_NAME") or ""
@@ -159,6 +180,7 @@ def guard(args, env):
 
 def publish(api, repo, tag, sha, d, src_repo, log=print):
     files, sums = check_dir(d)
+    check_manifest(files, sums)
     cur = api.call("GET", "repos/%s/releases/tags/%s" % (repo, tag))
     if cur and not cur.get("draft"):
         have = {a["name"]: (a.get("digest") or "")[7:] for a in cur.get("assets", [])}

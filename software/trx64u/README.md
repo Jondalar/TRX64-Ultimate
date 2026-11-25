@@ -1,6 +1,6 @@
 # trx64u: TRX64 Ultimate as a core of the MultiCore app core (U18)
 
-The application part of the `trx64u` core: three libraries and a sub-app for MultiCore's generic app core, and the UCI
+The application part of the `trx64u` core: three libraries and two sub-apps for MultiCore's generic app core, and the UCI
 library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U18-trx64u-app-part-moves-here.md, D1-D5).
 
 | Folder | Library | Holds |
@@ -14,20 +14,23 @@ library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the libraries it is linked with: the SDK's shared ones and `uci/` (MultiCore T239.3 D31) |
 | `apps/trex_crt/` | sub-app `trex_crt` | TREX CRT, the cartridge tools (Dump, Inspect, Flash; Write to Cartridge on `.crt`), loaded on demand (D5) |
+| `apps/online/` | sub-app `online` | the Assembly64 / CommoServe search: the F3 tab Online, `online.*` and the folder `/Online` (resident, record 7); MultiCore's `t239.3` `6e280710` `apps/online`, ours since U20 D22 (its README) |
 | `tools/` | - | `emu_ops.py`: runs `trx64u.cor` in ue2emu and exports what the running app registers; `boundary.py` |
 
-The sub-app is MultiCore's port onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt`) of our firmware's
+TREX CRT is MultiCore's port onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt`) of our firmware's
 tool at fork commit `aa2ef5dc` (its README lists what the port changed), moved here by MultiCore T239.3 P2-5 and built
 against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with MultiCore's P2-6. Softboot is not part of
 trx64u (Alex, 2026-11-24): it starts the firmware application inside a `.cfw` on the running bitstream, and c64_basic
-under this app is not the bitstream that application needs. It stays in the firmware build (`TREX/1541ultimate:apps/softboot`). Online search
-is MultiCore's sub-app `online.u2a` (pinned in `sdk.pin`, carried in record 7).
+under this app is not the bitstream that application needs. It stays in the firmware build (`TREX/1541ultimate:apps/softboot`); it is not
+ours to ship (U20 D22). The online search is a copy of MultiCore's `apps/online` at `t239.3` `6e280710` (U20 D22, MultiCore T261 D6: their
+SDK lane no longer builds it), built here and carried in record 7; its build equals the `online.u2a` that `sdk.pin` pinned before, byte for byte.
+Both sub-apps are assets of the `fw-<branch>-<sha8>` pre-release beside `trx64u.cor` (MultiCore's package takes them from there).
 
 ## State
 
-The three libraries and the sub-app build on MultiCore's dev SDK 0.4.6 (base 3.4, not released yet): every link
-closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (the sub-app declares
-none). The core's description (`base/menu.toml`, the UI
+The three libraries and the two sub-apps build on MultiCore's dev SDK 0.4.6 (base 3.4, not released yet): every link
+closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (TREX CRT declares
+none, the online search heap_keep 0 and heap_peak 16 MiB). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
 `pack_cor.sh` links trx64u's app from the SDK's base archive with `gateware/c64_basic.toml` (TOML A) and
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
@@ -67,7 +70,7 @@ firmware's copy is frozen, bug fixes only, each also here).
 
 ## Build
 
-`./build.sh [trx64u] [ring] [monitor] [trex_crt]` builds the libraries and the sub-app in `build/<name>/` (copies of the sources; the monitor
+`./build.sh [trx64u] [ring] [monitor] [trex_crt] [online]` builds the libraries and the two sub-apps in `build/<name>/` (copies of the sources; the monitor
 also gets `trxmon/`; the monitor and the ring library read `fwabi/`). Nothing of the firmware submodule is read (U20 A2). The driver table of `base/` and `ring/` is made there first from
 `gateware/c64_basic.toml` (their Makefiles: `descrec.py drivers` of the SDK with the SDK's `maps/`; `DRV_TOOLS` and
 `DRV_MAPS` name others). On a Mac it runs in the local `u64-build-env` container. `build.sh --check` only checks that
@@ -81,23 +84,24 @@ the firmware's trxmon and `monitor/lib_monitor.cc` / `monitor/monsrv.cc` give th
 
 ## SDK
 
-`sdk.pin` names the SDK version and the sha256 of its tarball, and MultiCore's online sub-app with its own
-commit (`online_*`: 6e280710, the build of SDK 0.4.6's commit: 0.4.6's base takes no older one, U18 §5). `./fetch_sdk.sh <tarball> [<online.u2a>]` checks both and puts them into `.sdk/` (not in git). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
+`sdk.pin` names the SDK version and the sha256 of its tarball. `./fetch_sdk.sh <tarball>` checks it and unpacks it into `.sdk/` (not in git);
+the online sub-app is no longer pinned (U20 D22: `apps/online`, built against this SDK's `online_api.h`: 0.4.6's base takes no smaller table,
+U18 §5). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
 `riscv64-elf-` has no newlib headers.
 
 ## Packing trx64u.cor
 
-1. The SDK and the online sub-app: `./fetch_sdk.sh --download` takes the pinned tarball and `online.u2a` from our registry
-   (`sdk.pin` `sdk_package`, TREX generic `trx64-sdk/<version>-<commit8>`, and `online_package`, `trx64-online/<version>-<commit8>`:
-   copies of MultiCore's `t239.3` build; their D26: we take the SDK from `t239.3` and keep it). `./fetch_sdk.sh <tarball>
-   <online.u2a>` takes local files (MultiCore's `.ci/sdk/` holds both). A new pin: build or fetch the SDK and `online.u2a` at a
-   `t239.3` commit (MultiCore's `tools/sdk_pack.sh`, `ci/trxapps.sh`), upload them, put their sha256 and hashes into `sdk.pin`.
+1. The SDK: `./fetch_sdk.sh --release` takes the pinned tarball from MultiCore's SDK release (`sdk.pin` `sdk_release`, U20 D11),
+   `./fetch_sdk.sh --download` from our Gitea registry (`sdk.pin` `sdk_package`, TREX generic `trx64-sdk/<version>-<commit8>`: a copy of
+   MultiCore's `t239.3` build; their D26: we take the SDK from `t239.3` and keep it), `./fetch_sdk.sh <tarball>` a local file
+   (MultiCore's `.ci/sdk/` holds them). A new pin: fetch the SDK of a MultiCore release, put its sha256 and hashes into `sdk.pin`, and check
+   that `apps/online` still builds against it (the base takes the table "online" only when it is at least its own `OnlineApi`'s size).
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
    `curl -o c64_basic.bit $GITEA_URL/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit` (`GITEA_URL`: our
    Gitea server, the `url:` of the tea login).
    It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
 3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version> [--emu <ue2emu>]` builds the three libraries
-   and the sub-app, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
+   and the two sub-apps, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's
    `tools/app_build.py build` with `gateware/c64_basic.toml`, `app/toml_b.toml` and the sources of `uci/`), runs the SDK's symbol check
    (`libtab.py symcheck`: no object of the base uses a symbol of a linked library), packs `build/cor/trx64u.cor` (`--out`
    for another name) with the heap of word 0 and runs `cor_pack.py check` on it; it prints the heap figures, the size and
@@ -114,7 +118,7 @@ What goes in:
 | the app (record 3) | linked by `pack_cor.sh` from the SDK's base archive (`sdk.pin`) with `gateware/c64_basic.toml` and `app/toml_b.toml` |
 | `cor_pack.py`, `app_build.py`, the symbol check | the SDK (`sdk.pin`) |
 | record 7: libraries `trx64u`, `ring`, `monitor` | `build.sh` |
-| record 7: the online sub-app `online.u2a` | MultiCore's build of `t239.3` `6e280710` (`sdk.pin` `online_*`, `fetch_sdk.sh`): the F3 tab Online and `online.*` |
+| record 7: the online sub-app `online.u2a` | `build.sh` (`apps/online`, U20 D22): the F3 tab Online and `online.*` |
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
 | the registers | `gateware/c64_basic.toml`: the app's and the libraries' driver table (`drvtab.h`) and the app's I/O addresses; no TOML A record in the `.cor` (record 6 holds a description or a TOML A, not both; the record type that carries it beside the description comes with a later MultiCore package: U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |

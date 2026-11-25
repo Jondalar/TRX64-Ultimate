@@ -3,15 +3,20 @@
 """U20 B: the scripts that read and write the builds repository, run against a fake GitHub API on 127.0.0.1 (no network, no token):
 ci/order.py (missing, published, draft), ci/fetch_bits.py (a good entry, the cache record reused, a wrong digest, a SHA256SUMS that lists a missing asset,
 a draft), ci/publish_release.py (a ref that publishes nothing, a tag without our prefix, a pull request event, main: draft -> published, the same files
-again, other files refused), tools/builds.py fetch (a good asset, a wrong digest).
+again, other files refused, a manifest.json that does not name the files), tools/builds.py fetch (a good asset, a wrong digest).
+U20 D22, the sub-apps beside the .cor: ci/prerelease.sh staging trx64u.cor, trex_crt.u2a and online.u2a with manifest.json and SHA256SUMS (and refusing an
+artifact without one of them); tools/release_trx64u.sh on a pre-release of a small .cor made here (good; a sub-app missing, a sub-app that is not the one
+the .cor carries, a manifest.json size that is not the file's: stopped); software/trx64u/tools/emu_ops.py's readers of records 7 and 8 on that .cor.
 
   python3 -I ci/test_builds.py"""
 import hashlib
 import http.server
+import importlib.util
 import io
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -131,6 +136,46 @@ def run(args, env):
     return subprocess.run([sys.executable, "-I"] + args, capture_output=True, text=True, env=e, cwd=ROOT)
 
 
+def run_sh(args, env):
+    e = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+    e.update(env)
+    return subprocess.run(["bash"] + args, capture_output=True, text=True, env=e, cwd=ROOT)
+
+
+def u2a(name, body):
+    """A file with the header fields the readers look at: magic U2AP, header size 104, format 3, the name at 20..35."""
+    h = bytearray(104)
+    h[:4] = b"U2AP"
+    struct.pack_into("<HH", h, 4, 104, 3)
+    h[20:20 + len(name)] = name.encode()
+    return bytes(h) + body
+
+
+def small_cor(version, libs, files):
+    """A .cor as cor_pack.py lays it out (header, records 1, 3, 7, 8), with nothing in it but what the release tool and emu_ops.py read."""
+    def rec(t, v):
+        return struct.pack("<II", t, len(v)) + v
+    man = json.dumps({"id": "trx64u", "name": "TRX64U", "version": version, "app_load": 0, "app_entry": 0}).encode()
+    r7 = b"TRXL" + struct.pack("<II", 1, len(libs)) + b"".join(struct.pack("<I", len(x)) + x + b"\0" * (-len(x) % 4) for x in libs)
+    r8 = b"TRXF" + struct.pack("<II", 1, len(files))
+    for path, data in files:
+        body = struct.pack("<HHI", len(path), 1, len(data)) + struct.pack("<III", 7, 0, 1) + path.encode() + data
+        body += b"\0" * (-len(body) % 4)
+        r8 += struct.pack("<I", len(body)) + body
+    body = rec(1, man) + rec(3, b"APP") + rec(7, r7) + rec(8, r8)
+    return b"TRXCOR01" + struct.pack("<I", len(body)) + body
+
+
+def write_sums(d, names):
+    with open(os.path.join(d, "SHA256SUMS"), "w") as f:
+        for n in names:
+            f.write("%s  %s\n" % (hashlib.sha256(open(os.path.join(d, n), "rb").read()).hexdigest(), n))
+
+
+def manifest_files(d, names):
+    return {n: {"sha256": hashlib.sha256(open(os.path.join(d, n), "rb").read()).hexdigest(), "size": os.path.getsize(os.path.join(d, n))} for n in names}
+
+
 def reports_tar():
     b = io.BytesIO()
     with tarfile.open(fileobj=b, mode="w:gz") as t:
@@ -218,11 +263,15 @@ def main():
         fake.releases.clear()
         st = os.path.join(td, "stage")
         os.makedirs(st)
-        open(os.path.join(st, "trx64u.cor"), "wb").write(b"COR")
-        open(os.path.join(st, "manifest.json"), "w").write("{}\n")
-        with open(os.path.join(st, "SHA256SUMS"), "w") as f:
-            for n in ("manifest.json", "trx64u.cor"):
-                f.write("%s  %s\n" % (hashlib.sha256(open(os.path.join(st, n), "rb").read()).hexdigest(), n))
+        assets = ("online.u2a", "trex_crt.u2a", "trx64u.cor")
+        for n, b in zip(assets, (b"ONLINE", b"TREX", b"COR")):
+            open(os.path.join(st, n), "wb").write(b)
+
+        def stage_meta(sums=True, drop=()):
+            json.dump({"files": {n: e for n, e in manifest_files(st, assets).items() if n not in drop}}, open(os.path.join(st, "manifest.json"), "w"))
+            if sums:
+                write_sums(st, ("manifest.json",) + assets)
+        stage_meta()
         sha = "b" * 40
         penv = dict(base, MC_SRC_REPO="owner/src", BUILDS_TOKEN="t", GITHUB_ACTIONS="true", GITHUB_EVENT_NAME="push", GITHUB_REPOSITORY="owner/src",
                     GITHUB_SHA=sha, CI_BRANCH="main", CI_REF_TYPE="branch", GITHUB_REF="refs/heads/main")
@@ -234,19 +283,78 @@ def main():
         expect("publish: another repository's run", run(pub + ["fw-main-bbbbbbbb"], dict(penv, GITHUB_REPOSITORY="fork/src")), 1, "belongs to")
         expect("publish: main without a token", run(pub + ["fw-main-bbbbbbbb"], dict(penv, BUILDS_TOKEN="")), 1, "BUILDS_TOKEN")
         r = run(pub + ["fw-main-bbbbbbbb"], penv)
-        expect("publish: main", r, 0, "published fw-main-bbbbbbbb")
+        expect("publish: main", r, 0, "(5 files)")
         rel = [x for x in fake.releases.values() if x["tag_name"] == "fw-main-bbbbbbbb"]
-        if len(rel) != 1 or rel[0]["draft"] or sorted(a["name"] for a in rel[0]["assets"]) != ["SHA256SUMS", "manifest.json", "trx64u.cor"]:
+        if len(rel) != 1 or rel[0]["draft"] or sorted(a["name"] for a in rel[0]["assets"]) != sorted(("SHA256SUMS", "manifest.json") + assets):
             errs.append("publish: the release"); print("FAIL publish: the release %s" % rel)
         expect("publish: the same files again", run(pub + ["fw-main-bbbbbbbb"], penv), 0, "already published with exactly these files")
         open(os.path.join(st, "trx64u.cor"), "wb").write(b"COR2")
         expect("publish: a changed SHA256SUMS is refused", run(pub + ["fw-main-bbbbbbbb"], penv), 1, "SHA256SUMS lists")
-        with open(os.path.join(st, "SHA256SUMS"), "w") as f:
-            for n in ("manifest.json", "trx64u.cor"):
-                f.write("%s  %s\n" % (hashlib.sha256(open(os.path.join(st, n), "rb").read()).hexdigest(), n))
+        write_sums(st, ("manifest.json",) + assets)
+        expect("publish: a manifest.json with another SHA-256 or size is refused", run(pub + ["fw-main-bbbbbbbb"], penv), 1, "trx64u.cor: manifest.json says")
+        stage_meta(drop=("online.u2a",))
+        expect("publish: a manifest.json that does not name every file is refused", run(pub + ["fw-main-bbbbbbbb"], penv), 1, "manifest.json's files name")
+        stage_meta()
         expect("publish: other files under a published tag are refused", run(pub + ["fw-main-bbbbbbbb"], penv), 1, "immutable")
         expect("publish: a v* tag", run(pub + ["fw-v0.4.0-bbbbbbbb"], dict(penv, CI_BRANCH="v0.4.0", CI_REF_TYPE="tag", GITHUB_REF="refs/tags/v0.4.0")), 0,
                "published fw-v0.4.0-bbbbbbbb")
+
+        # ci/prerelease.sh (U20 D22): staged, nothing published
+        head = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        dl = os.path.join(td, "deliver")
+        os.makedirs(dl)
+        delivered = ("trx64u.cor", "trex_crt.u2a", "online.u2a", "trx64u.elf", "deliver.json")
+        for n, b in zip(delivered[:4], (b"COR", b"TREX", b"ONLINE", b"ELF")):
+            open(os.path.join(dl, n), "wb").write(b)
+        json.dump({"commit": head, "version": "main-" + head[:8], "bitstream": {"entry": KEY}, "sdk": {"version": "0.0.1"}}, open(os.path.join(dl, "deliver.json"), "w"))
+        write_sums(dl, delivered)
+        pst = os.path.join(td, "pstage")
+        prenv = dict(base, MC_SRC_REPO="owner/src", CI_DELIVER_IN=dl, CI_STAGE=pst, PRERELEASE_NO_PUBLISH="1", CI_BRANCH="main", CI_REF_TYPE="branch")
+        expect("prerelease: the .cor and the two sub-apps staged", run_sh(["ci/prerelease.sh"], prenv), 0, "fw-main-%s staged" % head[:8])
+        staged = sorted(os.listdir(pst)) if os.path.isdir(pst) else []
+        m = json.load(open(os.path.join(pst, "manifest.json"))) if "manifest.json" in staged else {}
+        sums = sorted(line.split()[1] for line in open(os.path.join(pst, "SHA256SUMS"))) if "SHA256SUMS" in staged else []
+        if (staged != sorted(("SHA256SUMS", "manifest.json") + assets) or m.get("files") != manifest_files(pst, assets)
+                or sums != sorted(("manifest.json",) + assets) or m.get("commit") != head):
+            errs.append("prerelease: the staged files"); print("FAIL prerelease: the staged files %s, manifest %s, SHA256SUMS %s" % (staged, m, sums))
+        write_sums(dl, [n for n in delivered if n != "online.u2a"])
+        expect("prerelease: an artifact whose SHA256SUMS leaves out online.u2a is refused", run_sh(["ci/prerelease.sh"], prenv), 1, "does not list online.u2a")
+        os.remove(os.path.join(dl, "online.u2a"))
+        expect("prerelease: an artifact without online.u2a is refused", run_sh(["ci/prerelease.sh"], prenv), 1, "has no online.u2a")
+
+        # tools/release_trx64u.sh (U20 D22): download and check, on a pre-release of a small .cor made here
+        spec = importlib.util.spec_from_file_location("emu_ops", os.path.join(ROOT, "software", "trx64u", "tools", "emu_ops.py"))
+        emu_ops = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(emu_ops)
+        trex, onl, ring = u2a("trex_crt", b"T" * 33), u2a("online", b"O" * 41), u2a("ring", b"R" * 8)
+        corb = small_cor("main-cccccccc", [ring, onl], [("apps/other.u2a", b"X" * 5), ("apps/trex_crt.u2a", trex)])
+        with open(os.path.join(td, "c.cor"), "wb") as f:
+            f.write(corb)
+        _, recs, _ = emu_ops.read_cor(os.path.join(td, "c.cor"))
+        if emu_ops.cor_libs(recs[7]) != [ring, onl] or emu_ops.cor_files(recs[8]) != {"apps/other.u2a": b"X" * 5, "apps/trex_crt.u2a": trex}:
+            errs.append("emu_ops: records 7 and 8"); print("FAIL emu_ops: records 7 and 8 read back otherwise")
+        else:
+            print("ok   emu_ops: records 7 and 8 read back")
+        renv = dict(base, MC_SRC_REPO="owner/src")
+
+        def release(label, files, rc, text, size=None):
+            m = {"source_repo": "owner/src", "commit": "c" * 40, "version": "main-cccccccc",
+                 "files": {n: {"sha256": hashlib.sha256(b).hexdigest(), "size": len(b)} for n, b in files.items() if n != "notes.txt"}}
+            if size:
+                m["files"][size]["size"] += 1
+            fake.releases.clear()
+            fake.add("fw-main-cccccccc", dict(files, **{"manifest.json": json.dumps(m).encode()}))
+            out = os.path.join(td, "dist-" + re.sub(r"\W", "_", label))
+            os.makedirs(os.path.join(out, "pkg-fw-main-cccccccc"))
+            open(os.path.join(out, "pkg-fw-main-cccccccc", "online.u2a"), "wb").write(onl)     # a file of an earlier download must not count
+            expect("release: " + label, run_sh(["tools/release_trx64u.sh", "fw-main-cccccccc", "--out", out], renv), rc, text)
+        good = {"trx64u.cor": corb, "trex_crt.u2a": trex, "online.u2a": onl}
+        release("a good pre-release", good, 0, "are the files the .cor carries")
+        release("online.u2a missing", {n: b for n, b in good.items() if n != "online.u2a"}, 1, "has no online.u2a")
+        release("an online.u2a the .cor does not carry", dict(good, **{"online.u2a": u2a("online", b"Q" * 41)}), 1, "is not the online the .cor's record 7")
+        release("a trex_crt.u2a the .cor does not carry", dict(good, **{"trex_crt.u2a": u2a("trex_crt", b"Q" * 33)}), 1, "apps/trex_crt.u2a the .cor's record 8")
+        release("a size in manifest.json that is not the file's", good, 1, "trex_crt.u2a is not the file manifest.json names", size="trex_crt.u2a")
+        release("an asset manifest.json does not name", dict(good, **{"notes.txt": b"N"}), 1, "manifest.json's files name")
     srv.shutdown()
     print("test_builds: %s" % ("%d failed: %s" % (len(errs), "; ".join(errs)) if errs else "all passed"))
     return 1 if errs else 0

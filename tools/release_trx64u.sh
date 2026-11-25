@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # PROVENANCE: the form of TRX64U-MultiCore tools/release_mc.sh (t239.3 d9ddadeb1; Alex Damhuis' code in both repositories), U20 B. Replaces the Gitea
 # release of this repository (ci/release.sh and .gitea/workflows/release.yml, gone with U20 A5).
-# One release of trx64u.cor, taken over from a finished pre-release of the builds repository into a GitHub release of this repository.
+# One release of trx64u.cor and the two sub-apps it carries (trex_crt.u2a, online.u2a; U20 D22), taken over from a finished pre-release of the builds
+# repository into a GitHub release of this repository.
 #
 #   tools/release_trx64u.sh <pre-release tag> [--publish --notes FILE] [--out DIR]
 #       --publish      also create the GitHub release v<x.y.z> (without it: download and check only)
@@ -16,8 +17,10 @@
 # What it does, in this order:
 #   1. downloads every asset (tools/builds.sh: each file against the SHA-256 GitHub lists and the release's SHA256SUMS), then all of them against
 #      SHA256SUMS; every asset must be listed there;
-#   2. manifest.json: its commit starts with the tag's <sha8>, its trx64u.cor has the downloaded file's SHA-256, its source repository is this one;
-#   3. the .cor's own manifest (record 1, read by software/trx64u/tools/emu_ops.py's reader): id trx64u and the version manifest.json names;
+#   2. manifest.json: its commit starts with the tag's <sha8>, its source repository is this one, its `files` name every other asset but SHA256SUMS
+#      (trx64u.cor, trex_crt.u2a and online.u2a at least) with the downloaded file's SHA-256 and size, and nothing else;
+#   3. the .cor (software/trx64u/tools/emu_ops.py's reader): its own manifest (record 1) says id trx64u and the version manifest.json names, and it
+#      carries trex_crt.u2a (record 8, apps/trex_crt.u2a) and online.u2a (a library of record 7) byte for byte;
 #   4. with --publish: the version is a plain x.y.z (a release is made from the pre-release of its tag build), the public-tree check passes on every file
 #      (tools/check_public_tree.py --files, U20 A8: no ROM of ci/private.txt whole or in part, no text rule hit), and the tag v<x.y.z> exists in this
 #      repository and names the commit
@@ -33,8 +36,8 @@ for v in MC_BUILDS_REPO MC_SRC_REPO BUILDS_TAG_PREFIX; do
 done
 OUT="$ROOT/dist" PUBLISH=0 NOTES=""
 VER="${1:-}"
-[ -n "$VER" ] || { sed -n '6,10p' "$0"; exit 2; }
-case "$VER" in -h|--help) sed -n '6,10p' "$0"; exit 0;; esac
+[ -n "$VER" ] || { sed -n '7,11p' "$0"; exit 2; }
+case "$VER" in -h|--help) sed -n '7,11p' "$0"; exit 0;; esac
 shift
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -52,7 +55,7 @@ if [ -z "${GH_TOKEN:-}" ] && [ -z "${BUILDS_API:-}" ]; then t="$(gh auth token 2
 case "$VER" in "$BUILDS_TAG_PREFIX"*) ;; *) die "$VER is not a pre-release of this repository (its tags start with $BUILDS_TAG_PREFIX)";; esac
 
 PKG="$OUT/pkg-$VER"
-mkdir -p "$PKG"
+rm -rf "$PKG"; mkdir -p "$PKG"      # only what this run downloads counts: a file of an earlier download is not one of the pre-release
 echo ">>> pre-release $VER of $MC_BUILDS_REPO"
 files=$("$HERE/builds.sh" files "$VER") || die "pre-release $VER not found"
 [ -n "$files" ] || die "pre-release $VER holds no file"
@@ -67,29 +70,45 @@ for f in $files; do
     if [ "$f" != SHA256SUMS ] && ! awk -v f="$f" '$2 == f { found = 1 } END { exit !found }' "$PKG/SHA256SUMS"; then die "$f is not listed in SHA256SUMS: release stopped"; fi
     assets+=("$PKG/$f")
 done
-for f in trx64u.cor manifest.json; do [ -s "$PKG/$f" ] || die "pre-release $VER has no $f"; done
+for f in trx64u.cor trex_crt.u2a online.u2a manifest.json; do [ -s "$PKG/$f" ] || die "pre-release $VER has no $f"; done
 echo "    $(echo "$files" | wc -w | tr -d ' ') files downloaded, SHA256SUMS ok"
 
-read -r COMMIT REL < <(python3 -I - "$PKG" "$VER" "$MC_SRC_REPO" "$ROOT/software/trx64u/tools" <<'PY'
+# the commit and the version go to a file: macOS's bash 3.2 expands the braces of a here-document inside <(...)
+RES="$OUT/pkg-$VER.checked"
+rm -f "$RES"
+# shellcheck disable=SC2086  # files: the asset names, checked above to be plain
+python3 -I - "$PKG" "$VER" "$MC_SRC_REPO" "$ROOT/software/trx64u/tools" "$RES" $files <<'PY' || die "the pre-release does not hold together: release stopped"
 import hashlib, json, os, sys
-pkg, tag, repo, tools = sys.argv[1:]
+pkg, tag, repo, tools, res = sys.argv[1:6]
 m = json.load(open(os.path.join(pkg, "manifest.json")))
-cor = open(os.path.join(pkg, "trx64u.cor"), "rb").read()
 if m.get("source_repo") != repo:
     sys.exit("manifest.json names the repository %r, not %s" % (m.get("source_repo"), repo))
 if not str(m.get("commit", "")).startswith(tag.rsplit("-", 1)[-1]) or len(m.get("commit", "")) != 40:
     sys.exit("manifest.json names commit %r, the tag %s another" % (m.get("commit"), tag))
-if m.get("files", {}).get("trx64u.cor", {}).get("sha256") != hashlib.sha256(cor).hexdigest():
-    sys.exit("trx64u.cor is not the file manifest.json names")
+want = set(sys.argv[6:]) - {"manifest.json", "SHA256SUMS"}
+have = m.get("files") if isinstance(m.get("files"), dict) else {}
+if set(have) != want:
+    sys.exit("manifest.json's files name %s, the pre-release holds %s" % (sorted(have), sorted(want)))
+data = {n: open(os.path.join(pkg, n), "rb").read() for n in sorted(want)}
+for n, b in data.items():
+    e = have[n] if isinstance(have[n], dict) else {}
+    if e.get("sha256") != hashlib.sha256(b).hexdigest() or e.get("size") != len(b):
+        sys.exit("%s is not the file manifest.json names (SHA-256 and size)" % n)
 sys.path.insert(0, tools)
 import emu_ops
-man, _, _ = emu_ops.read_cor(os.path.join(pkg, "trx64u.cor"))
+try:
+    man, recs, _ = emu_ops.read_cor(os.path.join(pkg, "trx64u.cor"))
+    emu_ops.check_subapps(recs, data)
+except emu_ops.Failed as e:
+    sys.exit("trx64u.cor: %s" % e)
 if man.get("id") != "trx64u" or man.get("version") != m.get("version"):
     sys.exit("the .cor says id %r version %r, manifest.json version %r" % (man.get("id"), man.get("version"), m.get("version")))
-print(m["commit"], m["version"])
+open(res, "w").write("%s %s\n" % (m["commit"], m["version"]))
 PY
-) || die "the pre-release does not hold together: release stopped"
-echo "    commit $COMMIT, version $REL (manifest.json and the .cor's record 1 agree)"
+read -r COMMIT REL < "$RES"
+rm -f "$RES"
+echo "    commit $COMMIT, version $REL (manifest.json and the .cor's record 1 agree; every asset is the file manifest.json names;"
+echo "    trex_crt.u2a and online.u2a are the files the .cor carries)"
 
 echo ">>> would publish v$REL in $MC_SRC_REPO from $PKG:"
 printf '    %s\n' $files

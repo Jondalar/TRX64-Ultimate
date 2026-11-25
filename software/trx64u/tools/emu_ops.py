@@ -40,6 +40,8 @@ list or no ping answer (the reason, and the end of ue2emu's log).
 Defaults: --ue2emu $UE2EMU, else ~/Development/u64-emulator/target/release/ue2emu; --roms $UE2EMU_ROMS, else
 ~/Development/u64-emulator/firmware/1541ultimate/roms; --timeout 300, the seconds from ue2emu's start to the ping's answer (ue2emu
 gets --max-seconds of that plus 60, so it ends by itself when this script cannot end it).
+The module is also the .cor reader of ci/lane.sh (step deliver) and tools/release_trx64u.sh: read_cor, and for the sub-apps the fw-
+pre-release ships beside the .cor (U20 D22) cor_libs, cor_files and check_subapps.
 """
 import argparse
 import base64
@@ -112,6 +114,63 @@ def read_cor(path):
         if "," in man[k]:
             raise Failed("%s: the manifest's %s %r has a comma, which ue2emu's --handover cannot carry" % (path, k, man[k]))
     return man, recs, data
+
+
+# The sub-apps the fw- pre-release ships beside the .cor (U20 D22, MultiCore T261 D7) and where pack_cor.sh puts the same file into the .cor:
+# online.u2a is a library of record 7 (its header names it online), trex_crt.u2a the file apps/trex_crt.u2a of record 8.
+SUBAPPS = {"online.u2a": (7, "online"), "trex_crt.u2a": (8, "apps/trex_crt.u2a")}
+
+
+def cor_libs(rec):
+    """The .u2a files of record 7: "TRXL", u32 version 1, u32 count, then per library u32 length, the file, zeros to a multiple of 4 (cor_pack.py
+    pack_libs)."""
+    if len(rec) < 12 or rec[:4] != b"TRXL" or struct.unpack_from("<I", rec, 4)[0] != 1:
+        raise Failed("record 7 is not a library set of version 1")
+    p, out = 12, []
+    for _ in range(struct.unpack_from("<I", rec, 8)[0]):
+        if p + 4 > len(rec) or p + 4 + struct.unpack_from("<I", rec, p)[0] > len(rec):
+            raise Failed("record 7: a library runs past its end")
+        n = struct.unpack_from("<I", rec, p)[0]
+        out.append(rec[p + 4:p + 4 + n])
+        p += 4 + n + (-n % 4)
+    if p != len(rec):
+        raise Failed("record 7: %d bytes behind the last library" % (len(rec) - p))
+    return out
+
+
+def cor_files(rec):
+    """{path: bytes} of record 8: "TRXF", u32 version 1, u32 count, then per file u32 length of the entry, u16 path length, u16 count of earlier
+    versions, u32 size, 12 bytes per earlier version, the path, the bytes, zeros to a multiple of 4 (cor_pack.py pack_files)."""
+    if len(rec) < 12 or rec[:4] != b"TRXF" or struct.unpack_from("<I", rec, 4)[0] != 1:
+        raise Failed("record 8 is not a file set of version 1")
+    p, out = 12, {}
+    for _ in range(struct.unpack_from("<I", rec, 8)[0]):
+        if p + 12 > len(rec):
+            raise Failed("record 8: cut off")
+        n, plen, nold, size = struct.unpack_from("<IHHI", rec, p)
+        q = p + 12 + 12 * nold
+        if n < 8 or q + plen + size > p + 4 + n or p + 4 + n > len(rec):
+            raise Failed("record 8: an entry runs past its end")
+        out[rec[q:q + plen].decode("ascii")] = rec[q + plen:q + plen + size]
+        p += 4 + n
+    if p != len(rec):
+        raise Failed("record 8: %d bytes behind the last file" % (len(rec) - p))
+    return out
+
+
+def check_subapps(recs, files):
+    """files: {name: bytes} of every name of SUBAPPS. Fails unless each is byte for byte the file the .cor carries."""
+    for name, (t, where) in sorted(SUBAPPS.items()):
+        if name not in files:
+            raise Failed("no %s" % name)
+        if t not in recs:
+            raise Failed("the .cor has no record %d, which carries %s" % (t, name))
+        if t == 7:
+            ok = files[name][20:36].split(b"\0")[0] == where.encode() and files[name] in cor_libs(recs[7])
+        else:
+            ok = cor_files(recs[8]).get(where) == files[name]
+        if not ok:
+            raise Failed("%s (%d bytes) is not the %s the .cor's record %d carries" % (name, len(files[name]), where, t))
 
 
 def elf_loads(data, path):

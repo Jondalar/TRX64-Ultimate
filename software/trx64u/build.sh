@@ -1,17 +1,18 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build trx64u's libraries and sub-apps against the pinned TRX64 SDK (U18; sdk.pin, fetch_sdk.sh first).
-#   software/trx64u/build.sh [trx64u] [ring] [monitor] [trex_crt]                 (default: all four)
+#   software/trx64u/build.sh [trx64u] [ring] [monitor] [trex_crt] [online]        (default: all five)
 #   software/trx64u/build.sh --check                                               (only check the unpacked SDK against sdk.pin)
 # The SDK is .sdk/trx64-sdk-<sdk_version>/; its VERSION must name the pinned commit, base API and hashes (a dev build
 # and the release of the same version unpack to the same folder).
 # Each library is built in build/<name>/ from copies of its sources (lib.mk writes its objects next to the sources); the monitor also gets
 # trxmon/, the monitor's engine (U20 A2: moved from the firmware fork, this tree's only copy). The monitor and the ring library read the
-# firmware's application ABI in fwabi/ (FWABI). The sub-app TREX CRT (apps/trex_crt, MultiCore T239.3
-# P2-5) is built the same way with the SDK's mk/app.mk, its folder copied whole (its C sources are in src/). Softboot is not built here (Alex,
-# 2026-11-24): it starts the firmware application of a .cfw on the running bitstream, and c64_basic under this app is not the bitstream that
-# application needs; it stays in the firmware build. The driver table of c64_basic's
-# TOML A (gateware/c64_basic.toml) is made there by the SDK's descrec.py (api.md 6.17, SDK 0.4.0 and later). In the build image
+# firmware's application ABI in fwabi/ (FWABI). The two sub-apps, TREX CRT (apps/trex_crt, MultiCore T239.3 P2-5) and the online search
+# (apps/online, T239.3 L-3; ours since U20 D22, MultiCore T261 D6), are built the same way with the SDK's mk/app.mk, each folder copied whole (trex_crt's C
+# sources are in src/). Softboot is not built here (Alex, 2026-11-24, and U20 D22: not ours to ship): it starts the firmware application of a .cfw on the
+# running bitstream, and c64_basic under this app is not the bitstream that application needs. The driver table of c64_basic's
+# TOML A (gateware/c64_basic.toml, passed as GATEWARE) is made in a library's build folder by the SDK's descrec.py (its Makefile; api.md 6.17,
+# SDK 0.4.0 and later). In the build image
 # (riscv32-unknown-elf-g++ on PATH) it runs make directly; elsewhere it runs itself in the u64-build-env container.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -40,13 +41,13 @@ if ! command -v riscv32-unknown-elf-g++ >/dev/null 2>&1; then
     exec container run --rm --name "trx64u-build-$$" --rosetta --arch amd64 -v "$ROOT:/trx" -w /trx u64-build-env \
         sh /trx/software/trx64u/build.sh "$@"
 fi
-LIBS="${*:-trx64u ring monitor trex_crt}"
+LIBS="${*:-trx64u ring monitor trex_crt online}"
 rc=0
 for lib in $LIBS; do
     case "$lib" in
         trx64u) src=base ;;
         ring|monitor) src="$lib" ;;
-        trex_crt) src="apps/$lib" ;;
+        trex_crt|online) src="apps/$lib" ;;
         *) echo "build.sh: no library or sub-app $lib" >&2; exit 1 ;;
     esac
     B="$HERE/build/$lib"

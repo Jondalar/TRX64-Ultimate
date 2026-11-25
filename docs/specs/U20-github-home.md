@@ -11,7 +11,8 @@ and `--rewrite` (§6 "A8"); the check stays after the switch (D20). C: MultiCore
 fetched and checked it), the contract (copied 50e49dec), the builder's `fw` row deployed (keycode ref `u20` until the switch PR is merged; its
 `SOURCES` switch waits for `u20` on GitHub). D done 2026-11-25 (§6 "D"). E: `u18` 9d93d185 replayed as 121 export commits onto GitHub `main` 2b545a8 (part a with the tool of 92645aeb,
 part b with the current one, the one rewrite: §6 "E"), branch `u20` pushed to GitHub 2026-11-25 (head 26be21a); from here the work is native on
-GitHub, Gitea `u18` is the archive. Next: the first green matrix run on `u20`, `integration` cut, Alex merges the switch PR.
+GitHub, Gitea `u18` is the archive. D22 (MultiCore T261 D7) built on `u20-apps`: the `fw-*` pre-release carries `trx64u.cor`, `trex_crt.u2a`,
+`online.u2a`; online is built here (§6 "fw- assets"). Next: the first green matrix run on `u20`, `integration` cut, Alex merges the switch PR.
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -96,6 +97,11 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   hits (`software/ultimate-app/recovery/u64ii/ultimate.bin`, `software/6502/unsorted/tcpimage.crt`) are the same blobs as in Gideon's public
   `GideonZ/1541ultimate` (8b78db63, bf857f6e, read 2026-11-25); the other hits are private-range addresses, hosts and paths of old export
   commits. A rewrite would need `no-rewrite` off and a force push that breaks every clone and fork; the check keeps new hits out from E on.
+- **D22 (Alex, 2026-11-25, MultiCore T261 D6, D7, relayed by the MultiCore session and confirmed here):** our `fw-*` pre-release carries
+  `trx64u.cor`, `trex_crt.u2a`, `online.u2a`; MultiCore's SDK lane no longer builds trex_crt, softboot and online, we build ours, and
+  MultiCore's package takes the three files from our pre-release by SHA-256 and size, unchanged. Softboot is not ours to ship (a function of
+  the Gideon-based app; "MultiCore makes it obsolete"). `trx64g` stays a Gitea on-demand build; MultiCore pins its Gitea package (§6
+  "fw- assets").
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
@@ -501,6 +507,44 @@ For part E:
 - Push: `git push -u origin u20` from the GitHub clone (`core.hooksPath .githooks`, `user.email` the public address), as Alex's admin role
   through `protected`. The head carried `[skip ci]`; the first native commit (this one: `GITEA_KEPT` emptied) starts the first run.
 - MultiCore's builder: `SOURCES=multicore,fw` set after the push; `FW_KEYCODE_REF=u20` until the switch PR is merged.
+
+### fw- assets (T261 D7, D22)
+
+2026-11-25, branch `u20-apps` from GitHub `u20` a845f37. MultiCore read only: `t239.3` (T261 D6, D7 in its spec), `integration` 1a6bffa20 (contract).
+- **The pre-release** `fw-<branch>-<sha8>` now holds `trx64u.cor`, `trex_crt.u2a`, `online.u2a`, `manifest.json` (`files`: `sha256` and `size` of
+  each of the three) and `SHA256SUMS` (the four). This replaces the asset list of D12's proposal ("B, A7"). The contract follows MultiCore's
+  integration 1a6bffa20 byte for byte (§2: a release-form pin's field `U2A="trex_crt.u2a:<sha256>:<size> online.u2a:<sha256>:<size>"`).
+- **online** (`software/trx64u/apps/online`): MultiCore's `t239.3` 6e2807103 `apps/online` (unchanged up to `t239.3` 7f2bec40c), the sources and
+  `app.toml` byte for byte; the Makefile includes the SDK's `mk/app.mk`; the README carries the origin. What the build reads is the same as in
+  their tree at that commit: the 30 headers of the SDK's `include/` (their `app/sdk`, `coreapp/src`), `sdk/libc.c`, `sdk/u2p_compat.c`,
+  `tools/u2a_pack.py`, `tools/descrec.py`, `mk/app.mk`, `mk/lib.ld`. `build.sh online` (u64-build-env, xPack GCC 11.3.0, the version of MultiCore's
+  build image) makes `online.u2a` 26,147 bytes, sha256 061c7394...ab820968: the file `sdk.pin` pinned (their `.ci/sdk/online-6e280710.u2a`, the
+  asset of `sdk-0.4.6-6e280710`), byte for byte. The base's check (`netfs.cc` `online_api`): the export "online" of major 1 and a table at least
+  `sizeof(OnlineApi)` of the base's header, which is the SDK's `include/online_api.h` the sub-app is compiled against.
+- **trex_crt** as it was (its copy of 8ff28ba9; MultiCore's `apps/trex_crt` has not changed since, ours differs from it in comments only).
+- `build.sh` builds `online` with the other four. `pack_cor.sh` takes `build/online/online.u2a` for record 7. `sdk.pin`: the `online_*` lines are
+  gone (no reader left); `fetch_sdk.sh` takes only the tarball in all three forms (`--release`, `--download`, a path) and refuses a second argument;
+  `--release` fetched it from `sdk-0.4.6-6e280710` with an empty cache. The registry's `trx64-online` package is read no more.
+- **Lane and release side.** `ci/lane.sh core:trx64u deliver` copies both `.u2a` into the artifact, checks that they are the bytes the `.cor`
+  carries (`emu_ops.py` `check_subapps`: `online.u2a` one of record 7's libraries with the header name `online`, `trex_crt.u2a` record 8's
+  `apps/trex_crt.u2a`; the readers `cor_libs`, `cor_files` follow `cor_pack.py`) and lists them in `SHA256SUMS`. `ci/prerelease.sh` stages the three
+  files and writes `files` for each. `ci/publish_release.py` refuses a directory whose `manifest.json` does not name every file but itself and
+  `SHA256SUMS` with the file's SHA-256 and size; the release text names the sub-apps. `tools/release_trx64u.sh` wants both `.u2a`, `manifest.json`'s
+  `files` equal to the assets (SHA-256, size), and the `.cor` carrying both; it empties its download folder first (a file of an earlier download
+  counted as present), and the checks' result goes through a file: macOS's bash 3.2 expanded the braces of a here-document inside `<(...)`.
+- **Checks on the Mac:** `ci/lint.sh` rc 0 (with `SDK_FETCH=--release`); `ci/test_builds.py` 36 cases (12 new: publish with the three files and two
+  manifest refusals; prerelease staging and two refusals; the record readers on a small `.cor` made by the test; the release tool on it: good, a
+  sub-app missing, each sub-app not the one the `.cor` carries, a size, an asset the manifest does not name); `build.sh` rc 0 (`trex_crt.u2a`
+  88,909 bytes 4bc89def..., `online.u2a` as above); `pack_cor.sh --no-build --emu` with the bitstream of key `c64u-0dce5fff4ef99009`
+  (`--bit-commit 0dce5fff`) rc 0: `.cor` 3,948,591 bytes, heap 10,972,496, READY., ping answered, `[lib] online v1.0 ... ok`, the ops list 388 lines =
+  `base/ops_trx64u.txt` both ways; `cor_pack.py`'s own readers find the same records; `ci/lane.sh core:trx64u deliver` on that `.cor` and then
+  `ci/prerelease.sh` with `PRERELEASE_NO_PUBLISH`: the five files, `manifest.json` as above; `check_public_tree.py --files` on both `.u2a`: clean.
+- **Found, not changed:** `check_public_tree.py --files` on `trx64u.cor` has one hit: a 64-byte window of `characters.901225-01.bin` at offset 135,099 of
+  `ring.u2a` (record 7), inside the Timewarp bar's font (`ring/twfont.py`: ASCII 32-126 of `ovl_font8.mem`, Gideon's character generator; 760 bytes at
+  134,800). So `tools/release_trx64u.sh --publish` stops on every `.cor` until that is decided (not new: A8 put the hit of an older `.cor` on its
+  `online.u2a`; it is the ring's font). The two `.u2a` are clean.
+- Only GitHub shows: the build in MultiCore's `trx64u-build` image (same xPack 11.3.0; `online.u2a` expected byte-equal), the artifact with the two
+  `.u2a` through the emulator job, the upload of the five files, MultiCore's import by `U2A`.
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 
