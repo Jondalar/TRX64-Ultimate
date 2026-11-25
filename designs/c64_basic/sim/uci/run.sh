@@ -8,7 +8,7 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
 "$root/tools/gideon_sources.sh"
-G=$root/cores/gideon/fpga
+G=$root/vendor/gideon/fpga
 B=$G/ip/busses/vhdl_source
 C=$G/io/command_interface/vhdl_source
 out=$here/build

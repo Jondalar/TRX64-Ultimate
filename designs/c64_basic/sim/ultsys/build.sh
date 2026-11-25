@@ -42,17 +42,17 @@ EOT
 # synthesis has (build.tcl, as sim/input takes it); two entities do not go through ghdl and are
 # stand-ins: the RISC-V (replaced again, in Verilog, by rvlite_bfm.v) and async_fifo_ft (Ethernet/USB
 # only); the USB host and the drive are stand-ins too, for simulation speed (they are not on the
-# window's path). The submodule's sources come from tools/gideon_sources.sh.
+# window's path). Gideon's sources are our copy in vendor/gideon.
 "$root/tools/gideon_sources.sh"
 mkdir -p "$out/vh"
-python3 - "$D/build.tcl" "$root/cores/gideon/fpga" "$D" "$here" > "$out/vh/files.txt" <<'PY'
+python3 - "$D/build.tcl" "$root/vendor/gideon/fpga" "$D" "$here" > "$out/vh/files.txt" <<'PY'
 import sys
 tcl, g, design, here = sys.argv[1:]
 body = open(tcl).read().split("\nset g ", 1)[1].split("read_vhdl -library work [list", 1)[1].split("]", 1)[0]
 for tok in body.replace("\\", " ").split():
     p = tok.replace("$g", g)
     p = p if p.startswith("/") else design + "/" + p
-    if p.endswith("/rvlite_wrapper.vhd"): p = here + "/rvlite_stub.vhd"
+    if p.endswith("/rvlite_wrapper_dc.vhd"): p = here + "/rvlite_stub.vhd"
     if p.endswith("/async_fifo_ft.vhd"): p = here + "/async_fifo_stub.vhd"
     if p.endswith("/usb_host_nano.vhd"): p = here + "/usb_stub.vhd"
     if p.endswith("/drive_unit.vhd"): p = here + "/drive_stub.vhd"

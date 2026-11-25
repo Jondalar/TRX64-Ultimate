@@ -20,7 +20,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from trxmon_client import Client  # noqa: E402
 
-HOST = "192.168.242.189"
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 CFG = "/v1/configs/C64%20and%20Cartridge%20Settings"
 
 

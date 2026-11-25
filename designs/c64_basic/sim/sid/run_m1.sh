@@ -22,7 +22,7 @@ mkdir -p "$b/mem"
 "$b/gen_tables" "$b/mem" 2>/dev/null
 cmp "$b/mem/sid_wf_dir.mem" "$T/sid_wf_dir.mem" && cmp "$b/mem/sid_wf_data.mem" "$T/sid_wf_data.mem"
 python3 "$M/gen_logs.py" "$b/logs"
-python3 "$M/gen_curves.py" "$root/software/ultimate-app/software/io/audio/sid_coeff.c" "$b/curves"
+python3 "$M/gen_curves.py" "$root/vendor/gideon/software/io/audio/sid_coeff.c" "$b/curves"
 for f in "$R"/*.cpp "$R/resample/SincResampler.cpp"; do
   o=$b/obj/$(basename "$f" .cpp).o
   [ -f "$o" ] || $CXX -I"$R" -c "$f" -o "$o"

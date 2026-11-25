@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Write the boot ROM binary as Gideon's bootrom_pkg (cores/gideon .../bootrom_8k.vhd
+"""Write the boot ROM binary as Gideon's bootrom_pkg (vendor/gideon .../bootrom_8k.vhd
 reads c_bootrom from it): 2048 little-endian 32-bit words."""
 import sys
 

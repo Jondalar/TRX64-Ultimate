@@ -4,7 +4,13 @@
 # the next: /cache/runs/<run id>/<stage>/ on the NAS runner (the volume the
 # Vivado cache already uses), .ci/runs/local/<stage>/ in a checkout. A stage
 # that finished writes its directory completely and a file DONE last.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Two trees (U20 A7, MultiCore's form): CI_CODE is the one this file sits in, and
+# every script below runs from it; ROOT is the one whose files are read (the git
+# index the keys hash, ci/bitstream.sh's part). They are the same tree unless
+# CI_DATA_ROOT names another checkout: ci/keys.sh --data sets it, so the builder
+# can run the key code of its trusted ref over an outside commit's tree.
+CI_CODE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${CI_DATA_ROOT:-$CI_CODE}"
 RUN_ID="${CI_RUN_ID:-${GITHUB_RUN_ID:-local}}"
 if [ -n "${CI_HANDOFF:-}" ]; then
   HANDOFF="$CI_HANDOFF"
@@ -13,16 +19,6 @@ elif [ -d /cache ] && [ -w /cache ]; then
 else
   HANDOFF="$ROOT/.ci/runs/$RUN_ID"
 fi
-
-# release_reuse_skip <stage>: the release workflow (release.yml, ci/release.sh resolve) found the CI
-# package of the commit it releases and left $HANDOFF/release-reuse; the stages it calls then build
-# nothing and publish nothing. A normal pipeline never has that file.
-release_reuse_skip() {
-  if [ -f "$HANDOFF/release-reuse" ]; then
-    echo "=== $1 skipped: the release reuses the CI package $(cat "$HANDOFF/release-reuse")"
-    exit 0
-  fi
-}
 
 # stage_dir <stage>: the stage's hand-over directory, emptied.
 stage_dir() {
@@ -44,49 +40,32 @@ need_stage() {
 _lap_t=$SECONDS
 lap() { local d=$((SECONDS - _lap_t)); _lap_t=$SECONDS; printf '%dm%02ds' $((d / 60)) $((d % 60)); }
 
-branch_slug() { printf '%s' "${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}" | tr '/' '_'; }
+# CI_BRANCH first: GitHub's workflows (U20 B) set it to pr-<number> on a pull request, where GITHUB_REF_NAME is <number>/merge;
+# the Gitea workflows do not set it.
+branch_slug() { printf '%s' "${CI_BRANCH:-${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}}" | tr '/' '_'; }
 
 # tree_key <pathspec...>: 16 hex digits over the content of the tracked files
-# under the pathspecs, plus (when the checkout has it) the generated cores/gideon
-# and the free text in $KEY_EXTRA. Only the content counts, not commits: a push
-# that leaves these files alone gets the same key. cores/gideon/VENDOR.md is left
-# out for that reason: it only records the submodule commit, and hashing it tied
-# the key to the app, so every app bump missed the cache and rebuilt the bitstream
-# (2026-10-30, b151154b -> 11265524; MultiCore does the same since its run 898).
-# The copied files themselves count, so an app change that moves fpga/ still does.
+# under the pathspecs and the free text in $KEY_EXTRA. Only the content counts,
+# not commits: a push that leaves these files alone gets the same key.
 tree_key() {
   {
     git -C "$ROOT" ls-files -s -- "$@"
-    if [ -d "$ROOT/cores/gideon" ]; then
-      (cd "$ROOT" && find cores/gideon -type f ! -name .stamp ! -name VENDOR.md | LC_ALL=C sort | xargs sha256sum)
-    fi
     printf '%s\n' "${KEY_EXTRA:-}"
   } | sha256sum | cut -c1-16
 }
 
 # files_key <pathspec...>: 16 hex digits over the CONTENT (working tree, so an
 # edited checkout counts as well as a clean clone) of the tracked files under the
-# pathspecs, plus the commit of every submodule among them. Returns 1, printing
+# pathspecs, plus the commit of any gitlink among them. Returns 1, printing
 # nothing, when a plain pathspec matches no tracked file: a typo in a dependency
 # list must never turn into "depends on nothing". A pathspec that starts with
-# ':(exclude)' only narrows the others.
-#
-# A pathspec of the form <submodule>//<pathspec inside it> counts the CONTENT of
-# those files instead of the submodule's commit: the app submodule carries
-# Gideon's VHDL beside the application, and a commit that touches the
-# application alone must not rerun a bench that reads only his VHDL.
+# ':(exclude)' only narrows the others. (The form <submodule>//<pathspec>, the
+# content of files inside a submodule, went with the app submodule, U20 A5; the
+# key of every other spec list is what it was.)
 files_key() {
-  local spec list names subnames sub inner outer=() subspecs=()
+  local spec list names outer=()
   for spec in "$@"; do
     case "$spec" in
-      *//*)
-        sub="${spec%%//*}"; inner="${spec#*//}"
-        if [ -z "$(git -C "$ROOT/$sub" ls-files -- "$inner" 2>/dev/null | head -1)" ]; then
-          echo "files_key: '$spec' matches no tracked file in the submodule" >&2
-          return 1
-        fi
-        subspecs+=("$spec")
-        continue ;;
       ':(exclude)'*) outer+=("$spec"); continue ;;
     esac
     if [ -z "$(git -C "$ROOT" ls-files -- "$spec" | head -1)" ]; then
@@ -105,15 +84,6 @@ files_key() {
   {
     awk -F'\t' '{ split($1, a, " "); if (a[1] == "160000") print "submodule", a[2], $2 }' "$list"
     (cd "$ROOT" && git hash-object --stdin-paths < "$names") | paste -d' ' - "$names"
-    for spec in "${subspecs[@]:-}"; do
-      [ -n "$spec" ] || continue
-      sub="${spec%%//*}"; inner="${spec#*//}"
-      subnames="$(mktemp)"
-      git -C "$ROOT/$sub" ls-files -- "$inner" | LC_ALL=C sort > "$subnames"
-      (cd "$ROOT/$sub" && git hash-object --stdin-paths < "$subnames") |
-        paste -d' ' - "$subnames" | sed "s|^\([0-9a-f]\{40\}\) |\1 $sub/|"
-      rm -f "$subnames"
-    done
   } | sha256sum | cut -c1-16
   rm -f "$list" "$names"
 }
@@ -124,18 +94,23 @@ tool_versions() {
 }
 
 # gateware_key <part>: what decides a bitstream. The RTL and the build scripts
-# (not the benches), the constraints, Gideon's VHDL as generated from the
-# submodule (so an app change that moves fpga/ counts, one that does not does
-# not), the options that change the netlist, the part and the Vivado image.
+# (not the benches), the constraints, our copy of Gideon's files in vendor/gideon
+# (U20 A1: a renewal that moves them counts), the options that change the
+# netlist, the part and the Vivado image. Two files of vendor/gideon are left
+# out: VENDOR.md only records the commit the copy was made from (hashing it tied
+# the key to the app commit, 2026-10-30, b151154b -> 11265524; MultiCore leaves
+# it out too), and software/io/audio holds a bench input only (sid_coeff.c).
 #
-# The two excludes need the '/**': a pathspec without it matches the directory
+# The excludes need the '/**': a pathspec without it matches the directory
 # entry, not what is under it, so ':(exclude)designs/*/sim' excluded nothing and
 # every bench edit rebuilt the bitstream (found 2026-10-30, U5). Check with
 #   git ls-files designs ':(exclude)designs/*/sim/**' | grep -c /sim/   -> 0
+# GATEWARE_SPECS: the pathspecs of the key (also ci/lane.sh core:trx64u changed, which asks git whether they changed since the base).
+GATEWARE_SPECS=(designs constraints cores vendor/gideon tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon
+  ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**'
+  ':(exclude)vendor/gideon/VENDOR.md' ':(exclude)vendor/gideon/software/io/audio/**')
 gateware_key() {
-  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key \
-    designs constraints cores tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon \
-    ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**'
+  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key "${GATEWARE_SPECS[@]}"
 }
 
 # cache_put <dir> <key-dir>: copy a finished stage directory into the cache
@@ -188,25 +163,4 @@ heavy_lock() {
     flock 9
   fi
   echo "heavy lock held"
-}
-
-# build_update <manifest.json> <c64_basic.bit> <ultimate.app> <outdir>: the tester update files
-# (tools/make_update.sh --native -> <outdir>/trx64-<id>/trx64_update_*.cfw/.ue2) from the inputs of
-# one CI package. Shared by the stage `update` (ci/update.sh) and the release (ci/release.sh).
-# Needs the u64-build-env:ci image. Fetches the app submodule (and its nested ones) when the
-# checkout has none, and refuses a submodule whose commit is not the app commit of the manifest.
-# The file name part comes from tools/make_update.sh (TRX_UPDATE_NAME replaces it, the hook for
-# the release tag); the caller exports it.
-build_update() {
-  local manifest="$1" bit="$2" app="$3" out="$4" appdir="$ROOT/software/ultimate-app"
-  if [ ! -e "$appdir/.git" ]; then
-    NESTED="software/lwip software/httpd" "$ROOT/ci/submodule.sh"
-  fi
-  [ "$(git -C "$appdir" rev-parse HEAD)" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app_commit"])' "$manifest")" ] \
-    || { echo "the submodule commit is not the app commit of the package" >&2; return 1; }
-  # ESP-IDF's environment brings the `python` the app's makefiles call (as in ci/app.sh)
-  if [ -f /opt/esp/esp-idf/export.sh ]; then
-    set +u; . /opt/esp/esp-idf/export.sh >/dev/null; set -u
-  fi
-  "$ROOT/tools/make_update.sh" --native --manifest-json "$manifest" --out "$out" "$bit" "$app"
 }

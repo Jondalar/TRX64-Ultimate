@@ -11,7 +11,7 @@ level). Built 2026-10-09, **not yet run on the board**.
     python3 tests/sid/resid8_board.py --selftest         # offline, see below
 
 Needs the board free (no Lorenz, no JTAG/REST user), turbo off (1 MHz, the programs count cycles), REST on `--host`
-(default 192.168.242.189, env `TRX_HOST`). No flash is written (`configs:save_to_flash` is never called). Every setting it
+(default 192.0.2.189, env `TRX_HOST`). No flash is written (`configs:save_to_flash` is never called). Every setting it
 touches (speaker, SID socket/reSID8 addresses, range split, auto mirroring, chip model) is read first and put back at the end,
 also after an error or Ctrl-C; the machine is reset at the end (`--no-reset-end`). The suite runs through failures; exit
 status 1 if any check FAILed or ERRORed.

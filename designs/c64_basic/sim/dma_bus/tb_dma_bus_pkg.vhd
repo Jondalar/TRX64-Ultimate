@@ -13,4 +13,7 @@ package tb_dma_bus_pkg is
     signal sk_en      : std_logic_vector(1 downto 0);
     signal sk_sel     : std_logic_vector(2 downto 0);
     signal sk_gains   : std_logic_vector(31 downto 0);
+    -- D37: the words the ICAP loader hands to the ICAPE2 (icap_we pulses), the first and the last
+    signal ic_cnt     : natural := 0;
+    signal ic_first, ic_last : std_logic_vector(31 downto 0) := (others => '0');
 end package;

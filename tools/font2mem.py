@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Turn the fonts of Gideon's character generator (cores/gideon) into $readmemh
+"""Turn the fonts of Gideon's character generator (vendor/gideon) into $readmemh
 files for designs/c64_basic/overlay.v.
 
 ovl_font8.mem: the 1024 bytes of char_generator_rom_pkg that his chargen
@@ -15,7 +15,7 @@ import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 subprocess.run([os.path.join(here, "gideon_sources.sh")], check=True)
-src = os.path.join(here, "..", "cores", "gideon", "fpga", "ip", "video")
+src = os.path.join(here, "..", "vendor", "gideon", "fpga", "ip", "video")
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "designs", "c64_basic", "mem")
 
 

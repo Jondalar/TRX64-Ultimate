@@ -11,12 +11,15 @@
 
 ## Build and load
 
-- Every push runs the pipeline of `.gitea/workflows/build.yml` on the NAS runner, one job after the other
-  (`docs/specs/T31-ci-pipeline.md`): lint, sims, app (the submodule's `ultimate.app`), the XC7A50T bitstreams, package.
+- Every push runs the pipeline of `.gitea/workflows/pipeline.yml` on Gitea's runners, one stage after the other
+  (`docs/specs/T31-ci-pipeline.md`): lint, the XC7A50T bitstreams, package, then sims and cor (`trx64u.cor`).
   The 100T (Elite II) stage `bit-ue2` is commented out in `pipeline.yml` since 2026-10-16 (no Elite II at home).
   A push that changes nothing that goes into a bitstream gets the last good one (`ci/bitstream.sh`). The stages are
   `ci/*.sh`; `ci/lint.sh` and `ci/sims.sh` run the same way on the Mac. The result is the generic package
-  `trx64-ultimate` (`<branch>-<sha>` and `<branch>-latest`): bitstreams, reports, app, `manifest.json`.
+  `trx64-ultimate` (`<branch>-<sha>` and `<branch>-latest`): bitstreams, reports, `manifest.json`, `trx64u_<sha>.cor`.
+- The Gideon-app line (`ultimate.app`, the `.cfw`/`.ue2` update files, `trx64g.cor`) is not built here since U20 A5
+  (D13): the Gitea branch `gideon-app` keeps the firmware submodule and builds them by hand (its pipeline has no push
+  trigger).
 - `tools/load.sh [design] [version]` fetches one and loads it over the USB-Blaster;
   `tools/vivado.sh designs/<name>` builds by hand on the NAS.
 
@@ -71,19 +74,22 @@ Origin, version and licence of every gateware block in the bitstreams: [PROVENAN
   gateware (Alex's fork); origin commits and the former patches are listed in
   `cores/icepi/ORIGIN.md`. Licences: GPL-3 (icepi, kawari), CERN-OHL-S v2
   (reDIP SID/CIA); fine for internal use, to be settled before anything is published.
-- `cores/gideon`: generated, not in git: parts of Gideon Zweijtzer's 1541ultimate
-  (GPL-3) taken from the submodule `software/ultimate-app` with our patches from
-  `tools/patches/gideon` by `tools/gideon_sources.sh` (builds and simulations call it);
-  never the files marked "not to be used in other projects". `software/bootrom`: our rvlite boot ROM from his `bootloader_u64ii.c`,
+- `vendor/gideon`: our copy in git of the parts of Gideon Zweijtzer's 1541ultimate
+  (GPL-3) that the bitstream and the benches read, from his upstream commit in
+  `vendor/gideon/VENDOR.md` with our patches from `tools/patches/gideon` applied;
+  `tools/gideon_sources.sh <1541ultimate checkout>` renews it, without an argument it
+  only checks that the copy is there (builds and simulations call it); never the files
+  marked "not to be used in other projects". `software/bootrom`: our rvlite boot ROM from his `bootloader_u64ii.c`,
   built by `tools/build_bootrom.sh` (1541ultimate build image) into
   `designs/c64_basic/bootrom_pkg.vhd`.
-- `software/ultimate-app`: submodule, the Ultimate app (1541ultimate on Gitea, branch
-  `trex/main`, Gideon's firmware with our changes). App changes that belong to a
-  hardware change go there and are pinned here in the same commit; Gideon's upstream
-  is merged in that repo. Its CI build (`update.ue2`) gives the `ultimate.bin` that
-  `tools/trxdbg.sh riscv` loads. Clone with `git submodule update --init`.
-- `roms/`: stock C64 and 1541-II ROMs (Commodore/Cloanto), private use only, for the
-  simulations only: no bitstream contains them. On the board the Ultimate app loads
+- The Ultimate app (Gideon's firmware with our changes, the fork `TREX/1541ultimate`,
+  branch `trx64/main`) is no longer in this tree (U20 A5, D13): the Gitea branch
+  `gideon-app` pins it as the submodule `software/ultimate-app` and builds it by hand;
+  its `ultimate.bin` is what `tools/trxdbg.sh riscv` loads. This tree's application side
+  is `software/trx64u` (`trx64u.cor`, built against MultiCore's SDK, `software/trx64u/README.md`).
+- `roms/`: the stock C64 and 1541-II ROMs (Commodore/Cloanto) for the simulations only,
+  not tracked (U20 D14): `ci/roms.py fetch` puts them there from the pins of `ci/roms.txt`
+  (`roms/README.md`); no bitstream contains them. On the board the Ultimate app loads
   the C64's Kernal, BASIC and character ROM from `/roms` (its "Cartridge and ROM
   Settings") and writes them through its ROM apertures, as on Gideon's core; the C64
   stays in reset until it has. `tools/rom2mem.py <dir>` writes `c64_rom.mem` into a

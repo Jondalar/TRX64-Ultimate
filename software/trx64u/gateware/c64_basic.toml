@@ -1,0 +1,1789 @@
+# TOML A of c64_basic (MultiCore T239.3 P1-7, D28, D30, D34; U18): the capabilities of the TRX64 Ultimate bitstream as the app's I/O bus sees them,
+# record version 7 ([io], [identity], [[block]]; app/sdkpkg/api.md 6.14 of the SDK). Written from what the RTL of designs/c64_basic decodes (the files
+# of its build.tcl), not from a header or a comment; the RTL line that decodes a block is named above it. tools/descrec.py of the SDK generates the
+# driver table from it (`descrec.py drivers c64_basic.toml OUT --maps <SDK>/maps`, drvtab.h: DRV_<block>_<property>_*), which our libraries
+# take every register address from; rtl_check.py checks it against the RTL (U18 §5 has the command and what it can follow).
+#
+# The address path: the app RISC-V sends a data access to the I/O bus only when address bit 28 is set (rvlite_wrapper_dc.vhd: bus_converter g_io_bit
+# 28; bus_converter.vhd:123), and the I/O bus carries bits 23:0 of it (ultimate_sys.vhd:870-872 decodes io_req.address(23:0)); so iobase is
+# 0x10000000. A 16- or 32-bit access is split into byte accesses at rising addresses, byte 0 first, within one CPU access (bus_converter.vhd:56,
+# :173-184), which is what the 32-bit registers of trx_sys.v want (bytes 0-2 collect, byte 3 commits; byte 0 latches a read: trx_sys.v:311-323).
+#
+# owner "base": a block the base or a shared driver library of the SDK drives (identity, the cartridge, the cartridge port, drive, DMA, ROM apertures,
+# the ICAP loader, the pixel layer and its still capture (the base's video service), the registers the base's io group writes itself). owner "core": a
+# block only trx64u's code drives. Alex's split of 2026-11-24 (U18 §5): reSID8, the mixer's and the speaker's gains, both palettes, the command
+# interface and the GCR coder (our UCI library's) are the core's. A block of the core carries its properties itself, read from this RTL: an SDK map
+# belongs to the shared driver it lives with (api.md 6.14.11) and is written against MultiCore's gateware. One block per register range and driver
+# (D34); trx_io.v is cut into its pages that way.
+#
+# Not here: the resampler (0x10100580) and the base's master volume and tone (its block audio_master, 0x10100550 and 0x10100551): the write decode of
+# 0x101005xx (ultimate_sys.vhd:1257-1280) takes only 0x00-0x0B and 0x40, 0x41, 0x44, 0x45. So trx64u has no Volume and no Tone of the base (Alex: no
+# RTL for them in c64_basic; U18 §5).
+
+[io]
+iobase = 0x10000000
+u2p_io_base = 0x10100000
+
+[identity]
+id = "TRX2"
+block = "ident"
+
+# ---- trx_io.v (0x101A0000-0x101AFFFF, ultimate_sys.vhd:883 region r_cw, page = addr[15:12]) ------------------------------------------------------
+
+# page 0 0x000-0x00F: the standard block (trx_io.v:328-340): "TRX2", the capability bytes (constants of the bitstream: 0xFF, 0xF7, caps3), BUILD
+[[block]]
+name = "ident"
+module = "trx_io"
+owner = "base"
+address = 0x101A0000
+size = 0x10
+  [[block.property]]
+  name = "id"
+  offset = 0x00
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "caps"
+  offset = 0x04
+  width = 8
+  dir = "r"
+    [[block.property.field]]
+    name = "statebus"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "engine"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "debug"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "video"
+    shift = 6
+    bits = 1
+  [[block.property]]
+  name = "caps2"
+  offset = 0x05
+  width = 8
+  dir = "r"
+    [[block.property.field]]
+    name = "f4_after_f3"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "cpu_write"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "apply"
+    shift = 5
+    bits = 1
+    [[block.property.field]]
+    name = "turbo"
+    shift = 6
+    bits = 1
+    [[block.property.field]]
+    name = "trace"
+    shift = 7
+    bits = 1
+  [[block.property]]
+  name = "caps3"
+  offset = 0x06
+  width = 8
+  dir = "r"
+    [[block.property.field]]
+    name = "resid8"
+    shift = 0
+    bits = 1
+  [[block.property]]
+  name = "build"
+  offset = 0x08
+  width = 32
+  dir = "r"
+
+# page 0 0x040-0x04D: the reSID8 filter control of the two UltiSIDs' engines (trx_io.v:277-290 write, :351-364 read; rs8_cfg :188-189 goes to the SID
+# engine, top.v:828, :1380). Per engine u = 0, 1: fcsel the cutoff source (c64_redip_sid/sid_multi.sv:105, reDIP-SID/gateware/sid_filter.sv:260: 0 the
+# chip model's own, 1 the 6581 curve, 2 the 8580's), auto b0 the resonance and b1 the digis follow the chip model (sid_multi.sv:103-104), the 6581
+# curve's base (9 bits) and offset (11 bits) as 16-bit registers, low byte first, the two engines' pairs interleaved (stride 4), bypass b0 the filter
+# off. Written by u64cfg.cc (trx64u's SID settings); the names are those of the SDK's map `sid`.
+[[block]]
+name = "resid8"
+module = "trx_io"
+owner = "core"
+address = 0x101A0040
+size = 0xE
+  [[block.property]]
+  name = "fcsel"
+  offset = 0x00
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "source"
+    shift = 0
+    bits = 2
+      [[block.property.field.state]]
+      name = "chip_model"
+      value = 0
+      [[block.property.field.state]]
+      name = "curve_6581"
+      value = 1
+      [[block.property.field.state]]
+      name = "curve_8580"
+      value = 2
+  [[block.property]]
+  name = "auto"
+  offset = 0x02
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "resonance"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "digis"
+    shift = 1
+    bits = 1
+  [[block.property]]
+  name = "curve_base"
+  offset = 0x04
+  width = 16
+  count = 2
+  stride = 4
+  dir = "rw"
+    [[block.property.field]]
+    name = "base"
+    shift = 0
+    bits = 9
+  [[block.property]]
+  name = "curve_offset"
+  offset = 0x06
+  width = 16
+  count = 2
+  stride = 4
+  dir = "rw"
+    [[block.property.field]]
+    name = "offset"
+    shift = 0
+    bits = 11
+  [[block.property]]
+  name = "bypass"
+  offset = 0x0C
+  width = 8
+  count = 2
+  dir = "rw"
+    [[block.property.field]]
+    name = "filter_off"
+    shift = 0
+    bits = 1
+
+# page 0 0x100-0x117 (trx_sys.v, the C64's clock): the gate, the frame capture, the stop position (trx_sys.v:206-212 read, :347-365 write)
+[[block]]
+name = "trx_gate"
+module = "trx_sys"
+owner = "core"
+address = 0x101A0100
+size = 0x18
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x00
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "frz"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "halted"
+    shift = 8
+    bits = 1
+    [[block.property.field]]
+    name = "sb_frozen"
+    shift = 9
+    bits = 1
+  [[block.property]]
+  name = "cap_ctrl"
+  offset = 0x04
+  width = 32
+  dir = "rw"
+  [[block.property]]
+  name = "cap_stat"
+  offset = 0x08
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "jtag_page"
+  offset = 0x0C
+  width = 32
+  dir = "rw"
+  [[block.property]]
+  name = "resume_phase"
+  offset = 0x10
+  width = 32
+  dir = "rw"
+  [[block.property]]
+  name = "stop_pos"
+  offset = 0x14
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "cycle"
+    shift = 0
+    bits = 6
+    [[block.property.field]]
+    name = "arm"
+    shift = 8
+    bits = 1
+    [[block.property.field]]
+    name = "release"
+    shift = 9
+    bits = 1
+    [[block.property.field]]
+    name = "holding"
+    shift = 16
+    bits = 1
+
+# page 0 0x118-0x13F: the debugger's run control and counters (trx_sys.v:199-200 forwards words 0x46-0x4F to trx_dbg.v; trx_dbg.v:334-336 write,
+# :390-393 read)
+[[block]]
+name = "trx_dbg_run"
+module = "trx_dbg"
+owner = "core"
+address = 0x101A0118
+size = 0x28
+  [[block.property]]
+  name = "owner"
+  offset = 0x00
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "cycles"
+  offset = 0x08
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "cycles_hi"
+  offset = 0x0C
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "instrs"
+  offset = 0x10
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "cyc_cmp"
+  offset = 0x18
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "cmp_en"
+  offset = 0x1C
+  width = 32
+  dir = "w"
+
+# page 0 0x140-0x14F: the turbo engine's state (trx_sys.v:213-215 read, :367 write; the status word is cores/icepi/c64_turbo.v:519-520: b30 the
+# engine on (tmode), b28 it ran since cleared, b21:16 CPU cycles per PHI2 cycle; ctrl b0 clears "ran")
+[[block]]
+name = "trx_turbo"
+module = "trx_sys"
+owner = "core"
+address = 0x101A0140
+size = 0x10
+  [[block.property]]
+  name = "stat"
+  offset = 0x00
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "idx"
+    shift = 0
+    bits = 4
+    [[block.property.field]]
+    name = "d030_b0"
+    shift = 7
+    bits = 1
+    [[block.property.field]]
+    name = "regs_en"
+    shift = 8
+    bits = 3
+    [[block.property.field]]
+    name = "n_cur"
+    shift = 16
+    bits = 6
+    [[block.property.field]]
+    name = "inhibit"
+    shift = 27
+    bits = 1
+    [[block.property.field]]
+    name = "ran"
+    shift = 28
+    bits = 1
+    [[block.property.field]]
+    name = "bl_cur"
+    shift = 29
+    bits = 1
+    [[block.property.field]]
+    name = "on"
+    shift = 30
+    bits = 1
+    [[block.property.field]]
+    name = "holding"
+    shift = 31
+    bits = 1
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x04
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "ran_clr"
+    shift = 0
+    bits = 1
+  [[block.property]]
+  name = "w1"
+  offset = 0x08
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "w2"
+  offset = 0x0C
+  width = 32
+  dir = "r"
+
+# page 1: the state bus (trx_sys.v:216-218 read, :350-358 and :366 write; SB_DATA reads through the state bus, :376-390)
+[[block]]
+name = "trx_statebus"
+module = "trx_sys"
+owner = "core"
+address = 0x101A1000
+size = 0x10
+  [[block.property]]
+  name = "addr"
+  offset = 0x00
+  width = 32
+  dir = "rw"
+  [[block.property]]
+  name = "data"
+  offset = 0x04
+  width = 32
+  dir = "rw"
+  [[block.property]]
+  name = "status"
+  offset = 0x08
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "sb_frozen"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "refused"
+    shift = 1
+    bits = 1
+  [[block.property]]
+  name = "load"
+  offset = 0x0C
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "turbo"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "cpu"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "cia1"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "cia2"
+    shift = 4
+    bits = 1
+
+# page 2: the recording engine (trx_sys.v:221-224 forwards page 2 as words; trx_engine.v:540-593 write, :600-611 read). log_cnt is a run of the four
+# streams' counters (stream 3 the instruction trace); eng_cmd takes the operation (trx_engine.v:561, :771-774: 1 copy, 2 fill) and reads b0 busy,
+# ap_cmd takes the direction and reads b0 while the apply runs
+[[block]]
+name = "trx_engine"
+module = "trx_engine"
+owner = "core"
+address = 0x101A2000
+size = 0xA0
+  [[block.property]]
+  name = "log_ctrl"
+  offset = 0x00
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "on"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "taps"
+    shift = 1
+    bits = 3
+    [[block.property.field]]
+    name = "trace"
+    shift = 4
+    bits = 1
+    [[block.property.field]]
+    name = "restart"
+    shift = 8
+    bits = 1
+    [[block.property.field]]
+    name = "flush"
+    shift = 9
+    bits = 1
+  [[block.property]]
+  name = "log_stat"
+  offset = 0x04
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "on"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "seq_busy"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "busy"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "fifo"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "kmiss"
+    shift = 4
+    bits = 1
+    [[block.property.field]]
+    name = "tfifo"
+    shift = 5
+    bits = 1
+  [[block.property]]
+  name = "frame"
+  offset = 0x08
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "dropped"
+  offset = 0x0C
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "log_cnt"
+  offset = 0x28
+  width = 32
+  count = 4
+  stride = 16
+  dir = "r"
+  [[block.property]]
+  name = "tab_idx"
+  offset = 0x60
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "tab"
+  offset = 0x64
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "tab_len"
+  offset = 0x68
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "eng_cmd"
+  offset = 0x80
+  width = 32
+  dir = "rw"
+    [[block.property.state]]
+    name = "copy"
+    value = 0x1
+    [[block.property.state]]
+    name = "fill"
+    value = 0x2
+    [[block.property.field]]
+    name = "busy"
+    shift = 0
+    bits = 1
+  [[block.property]]
+  name = "eng_src"
+  offset = 0x84
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "eng_dst"
+  offset = 0x88
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "eng_len"
+  offset = 0x8C
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "eng_arg"
+  offset = 0x90
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "ap_start"
+  offset = 0x94
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "ap_count"
+  offset = 0x98
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "ap_cmd"
+  offset = 0x9C
+  width = 32
+  dir = "rw"
+    [[block.property.state]]
+    name = "redo"
+    value = 0x0
+    [[block.property.state]]
+    name = "undo"
+    value = 0x1
+    [[block.property.field]]
+    name = "busy"
+    shift = 0
+    bits = 1
+
+# page 3: the debuggers of the C64 and of drive A (trx_sys.v:199 forwards page 3 to trx_dbg.v and drv_dbg.v, word = offset / 4 + 0x400). trx_dbg.v: CMD
+# :155, ARG :337, IPC_SET :301-306, the reads :390-399 (STATUS :394-395); drv_dbg.v: CMD 0x10-0x12 and 0x03 :56-62, ARG :54, its compare :55, the reads
+# :124-125 (drv_stat :113-115: b0 the drive halted, b1 hold, b2 step, b3 compare on, b31:16 the drive's PC; drv_cycles its cycle count)
+[[block]]
+name = "trx_debug"
+module = "trx_dbg"
+owner = "core"
+address = 0x101A3000
+size = 0xCC
+  [[block.property]]
+  name = "cmd"
+  offset = 0x00
+  width = 32
+  dir = "w"
+    [[block.property.state]]
+    name = "pause_cb"
+    value = 0x1
+    [[block.property.state]]
+    name = "pause_ib"
+    value = 0x2
+    [[block.property.state]]
+    name = "run"
+    value = 0x3
+    [[block.property.state]]
+    name = "step_ins"
+    value = 0x5
+    [[block.property.state]]
+    name = "step_cyc"
+    value = 0x6
+    [[block.property.state]]
+    name = "drv_pause"
+    value = 0x10
+    [[block.property.state]]
+    name = "drv_run"
+    value = 0x11
+    [[block.property.state]]
+    name = "drv_step"
+    value = 0x12
+    [[block.property.state]]
+    name = "stop_ack"
+    value = 0x20
+  [[block.property]]
+  name = "arg"
+  offset = 0x04
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "status"
+  offset = 0x08
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "shut"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "stop"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "at_ib"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "stop_new"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "held"
+    shift = 4
+    bits = 1
+    [[block.property.field]]
+    name = "fw_stop"
+    shift = 5
+    bits = 1
+    [[block.property.field]]
+    name = "halted"
+    shift = 6
+    bits = 1
+    [[block.property.field]]
+    name = "stepping"
+    shift = 7
+    bits = 1
+    [[block.property.field]]
+    name = "reason"
+    shift = 8
+    bits = 4
+    [[block.property.field]]
+    name = "rel"
+    shift = 12
+    bits = 1
+    [[block.property.field]]
+    name = "en"
+    shift = 16
+    bits = 2
+    [[block.property.field]]
+    name = "bmp_en"
+    shift = 18
+    bits = 1
+    [[block.property.field]]
+    name = "cmp_en"
+    shift = 19
+    bits = 1
+    [[block.property.field]]
+    name = "owner"
+    shift = 20
+    bits = 1
+    [[block.property.field]]
+    name = "stops"
+    shift = 24
+    bits = 8
+  [[block.property]]
+  name = "stop_rec"
+  offset = 0x10
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "stop_at"
+  offset = 0x14
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "ipc_set"
+  offset = 0x18
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "pc"
+    shift = 0
+    bits = 16
+    [[block.property.field]]
+    name = "op"
+    shift = 16
+    bits = 8
+    [[block.property.field]]
+    name = "valid"
+    shift = 24
+    bits = 1
+  [[block.property]]
+  name = "drv_cmp"
+  offset = 0xC0
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "drv_stat"
+  offset = 0xC4
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "halted"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "hold"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "stepping"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "cmp_en"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "pc"
+    shift = 16
+    bits = 16
+  [[block.property]]
+  name = "drv_cycles"
+  offset = 0xC8
+  width = 32
+  dir = "r"
+
+# page 4: the cartridge (trx_io.v:293-319 write, :367-379 read), the cartridge library's map; the descriptor ends at 0x06A
+[[block]]
+name = "c64cart"
+module = "trx_io"
+owner = "base"
+address = 0x101A4000
+size = 0x6B
+map = "c64cart"
+
+# page 6 0x060-0x0A7: the pixel layer and the still capture (trx_io.v:223-224 hands page 6 over; top.v:1580-1582 pix_layer.v: bytes 0-2 stage, byte 3
+# commits :181-202, byte 0 latches a read :204-210; the registers :160-166, :188-197). The base's: its video service (video.cc) takes the still
+# (still_en, still_base, still_status) and the menu's layer, by the offsets of its own video.h (PX_*, STILL_*), not through this table; the ring library
+# only reads still_status's count (ring.cc scrub_show_locked). No SDK map has the block, so it keeps its properties.
+[[block]]
+name = "trx_pixel"
+module = "pix_layer"
+owner = "base"
+address = 0x101A6060
+size = 0x48
+  [[block.property]]
+  name = "still_en"
+  offset = 0x00
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "on"
+    shift = 0
+    bits = 1
+  [[block.property]]
+  name = "still_base"
+  offset = 0x04
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "still_status"
+  offset = 0x08
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "valid"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "slot"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "hz60"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "count"
+    shift = 8
+    bits = 24
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x20
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "front"
+  offset = 0x24
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "back"
+  offset = 0x28
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "size"
+  offset = 0x30
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "w"
+    shift = 0
+    bits = 16
+    [[block.property.field]]
+    name = "h"
+    shift = 16
+    bits = 16
+  [[block.property]]
+  name = "stride"
+  offset = 0x34
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "origin"
+  offset = 0x38
+  width = 32
+  dir = "w"
+    [[block.property.field]]
+    name = "x"
+    shift = 0
+    bits = 16
+    [[block.property.field]]
+    name = "y"
+    shift = 16
+    bits = 16
+  [[block.property]]
+  name = "ga"
+  offset = 0x3C
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "key"
+  offset = 0x40
+  width = 32
+  dir = "w"
+  [[block.property]]
+  name = "status"
+  offset = 0x44
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "flip_pending"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "vblank"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "under"
+    shift = 8
+    bits = 8
+    [[block.property.field]]
+    name = "frames"
+    shift = 16
+    bits = 16
+
+# page 6 0x0C0-0x0C7: the freeze menu's text layer (top.v:1594-1596 c64_text.v:103-120: ctrl's b1:0 written at byte 3, b31:24 read the layer's version 2)
+[[block]]
+name = "trx_text"
+module = "c64_text"
+owner = "core"
+address = 0x101A60C0
+size = 0x8
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x00
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "show"
+    shift = 0
+    bits = 2
+    [[block.property.field]]
+    name = "version"
+    shift = 24
+    bits = 8
+  [[block.property]]
+  name = "late"
+  offset = 0x04
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "shown"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "count"
+    shift = 8
+    bits = 8
+
+# page 7: the expansion port (trx_sys.v:219-223 read, :368 write)
+[[block]]
+name = "trx_slot"
+module = "trx_sys"
+owner = "core"
+address = 0x101A7000
+size = 0x14
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x00
+  width = 32
+  dir = "rw"
+    [[block.property.field]]
+    name = "rom_wr_en"
+    shift = 1
+    bits = 1
+  [[block.property]]
+  name = "status"
+  offset = 0x04
+  width = 32
+  dir = "r"
+    [[block.property.field]]
+    name = "armed"
+    shift = 16
+    bits = 1
+    [[block.property.field]]
+    name = "block"
+    shift = 31
+    bits = 1
+  [[block.property]]
+  name = "cnt0"
+  offset = 0x08
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "cnt1"
+  offset = 0x0C
+  width = 32
+  dir = "r"
+  [[block.property]]
+  name = "last"
+  offset = 0x10
+  width = 32
+  dir = "r"
+
+# ---- ultimate_sys.vhd's own decode --------------------------------------------------------------------------------------------------------------
+
+# 0x10040000: the C64's control page (page RAM, every byte writes and reads back: ultimate_sys.vhd:1244-1245, :1255; the registers: :1088-1120
+# write, :1327-1342 read). The cartridge library's map c64cart_regs has mode, stop, type, reu, reu_size and sampler write-only and no stop_mode or
+# clock_detect, which trx64u reads and writes; the block carries the page's registers itself, under the map's names and states.
+[[block]]
+name = "cart_regs"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10040000
+size = 0x100
+  [[block.property]]
+  name = "mode"
+  offset = 0x00
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "normal"
+    value = 0
+    [[block.property.state]]
+    name = "ultimax"
+    value = 2
+    [[block.property.state]]
+    name = "reset"
+    value = 4
+    [[block.property.state]]
+    name = "unreset"
+    value = 8
+  [[block.property]]
+  name = "stop"
+  offset = 0x01
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "run"
+    value = 0
+    [[block.property.state]]
+    name = "stopped"
+    value = 1
+    [[block.property.field]]
+    name = "has_stopped"
+    shift = 1
+    bits = 1
+  [[block.property]]
+  name = "stop_mode"
+  offset = 0x02
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "force"
+    value = 2
+  [[block.property]]
+  name = "clock_detect"
+  offset = 0x03
+  width = 8
+  dir = "r"
+    [[block.property.field]]
+    name = "reset_seen"
+    shift = 4
+    bits = 1
+  [[block.property]]
+  name = "type"
+  offset = 0x05
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "reu"
+  offset = 0x08
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "off"
+    value = 0
+    [[block.property.state]]
+    name = "on"
+    value = 1
+  [[block.property]]
+  name = "reu_size"
+  offset = 0x09
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "mb16"
+    value = 7
+  [[block.property]]
+  name = "sampler"
+  offset = 0x0E
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "off"
+    value = 0
+    [[block.property.state]]
+    name = "on"
+    value = 1
+
+# 0x10020000-0x10023FFF: drive A (ultimate_sys.vhd:879-880, drive_unit.vhd, Gideon's c1541_drive). The drive library's map cbm1541 without what
+# this drive does not decode: the WD177x registers from +0x1800 (no write reaches them), `side` (it reads a constant 0) and `drivetype`
+# (drive_registers.vhd:89-92, :121-124 only with g_multi_mode).
+[[block]]
+name = "drive_a"
+module = "drive_unit"
+owner = "base"
+address = 0x10020000
+size = 0x4000
+  [[block.property]]
+  name = "power"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "reset"
+  offset = 0x1
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "hw_addr"
+  offset = 0x2
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "sensor"
+  offset = 0x3
+  width = 8
+  dir = "w"
+    [[block.property.state]]
+    name = "dark"
+    value = 0
+    [[block.property.state]]
+    name = "light"
+    value = 1
+  [[block.property]]
+  name = "inserted"
+  offset = 0x4
+  width = 8
+  dir = "w"
+    [[block.property.state]]
+    name = "no"
+    value = 0
+    [[block.property.state]]
+    name = "yes"
+    value = 1
+  [[block.property]]
+  name = "rammap"
+  offset = 0x5
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "track"
+  offset = 0x8
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status"
+  offset = 0x9
+  width = 8
+  dir = "r"
+    [[block.property.field]]
+    name = "motor"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "writing"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "writebusy"
+    shift = 2
+    bits = 1
+  [[block.property]]
+  name = "diskchange"
+  offset = 0xC
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "dirty"
+  offset = 0x800
+  width = 8
+  count = 128
+  dir = "rw"
+    [[block.property.field]]
+    name = "any"
+    shift = 7
+    bits = 1
+    [[block.property.field]]
+    name = "this"
+    shift = 0
+    bits = 1
+  [[block.property]]
+  name = "param_addr"
+  offset = 0x1000
+  width = 32
+  count = 256
+  stride = 8
+  dir = "w"
+  [[block.property]]
+  name = "param_len"
+  offset = 0x1004
+  width = 32
+  count = 256
+  stride = 8
+  dir = "w"
+    [[block.property.field]]
+    name = "length_m1"
+    shift = 0
+    bits = 16
+    [[block.property.field]]
+    name = "bit_time"
+    shift = 16
+    bits = 16
+
+# 0x10044000: the UCI (ultimate_sys.vhd:885-886 region r_uci, 8 KB; uci_unit.vhd:124 instantiates Gideon's command_interface, whose splitter
+# :47-59 puts the registers below +0x800 and the 2 KB of buffers from +0x800). The core's (Alex, U18 §5 2026-11-24). Its driver is the UCI library
+# (uci/): the slot registers through uci/trxuci_slot.cc, everything else through the command interface server, uci/command_intf.cc, which left the
+# base with SDK 0.4.6 (MultiCore T239.3 D48) and takes every register and the buffers from this table (uci/command_intf.h CMD_IF_*). The SDK's map
+# `uci` has only the two slot registers, so the block lists its own (api.md 6.14.11). The registers are command_protocol.vhd's, address bits 3:0
+# (they repeat up to +0x7FF), named as command_if_pkg.vhd's c_cif_io_*; the writes are decoded at :198-249, the reads at :250-289:
+#  - slot_base (+0, :201 write, :253 read): data bits 6:1 are the slot's C64 address bits 8:3, compared at :108, :121, :141; 0x47 puts its four
+#    registers at $DF1C-$DF1F.
+#  - slot_enable (+1, :203 write: b0 the slot answers while b7 is 0, b7 set writes the bus ID instead; :255 read b0).
+#  - handshake_out (+2, :209 write: b0 reset, b1 data seen, b2 abort seen, b4 data valid with b5 more, b7 back to idle; :257 read: b7 freeze,
+#    b6 trigger, b5:4 the state). handshake_in (+3, :261 read): the slot's status byte, the firmware's CMD_IF_STATUSBYTE.
+#  - command_start .. status_end (+4 .. +9, :263-273 read): the buffers' bounds over 8 (command_if_pkg.vhd:33-41). irq_mask_set (+4, :243) and
+#    irq_mask_clear (+5, :245) are the writes of +4 and +5.
+#  - status_length (+A, :233 write: the status length, its pointer back to the start; :275 read: the status pointer), irq_mask (+B, :241, :285),
+#    response_len_l and _h (+C, +D, :236, :239 write: the response length, its pointer back to the start; :277, :279 read: the response pointer),
+#    command_len_l and _h (+E, +F, :281, :283 read: the length of the command).
+#  - buffer (+0x800, 2 KB): command_interface.vhd's dpram (:74-95, port a :84-88), read and written a byte at a time (:70-72); the command at 0,
+#    the response at 896, the status at 1792.
+[[block]]
+name = "cmd_if"
+module = "uci_unit"
+owner = "core"
+address = 0x10044000
+size = 0x1000
+  [[block.property]]
+  name = "slot_base"
+  offset = 0x00
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "df1c"
+    value = 0x47
+  [[block.property]]
+  name = "slot_enable"
+  offset = 0x01
+  width = 8
+  dir = "rw"
+    [[block.property.state]]
+    name = "off"
+    value = 0
+    [[block.property.state]]
+    name = "on"
+    value = 1
+  [[block.property]]
+  name = "handshake_out"
+  offset = 0x02
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "handshake_in"
+  offset = 0x03
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "command_start"
+  offset = 0x04
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "irq_mask_set"
+  offset = 0x04
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "command_end"
+  offset = 0x05
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "irq_mask_clear"
+  offset = 0x05
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "response_start"
+  offset = 0x06
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "response_end"
+  offset = 0x07
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_start"
+  offset = 0x08
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_end"
+  offset = 0x09
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "status_length"
+  offset = 0x0A
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "irq_mask"
+  offset = 0x0B
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "response_len_l"
+  offset = 0x0C
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "response_len_h"
+  offset = 0x0D
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "command_len_l"
+  offset = 0x0E
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "command_len_h"
+  offset = 0x0F
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "buffer"
+  offset = 0x800
+  width = 8
+  count = 2048
+  dir = "rw"
+
+# 0x10050000: the DMA window into the C64 (ultimate_sys.vhd:887-888, :1015-1034; dma_win.v behind the handshake), the DMA map
+[[block]]
+name = "dma"
+module = "dma_win"
+owner = "base"
+address = 0x10050000
+size = 0x10000
+map = "dma"
+
+# 0x10060500: the GCR coder (ultimate_sys.vhd:893-894 region r_gcr, :950-953 its request, :798-803 the instance; vendor/gideon/fpga/1541/vhdl_source/
+# gcr_codec.vhd). Every write shifts its byte into a 40-bit register (:27-29, at any address of the block); a read (:30-52) of +0 .. +3 answers the
+# four bytes decoded from those 40 bits (gcr2bin :70-76), +4 .. +7 the decoder's error bits, +8 .. +C the five bytes encoded from the last 32. The
+# core's (Alex's split, U18 §5 2026-11-24): its one driver is the UCI library's CONTROL target (uci/uci.cc conv_5bytes_gcr2bin: five bytes in, four out;
+# the drive library codes GCR in software). The names are those of the SDK's map `gcr_coder`.
+[[block]]
+name = "gcr_coder"
+module = "gcr_codec"
+owner = "core"
+address = 0x10060500
+size = 0x10
+  [[block.property]]
+  name = "in"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "out0"
+  offset = 0x0
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out1"
+  offset = 0x1
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out2"
+  offset = 0x2
+  width = 8
+  dir = "r"
+  [[block.property]]
+  name = "out3"
+  offset = 0x3
+  width = 8
+  dir = "r"
+
+# 0x10060600: the ICAP loader (MultiCore T239.3 D37, a port of the host's loader; ultimate_sys.vhd:895-896 region r_icap, :1374-1403 write,
+# :1410-1419 read; top.v:620-625 the byte bit reversal and ICAPE2 X32 on cpu_clk), the base's map icap: the way back to the MultiCore host
+# (IPROG with WBSTAR 0, the contract's section 7). c64_basic has no partition and no port lock, so there is no block `partition` (+0x20, +0x21):
+# the base then does no partial load, no port release and no decouple write, and takes the board as the host's only with a valid hand-over page.
+[[block]]
+name = "icap"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10060600
+size = 0x1C
+map = "icap"
+
+# 0x1010000C: the speaker enable of u2p_io (ultimate_sys.vhd:903-904 region r_u2p; u2p_io.vhd:75-77 read, :120-122 write: b0 on, b4:1 volume);
+# the rest of the U2P block (I2C, MDIO, the USB hub and ULPI resets) is the base's
+[[block]]
+name = "speaker_enable"
+module = "u2p_io"
+owner = "core"
+address = 0x1010000C
+size = 0x1
+  [[block.property]]
+  name = "ctrl"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+    [[block.property.field]]
+    name = "on"
+    shift = 0
+    bits = 1
+
+# 0x10100400 (page 2, page RAM: ultimate_sys.vhd:913-914, :1244-1245, :1255): the three runs of the U64 block trx64u writes. The bitstream gives
+# them no function beyond the page RAM (the page's registers are 0x00, 0x02, 0x03, 0x06, 0x07, 0x0A, 0x0B, 0x0E, 0x0F: :1199-1231, :1343-1359);
+# power, RESTORE, the HDMI PLL reset, the keyboard scan and the case LEDs are the base's
+[[block]]
+name = "u64_userport"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100405
+size = 0x1
+  [[block.property]]
+  name = "en"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+[[block]]
+name = "u64_connectors"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100408
+size = 0x2
+  [[block.property]]
+  name = "hdmi_enable"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "internal"
+  offset = 0x1
+  width = 8
+  dir = "rw"
+
+[[block]]
+name = "u64_pwm"
+module = "ultimate_sys"
+owner = "core"
+address = 0x1010040D
+size = 0x1
+  [[block.property]]
+  name = "duty"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+# 0x10100500: the mixer's gains (ultimate_sys.vhd:1257-1274, a write decode of its own at address bits 23:8 = 0x1005 outside the regions; writes only,
+# no read). A right and a left byte per source: 0x00-0x03 the two UltiSIDs (sid_gains to the SID mixer, top.v:1382), 0x04-0x07 the two SID sockets
+# (sock_gains, top.v:955), 0x08-0x0B the sampler's two channels (sid_gains2, top.v:1383). Nothing decodes a byte from 0x0C up.
+[[block]]
+name = "audio_mixer"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100500
+size = 0xC
+  [[block.property]]
+  name = "gain"
+  offset = 0x0
+  width = 8
+  count = 12
+  dir = "w"
+
+# 0x10100540 and 0x10100544: the speaker's four gains spk_gain(0..3) (ultimate_sys.vhd:1275-1278, the same write decode; writes only), of which the
+# speaker plays the highest (mix_spk :1559-1562, top.v:1661). Two blocks: +0x02 and +0x03 between them decode nothing.
+[[block]]
+name = "speaker_mixer"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100540
+size = 0x2
+  [[block.property]]
+  name = "gain0"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "gain1"
+  offset = 0x1
+  width = 8
+  dir = "w"
+
+[[block]]
+name = "speaker_mixer_b"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10100544
+size = 0x2
+  [[block.property]]
+  name = "gain2"
+  offset = 0x0
+  width = 8
+  dir = "w"
+  [[block.property]]
+  name = "gain3"
+  offset = 0x1
+  width = 8
+  dir = "w"
+
+# 0x10145000: the HDMI palette of the overlay's characters (ultimate_sys.vhd:915-916 region r_ovl 0x140000-0x147FFF, ovl_we :978, ovl_addr :983;
+# overlay.v:105-111: block 5 with address bits 11:6 = 0, entry n's R, G, B at 4n + 0, 1, 2, 4n + 3 ignored; writes only: rdata :116-117 is 0 there).
+[[block]]
+name = "hdmi_palette"
+module = "overlay"
+owner = "core"
+address = 0x10145000
+size = 0x40
+  [[block.property]]
+  name = "red"
+  offset = 0x0
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "green"
+  offset = 0x1
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "blue"
+  offset = 0x2
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+
+# 0x10180000 (page 3, the C64's I/O block, page RAM: ultimate_sys.vhd:917-918, :1121-1192, :1364-1369), one block per register range and driver:
+# the base writes the video format (io.video_format), the DMA mode (io.ram_memonly) and the joystick lines; trx64u the rest. Of the video format the
+# bitstream acts on ntsc_encoding and cycles_65 (mode_ctl.v:74-75 picks the clock and line timing from them); hz60, rgb_output and ntsc_freq are the
+# firmware's bits, kept in the page RAM and read back.
+[[block]]
+name = "c64_scanlines"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180000
+size = 0x1
+  [[block.property]]
+  name = "on"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+[[block]]
+name = "c64_video"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10180001
+size = 0x1
+  [[block.property]]
+  name = "format"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+    [[block.property.field]]
+    name = "ntsc_encoding"
+    shift = 0
+    bits = 1
+    [[block.property.field]]
+    name = "hz60"
+    shift = 1
+    bits = 1
+    [[block.property.field]]
+    name = "rgb_output"
+    shift = 2
+    bits = 1
+    [[block.property.field]]
+    name = "ntsc_freq"
+    shift = 3
+    bits = 1
+    [[block.property.field]]
+    name = "cycles_65"
+    shift = 5
+    bits = 1
+
+[[block]]
+name = "c64_turbo_en"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180002
+size = 0x1
+  [[block.property]]
+  name = "regs"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+[[block]]
+name = "c64_dma_mode"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10180003
+size = 0x1
+  [[block.property]]
+  name = "memonly"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+# +0x05: page RAM only (no register of the bitstream reads it); trx64u writes the colour timing's phase increment there as the firmware does
+[[block]]
+name = "c64_phase"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180005
+size = 0x1
+  [[block.property]]
+  name = "incr"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+
+# +0x08-0x0F: the addresses of the two SID sockets and the two UltiSIDs (:1172-1175, :1183-1186), each a run of four in that order: socket 1,
+# socket 2, UltiSID 1, UltiSID 2
+[[block]]
+name = "c64_sid_addr"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180008
+size = 0x8
+  [[block.property]]
+  name = "base"
+  offset = 0x0
+  width = 8
+  count = 4
+  dir = "rw"
+  [[block.property]]
+  name = "mask"
+  offset = 0x4
+  width = 8
+  count = 4
+  dir = "rw"
+
+# +0x11-0x14: the sockets' enables (:1187-1188), the paddles (page RAM only) and the stereo address select (:1189)
+[[block]]
+name = "c64_sid_sock"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180011
+size = 0x4
+  [[block.property]]
+  name = "socket1_en"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "socket2_en"
+  offset = 0x1
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "paddle_en"
+  offset = 0x2
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "stereo_addrsel"
+  offset = 0x3
+  width = 8
+  dir = "rw"
+
+# +0x20-0x29: the UltiSIDs' waveforms, resonance, digis and split (:1176-1182)
+[[block]]
+name = "c64_sid_cfg"
+module = "ultimate_sys"
+owner = "core"
+address = 0x10180020
+size = 0xA
+  [[block.property]]
+  name = "waves1"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "waves2"
+  offset = 0x1
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "res1"
+  offset = 0x2
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "res2"
+  offset = 0x3
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "digi1"
+  offset = 0x7
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "digi2"
+  offset = 0x8
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "split"
+  offset = 0x9
+  width = 8
+  dir = "rw"
+
+# +0x2A-0x2E: the bus bridge (page RAM only), the bus sharing (:1149-1156) and the turbo's speed (:1165-1166)
+[[block]]
+name = "c64_bus"
+module = "ultimate_sys"
+owner = "core"
+address = 0x1018002A
+size = 0x5
+  [[block.property]]
+  name = "bridge"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "internal"
+  offset = 0x1
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "external"
+  offset = 0x2
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "speed_prefer"
+  offset = 0x3
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "speed_update"
+  offset = 0x4
+  width = 8
+  dir = "rw"
+
+# +0x30-0x31: the joystick lines the base drives (:1140-1146)
+[[block]]
+name = "c64_joy"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10180030
+size = 0x2
+  [[block.property]]
+  name = "port1"
+  offset = 0x0
+  width = 8
+  dir = "rw"
+  [[block.property]]
+  name = "port2"
+  offset = 0x1
+  width = 8
+  dir = "rw"
+
+# 0x10180800: the C64 palette (ultimate_sys.vhd:925-926 region r_pal 0x180800-0x180FFF; pal_we :985 only with address bits 10:6 = 0, pal_addr :986;
+# pal_ram.v:43-50: entry n's R, G, B at 4n + 0, 1, 2, 4n + 3 ignored; writes only). Nothing decodes the rest of the region (no YUV at +0x400).
+[[block]]
+name = "c64_palette"
+module = "pal_ram"
+owner = "core"
+address = 0x10180800
+size = 0x40
+  [[block.property]]
+  name = "red"
+  offset = 0x0
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "green"
+  offset = 0x1
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+  [[block.property]]
+  name = "blue"
+  offset = 0x2
+  width = 8
+  count = 16
+  stride = 4
+  dir = "w"
+
+# 0x10181800 (page 5): U64_DEBUG_REGISTER, its own byte at +0 (ultimate_sys.vhd:1247-1254, :1360-1363), the DMA service's
+[[block]]
+name = "c64_debug"
+module = "ultimate_sys"
+owner = "base"
+address = 0x10181800
+size = 0x10
+  [[block.property]]
+  name = "debug"
+  offset = 0x00
+  width = 8
+  dir = "rw"
+
+# 0x10188000-0x1018FFFF: the ROM apertures (ultimate_sys.vhd:923-924, :1035-1055; dma_win.v): BASIC at +0x0000, KERNAL at +0x2000, the character
+# ROM at +0x4000 (4 KB, mirrored up to +0x6FFF). The base's io group writes and reads them (io.rom_write, io.rom_read).
+[[block]]
+name = "c64_roms"
+module = "dma_win"
+owner = "base"
+address = 0x10188000
+size = 0x5000
+  [[block.property]]
+  name = "basic"
+  offset = 0x0000
+  width = 8
+  count = 8192
+  dir = "rw"
+  [[block.property]]
+  name = "kernal"
+  offset = 0x2000
+  width = 8
+  count = 8192
+  dir = "rw"
+  [[block.property]]
+  name = "char"
+  offset = 0x4000
+  width = 8
+  count = 4096
+  dir = "rw"

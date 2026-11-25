@@ -1,0 +1,377 @@
+name: Matrix
+run-name: "matrix @${{ github.event.pull_request.head.sha || github.sha }}"
+
+# U20 B (MultiCore T239.5 D8-D10, copied in their form): the pipeline as a matrix. The lanes from top to bottom: the tree checks and the dispatcher of every
+# push (tree), the bitstream (bits:c64_basic: the entry c64u-<key>, every designs/*/build.tcl, built by the builder), the core (core:trx64u: our
+# libraries linked with MultiCore's SDK into trx64u.cor). The thirteen steps from left to right (1 lint, 2 unit tests, 3 what has changed, 4 comparison,
+# 5 what must be in it, 6 build, 7 complete and fits, 8-10 tests, 11 package, 12 emulator tests, 13 deliver); a lane leaves a step empty when it does
+# not have it (ci/lane.sh names which). No SDK lane (we take MultiCore's SDK by its pin, sdk.pin sdk_release, D11), no host lane, no DFX lanes.
+# ci/dispatch.py decides what this push has to do; ci/lane.sh runs one step of one lane. Called by pipeline.yml, whose runs the builder serves.
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+
+jobs:
+  # Every push: the plan, the lanes and steps of this push (ci/dispatch.py, the matrix in the summary), the work order of the builder (ci/order.py)
+  dispatch:
+    name: Dispatcher (what this push has to do)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jondalar/trx64u-build@sha256:706a976b56de400970d5af3bac9358d063c1d87defe6a3630d3ed26c5bae0c08
+    timeout-minutes: 30
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+    outputs:
+      lint_groups: ${{ steps.dispatch.outputs.lint_groups }}
+      bits: ${{ steps.dispatch.outputs.bits }}
+      cores: ${{ steps.dispatch.outputs.cores }}
+      sims: ${{ steps.dispatch.outputs.sims }}
+      sims_tier: ${{ steps.dispatch.outputs.sims_tier }}
+      missing: ${{ steps.order.outputs.missing }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Container paths and git
+        # MultiCore T239.1: $RUNNER_TEMP and $GITHUB_WORKSPACE are the container's paths (env.CI_TEMP, env.CI_WS); git trusts the checkout
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Environment
+        run: |
+          echo "CI_HANDOFF=$RUNNER_TEMP/handoff" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/handoff"
+      - name: 3 What has changed and the dispatcher (the lanes and steps of this push)
+        id: dispatch
+        env:
+          SIMS_INPUT: ${{ contains(github.event.inputs.extra, 'sims') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -eu
+          tier="$(ci/select.sh sims-demand)"
+          # into a file first: a failing dispatcher fails this step (a pipe into tee would hide its exit code)
+          python3 ci/dispatch.py --plan-out "$CI_HANDOFF/plan.json" --tier "$tier" > "$CI_HANDOFF/dispatch.out"
+          cat "$CI_HANDOFF/dispatch.out" >> "$GITHUB_OUTPUT"
+          cat "$CI_HANDOFF/dispatch.out"
+      - name: Work order (the bitstream entries the builder builds)
+        id: order
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON_FILE: ${{ env.CI_TEMP }}/handoff/plan.json
+          WORK_ORDER_OUT: ${{ env.CI_TEMP }}/handoff/work-order.json
+          ORDER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 ci/order.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: plan
+          path: ${{ env.CI_TEMP }}/handoff/plan.json
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: work-order
+          path: ${{ env.CI_TEMP }}/handoff/work-order.json
+          retention-days: 3
+          if-no-files-found: error
+
+  # MultiCore T239.1 D14: Alex's click for a commit the builder does not build by itself (the builder reads the approval through the API)
+  approve:
+    name: Approve the builder's work (environment vivado)
+    needs: dispatch
+    if: ${{ needs.dispatch.outputs.missing == 'true' && !(github.event_name == 'push' && github.actor_id == '682272' && github.triggering_actor == github.actor) }}
+    runs-on: ubuntu-latest
+    environment: vivado
+    timeout-minutes: 5
+    steps:
+      - run: echo "approved; the builder builds the missing keys of this commit"
+
+  # 1 Lint, one leg per lane (MultiCore T239.5 D7): tree, bits:c64_basic, core:trx64u (ci/lint.sh <group>)
+  lint:
+    name: "1 Lint (${{ matrix.group }})"
+    needs: dispatch
+    if: ${{ !cancelled() && needs.dispatch.result == 'success' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jondalar/trx64u-sim@sha256:3e366a085f3ff5bfec33b5fa08359a625034038803b8b89f3406691683a625e0
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.dispatch.outputs.lint_groups) }}
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+      GROUP: ${{ matrix.group }}
+      SDK_FETCH: --release
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Container paths and git
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684   # v4.2.3
+        if: ${{ matrix.group == 'core:trx64u' }}
+        with:
+          path: software/trx64u/.sdk/release
+          key: sdk-release-${{ hashFiles('software/trx64u/sdk.pin') }}
+      - name: Lint
+        run: ci/lint.sh "$GROUP"
+
+  # the bitstream lane, step 2: the benches of ci/sims.txt, on demand only ("[sims]", the dispatch input, integration, tags), before Vivado. Per-bench
+  # PASS markers (ci/sims.sh) and the bench ROMs (ci/roms.py's store) are kept in GitHub's cache; a hosted job stops after 6 h.
+  sims:
+    name: "2 Sims (bits:${{ matrix.bits }}, tier ${{ needs.dispatch.outputs.sims_tier }})"
+    needs: dispatch
+    if: ${{ !cancelled() && needs.dispatch.result == 'success' && needs.dispatch.outputs.sims != '[]' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jondalar/trx64u-sim@sha256:3e366a085f3ff5bfec33b5fa08359a625034038803b8b89f3406691683a625e0
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        bits: ${{ fromJSON(needs.dispatch.outputs.sims) }}
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+      TIER: ${{ needs.dispatch.outputs.sims_tier }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Container paths and git
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Environment
+        run: |
+          {
+            echo "CI_HANDOFF=$RUNNER_TEMP/handoff"
+            echo "CI_SIMS_OK=$RUNNER_TEMP/ci-cache/sims-ok"
+            echo "ROMS_STORE=$RUNNER_TEMP/ci-cache/roms"
+            echo "CI_SIMS_JOBS=$(nproc)"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/ci-cache/sims-ok" "$RUNNER_TEMP/ci-cache/roms"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684   # v4.2.3
+        with:
+          path: ${{ env.CI_TEMP }}/ci-cache
+          # one key per run and leg; the leg restores its newest entry
+          key: ci-cache-sims-${{ matrix.bits }}-${{ github.sha }}
+          restore-keys: |
+            ci-cache-sims-${{ matrix.bits }}-
+      - name: Benches
+        run: ci/sims.sh -t "$TIER"
+
+  # the bitstream lane - 3 key, 6 Vivado (the builder, while this job waits at the environment bitstreams), 7 report, 11 keep (the entry restored from
+  # the builds repository, D40: GitHub's cache first), 13 to the lanes (the artifact bits-<lane>)
+  bits:
+    name: "Bitstream ${{ matrix.bits }}: key, Vivado (builder), report"
+    needs: [dispatch, approve, sims]
+    if: ${{ !cancelled() && needs.dispatch.result == 'success' && needs.approve.result != 'failure' && needs.approve.result != 'cancelled' && needs.sims.result != 'failure' && needs.sims.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    environment: bitstreams
+    container:
+      image: ghcr.io/jondalar/trx64u-build@sha256:706a976b56de400970d5af3bac9358d063c1d87defe6a3630d3ed26c5bae0c08
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        bits: ${{ fromJSON(needs.dispatch.outputs.bits) }}
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+      LANE: bits:${{ matrix.bits }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Container paths and git
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Environment
+        run: |
+          {
+            echo "CI_HANDOFF=$RUNNER_TEMP/handoff"
+            echo "CI_BIT_CACHE=$RUNNER_TEMP/bit"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/bit"
+      - name: 3 Key
+        id: key
+        run: |
+          set -eu
+          ci/lane.sh "$LANE" key
+          echo "entry=$(ci/fetch_bits.sh --names)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684   # v4.2.3
+        with:
+          path: ${{ env.CI_TEMP }}/bit
+          key: bit-${{ steps.key.outputs.entry }}
+      - name: 6 Vivado (the builder) and 11 keep (the entry from the builds repository)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ci/lane.sh "$LANE" fetch
+      - name: 7 Report
+        run: ci/lane.sh "$LANE" report
+      - name: 13 To the lanes (the artifact bits-<lane>)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: bits-${{ matrix.bits }}
+          path: ${{ env.CI_TEMP }}/bit
+          retention-days: 3
+          if-no-files-found: error
+
+  # the core lane - 3 what has changed, 6 build (the SDK of the pinned release, our libraries and sub-apps), 11 package (5 and 7 inside pack_cor.sh),
+  # 13 deliver (the artifact deliver-<core>; 12 is the job emu)
+  core:
+    name: "${{ matrix.core }}: steps 3, 6, 11 (with 5 and 7), 13"
+    needs: [dispatch, lint, bits]
+    if: ${{ !cancelled() && needs.dispatch.result == 'success' && needs.lint.result == 'success' && needs.bits.result == 'success' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/jondalar/trx64u-build@sha256:706a976b56de400970d5af3bac9358d063c1d87defe6a3630d3ed26c5bae0c08
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ${{ fromJSON(needs.dispatch.outputs.cores) }}
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+      LANE: core:${{ matrix.core }}
+      SDK_FETCH: --release
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Container paths and git
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Environment
+        run: |
+          {
+            echo "CI_HANDOFF=$RUNNER_TEMP/handoff"
+            echo "CI_BIT_CACHE=$RUNNER_TEMP/bit"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/handoff" "$RUNNER_TEMP/bit"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684   # v4.2.3
+        with:
+          path: software/trx64u/.sdk/release
+          key: sdk-release-${{ hashFiles('software/trx64u/sdk.pin') }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: plan
+          path: ${{ env.CI_TEMP }}/handoff
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: bits-c64_basic
+          path: ${{ env.CI_TEMP }}/bit
+      - name: 3 What has changed
+        run: ci/lane.sh "$LANE" changed
+      - name: 6 Build (the SDK of the pinned release, our libraries and the sub-apps trex_crt and online)
+        run: ci/lane.sh "$LANE" build
+      - name: 11 Package (the app linked with the TOML A and B, symbol check, the .cor with this commit's bitstream, its ops and heap checks)
+        run: ci/lane.sh "$LANE" package
+      - name: 13 Deliver (the .cor, the sub-apps it carries, its app's ELF, deliver.json)
+        run: ci/lane.sh "$LANE" deliver
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: deliver-${{ matrix.core }}
+          path: ${{ env.CI_TEMP }}/handoff/deliver-${{ matrix.core }}
+          retention-days: 14
+          if-no-files-found: error
+
+  # 12 Emulator tests: the core's .cor in ue2emu with its own app (software/trx64u/tools/emu_ops.py: READY., the monitor's ping, the operations and
+  # states the running app registers against base/ops_trx64u.txt, both ways)
+  emu:
+    name: "12 Emulator tests: ${{ matrix.core }} with its own app"
+    needs: [dispatch, core]
+    if: ${{ !cancelled() && needs.dispatch.result == 'success' && needs.core.result == 'success' }}
+    runs-on: ubuntu-latest
+    # MultiCore's emu image with ue2emu's `net` feature (T261 D8; libslirp 4.9.7 from source): emu_ops.py reads REST and the monitor over --net user
+    container:
+      image: ghcr.io/jondalar/trx64u-emu@sha256:ba18a018b776cb3c96b9a7e62656fe7c2c190bf6b71bf36700c8615277da7984
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ${{ fromJSON(needs.dispatch.outputs.cores) }}
+    env:
+      CI_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
+      CI_REF_TYPE: ${{ github.ref_type }}
+      LANE: core:${{ matrix.core }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Container paths and git
+        run: |
+          git config --system --add safe.directory '*'
+          echo "CI_TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CI_WS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Environment
+        id: env
+        run: |
+          {
+            echo "CI_HANDOFF=$RUNNER_TEMP/handoff"
+            echo "CI_EMU_ROMS_CACHE=$RUNNER_TEMP/emu-roms-cache"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/handoff"
+          echo "commit=$(ci/emu_roms.sh --commit)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684   # v4.2.3
+        with:
+          path: ${{ env.CI_TEMP }}/emu-roms-cache
+          key: gideon-roms-${{ steps.env.outputs.commit }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: deliver-${{ matrix.core }}
+          path: ${{ env.CI_TEMP }}/handoff/deliver-${{ matrix.core }}
+      - name: 12 Emulator tests
+        run: ci/lane.sh "$LANE" emu
+      - name: Emulator output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: emu-${{ matrix.core }}
+          path: ${{ env.CI_TEMP }}/handoff/emu
+          retention-days: 7
+          if-no-files-found: ignore
+
+  summary:
+    name: Result (the matrix)
+    needs: [dispatch, approve, lint, sims, bits, core, emu]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Table
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS"])
+          lines = ["| job | result |", "|---|---|"] + ["| %s | %s |" % (k, v.get("result")) for k, v in needs.items()]
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          bad = [k for k, v in needs.items() if v.get("result") in ("failure", "cancelled")]
+          if bad:
+              sys.exit("red: " + ", ".join(bad))
+          PY

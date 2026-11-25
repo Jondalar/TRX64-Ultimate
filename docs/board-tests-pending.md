@@ -28,7 +28,7 @@ Turbo-Engine in main, t16-complete. Der Tester-RC (T49) steht an. T29 hat dazu n
 
 Bestanden: T62 (Mensch), T16 EF1/MegaByter/GMod2/EF3, T57 B1-B11, T74 (MegaByter, Gideon gemessen), T49-RESTORE (Einstellungen NO und YES). R21 nach M2 (T76); RC1 installiert (T49). Details: [AlexTest101026.md](AlexTest101026.md) und die Spec-Historien.
 
-Befunde abends (RC1, Claude beim Video-Mitschnitt): (1) `PUT /v1/streams/video:start?ip=192.168.242.111` (Unicast) antwortet "Network Host Resolve Error", Multicast `239.0.1.64` geht; nicht analysiert. (2) trxmon per RPC `bk` + `g` legt die App lahm (T55).
+Befunde abends (RC1, Claude beim Video-Mitschnitt): (1) `PUT /v1/streams/video:start?ip=192.0.2.111` (Unicast) antwortet "Network Host Resolve Error", Multicast `239.0.1.64` geht; nicht analysiert. (2) trxmon per RPC `bk` + `g` legt die App lahm (T55).
 
 ### Vorbereitung (Stand vom Morgen, erledigt)
 
@@ -43,7 +43,7 @@ fehl (dann ist es der Zustandsbus, nicht das Cart).
 
 **Vorher (Claude), einmal:**
 ```
-cd /Users/alex/Development/TRX64-Ultimate-wt-t16h     # oder integ-m1 nach dem Merge
+cd ~/Development/TRX64-Ultimate-wt-t16h     # oder integ-m1 nach dem Merge
 pgrep -fl "load.sh|trxdbg|_board.py|t16_session"      # muss leer sein
 ioreg -p IOUSB | grep -i blaster                       # Blaster muss da sein
 tests/cart/t16_session.sh selftest                     # 20 s, muss "all passed" sagen

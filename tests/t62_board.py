@@ -21,7 +21,7 @@ import argparse, json, os, subprocess, sys, time, urllib.parse, urllib.request, 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser()
-ap.add_argument("host", nargs="?", default="192.168.242.189")
+ap.add_argument("host", nargs="?", default=os.environ.get("TRX64_HOST", "192.0.2.189"))
 ap.add_argument("--package")
 args = ap.parse_args()
 HOST = args.host

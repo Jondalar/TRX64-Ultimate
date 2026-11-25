@@ -24,7 +24,7 @@ preference, `CART_DETECT` and the trex_crt dumper/writer work on it.
   weak evidence for function and none for polarity; rows that rest on the name alone are
   marked **unverified**.
 - What is copied or adapted from our TRX64 emulator is marked **[TRX64: file]**, paths
-  relative to `/Users/alex/Development/C64/Tools/TRX64/`.
+  relative to `~/Development/C64/Tools/TRX64/`.
 - Times are in dot4x ticks: 1 tick = 1 / 31.527778 MHz = 31.72 ns; one C64 cycle = 32
   ticks = 1015 ns; a half cycle = 16 ticks = 507.5 ns.
 

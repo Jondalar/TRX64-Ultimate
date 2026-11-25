@@ -603,6 +603,26 @@ module top #(
         else if (!eth_age[27]) eth_age <= eth_age + 1'b1;
     end
     assign ETH_LED_YELn = eth_age[27];
+    // U19 (MultiCore T133): the RISC-V's data cache. dc_ext_tgl toggles for every DDR2 write into its cacheable window from outside
+    // its bus (mig_arb, ui_clk); dc_line / dc_line_adr are the 128-bit word of its last DDR2 read and the line address (cpu_mem_bridge,
+    // cpu_clk), cpu_done_rline client 0's word as mig_arb read it (ui_clk). Declared before ult, which takes them.
+    wire         dc_ext_tgl;
+    wire [127:0] cpu_done_rline, dc_line;
+    wire [21:0]  dc_line_adr;
+    // The ICAP loader (MultiCore T239.3 D37, the host's T79 loader): the RISC-V streams bytes through ultimate_sys 0x10060610; the
+    // base's "Return to host menu" sends IPROG with WBSTAR 0 and the FPGA loads the MultiCore host from flash 0x0. icap_data holds the
+    // file's 32-bit word (first byte in 31:24); ICAPE2 wants every byte bit-reversed (UG470: the file is MSB first, the port is not).
+    // cpu_clk is 100 MHz, the ICAPE2's maximum.
+    wire        icap_we;
+    wire [31:0] icap_data;
+    wire [31:0] icap_i;
+    genvar      icap_g;
+    generate for (icap_g = 0; icap_g < 4; icap_g = icap_g + 1) begin : icap_swap
+        assign icap_i[8*icap_g +: 8] = {icap_data[8*icap_g], icap_data[8*icap_g+1], icap_data[8*icap_g+2],
+                                        icap_data[8*icap_g+3], icap_data[8*icap_g+4], icap_data[8*icap_g+5],
+                                        icap_data[8*icap_g+6], icap_data[8*icap_g+7]};
+    end endgenerate
+    ICAPE2 #(.ICAP_WIDTH("X32")) icap_i0 (.CLK(cpu_clk), .CSIB(~icap_we), .RDWRB(1'b0), .I(icap_i), .O());
     ultimate_sys #(.g_capabilities({2'b00, FPGA_TYPE, 28'h5E40202})) ult (
         .clock(cpu_clk), .reset(cpu_rst),
         .mem_request(m_request), .mem_tag(m_tag), .mem_read_writen(m_rwn),
@@ -668,7 +688,9 @@ module top #(
         .drive_trace(drv_trace), .drive_trace_valid(drv_trace_valid),
         .rv_tap(rv_tap),
         .drv_mem_tgl(drv_tgl), .drv_mem_addr(drv_addr), .drv_mem_we(drv_we), .drv_mem_wdata(drv_wdata),
-        .drv_mem_be(drv_be), .drv_mem_done(drv_done_tgl), .drv_mem_rdata(drv_done_rdata)
+        .drv_mem_be(drv_be), .drv_mem_done(drv_done_tgl), .drv_mem_rdata(drv_done_rdata),
+        .dc_ext_tgl(dc_ext_tgl), .dc_line(dc_line), .dc_line_adr(dc_line_adr),
+        .icap_we(icap_we), .icap_data(icap_data)
     );
 
     // ---- serial bus: the C64, the app's drive A, the board's IEC port -------------
@@ -742,7 +764,8 @@ module top #(
         .byte_en(m_byte_en), .wdata(m_wdata), .rdata(m_rdata), .rack(m_rack),
         .rack_tag(m_rack_tag), .dack_tag(m_dack_tag),
         .req_tgl(cpu_tgl), .a_addr(cpu_addr), .a_we(cpu_we), .a_wdata(cpu_wdata), .a_be(cpu_be),
-        .done_tgl(cpu_done_tgl), .done_rdata(cpu_done_rdata)
+        .done_tgl(cpu_done_tgl), .done_rdata(cpu_done_rdata),
+        .done_rline(cpu_done_rline), .line(dc_line), .line_adr(dc_line_adr)
     );
 
     // client 0: RISC-V, client 1: REU / JTAG, client 2: drive A; cart_fill
@@ -753,7 +776,7 @@ module top #(
         .we({drv_we, ddr_we, cpu_we}), .wdata({drv_wdata, ddr_wdata, cpu_wdata}),
         .be({drv_be, ddr_be, cpu_be}),
         .done_tgl({drv_done_tgl, port_done_tgl, cpu_done_tgl}), .rdata({port_done_rdata, cpu_done_rdata}),
-        .rdata_line(drv_done_rdata),
+        .rdata_line(drv_done_rdata), .rline0(cpu_done_rline), .ext_wr_tgl(dc_ext_tgl),
         .c_addr(c_addr), .c_cmd(c_cmd), .c_en(c_en), .c_rdy(c_rdy), .c_wdf_data(c_wdf_data),
         .c_wdf_mask(c_wdf_mask), .c_wdf_wren(c_wdf_wren), .c_wdf_rdy(c_wdf_rdy),
         .c_rd_data(c_rd_data), .c_rd_data_valid(c_rd_valid),

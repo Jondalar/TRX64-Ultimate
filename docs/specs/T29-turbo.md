@@ -5,13 +5,13 @@ replacement for Gideon's core plus the TRX64 functions).
 **Shares with:** T20 (write log, snap, state bus), T21 (cycle counters, stops, watch units),
 T28 (UCI bus events), T12 (pause, freeze responder), ARCH (`docs/specs/ARCH-lean-state-access.md`).
 **Behaviour references, in this order where they conflict (§3.3):** (1) Xander Mol's
-real-hardware statements and programs (`/Users/alex/Development/u64-emulator/run/xander/`,
+real-hardware statements and programs (`~/Development/u64-emulator/run/xander/`,
 `TURBOCONTROLMANUAL.md`); (2) TRX64 Specs 815, 851, 856, 868 and BUG-061
-(`/Users/alex/Development/C64/Tools/TRX64/docs/_archive/`; code in
+(`~/Development/C64/Tools/TRX64/docs/_archive/`; code in
 `crates/trx64-core/src/c64_6510core.rs`, `vic.rs`, `lib.rs`), copied wherever the hardware
 allows; (3) Gideon's manual. A measurement beats all three.
 **Comparison machine:** Alex's C64U running Gideon's firmware and bitstream from flash (§8.4).
-**Test material:** Xander Mol's Ultimate projects in `/Users/alex/Development/u64-emulator/run/xander/`
+**Test material:** Xander Mol's Ultimate projects in `~/Development/u64-emulator/run/xander/`
 — `mandelbrot-upic` (64 MHz, one `$D020` store per pixel, `$D012` row sync), `UltimateDemo2026`
 (64 MHz demo, `TURBOCONTROLMANUAL.md`), `heartbeat-demo` (turbo + CIA1 timer A tempo + 8 SIDs +
 16 MB REU), `GeoUTools` and `UBoot64-v2` (UCI, CIA TOD waits).
@@ -736,7 +736,7 @@ From `docs/turbo-measurements-gideon.md` "Round 2" (`tests/turbo-gideon/data/`):
 6. Interrupt latency in turbo: natural (sampled every turbo cycle), or TRX64's "two PHI2 cycles"?
    The natural one is cheaper and is what a fast 6502 does.
    **Decided (Alex, 2026-10-03): as TRX64** (two PHI2 cycles) — expensively tested there. Test
-   material on disk: Xander Mol's Ultimate projects in `/Users/alex/Development/u64-emulator/run/xander/`
+   material on disk: Xander Mol's Ultimate projects in `~/Development/u64-emulator/run/xander/`
    (mandelbrot-upic, UltimateDemo2026 incl. `TURBOCONTROLMANUAL.md`, heartbeat-demo, GeoUTools,
    UBoot64), as used by the UE2 session for TRX64's turbo gates (`crates/trx64-core/tests/u64_turbo_gate.rs`,
    `subpixel_colour_gate.rs`, `cia_tod_gate.rs`).

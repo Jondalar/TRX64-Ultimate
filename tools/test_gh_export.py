@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for tools/gh_export.py: the exclusions, the placeholders, the rewrite
-rules and the three checks that stop an export. Runs without git and without
-touching either repository."""
+rules, the checks that stop an export, the public-tree scrub of files, messages
+and addresses (U20 A8), the replay's first commit (U20 E) and the one rewrite of a
+clone (U20 D15). Touches neither repository; only the replay and rewrite tests run
+git, in scratch repositories."""
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -32,38 +35,31 @@ class StageTree(unittest.TestCase):
     def test_excluded_paths_and_directories_go(self):
         write(self.d, "TODO.md", "the task list\n")
         write(self.d, "roms/kernal.901227-03.bin", "rom bytes")
+        write(self.d, "roms/README.md", "where they come from\n")
         write(self.d, "docs/contracts/handover.md", "the two projects\n")
         write(self.d, "README.md", "stays\n")
         write(self.d, "docs/.DS_Store", "junk")
-        write(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin", "chars")
         dropped = gx.drop_excluded(self.d)
 
         # since 2026-11-13 the task list and the working documents go out (Alex)
         self.assertTrue(os.path.exists(os.path.join(self.d, "TODO.md")))
         self.assertTrue(os.path.isdir(os.path.join(self.d, "docs/contracts")))
-        self.assertFalse(os.path.isdir(os.path.join(self.d, "roms")))
+        # since U20 A6 the ROM images stay out and the tree's roms/README.md goes out
+        self.assertFalse(os.path.exists(os.path.join(self.d, "roms/kernal.901227-03.bin")))
+        self.assertTrue(os.path.exists(os.path.join(self.d, "roms/README.md")))
         self.assertFalse(os.path.exists(os.path.join(self.d, "docs/.DS_Store")))
-        self.assertFalse(os.path.exists(
-            os.path.join(self.d, gx.APP_PREFIX + "/software/u64/default_chars.bin")))
         self.assertTrue(os.path.exists(os.path.join(self.d, "README.md")))
-        self.assertIn("roms/", dropped)
+        self.assertIn("roms/kernal.901227-03.bin", dropped)
 
-    def test_placeholders_replace_what_was_dropped(self):
-        write(self.d, "roms/kernal.901227-03.bin", "rom bytes")
+    def test_the_pin_constraints_go_out_as_they_are(self):
+        # U20 D14: constraints/c64u.xdc is public, no link stands in its place
         write(self.d, "constraints/c64u.xdc", "pins")
         gx.drop_excluded(self.d)
         gx.write_placeholders(self.d)
 
-        with open(os.path.join(self.d, "roms/README.md")) as fh:
-            roms = fh.read()
-        self.assertIn("No ROMs are in this repository", roms)
-        self.assertIn("vice-emu.sourceforge.io", roms)
-        self.assertTrue(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc.md")))
-        self.assertFalse(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc")))
-
-        name = gx.APP_PREFIX + "/software/ModPlayer_16k/module.bin.md"
-        with open(os.path.join(self.d, name)) as fh:
-            self.assertIn("software/ModPlayer_16k/module.bin", fh.read())
+        with open(os.path.join(self.d, "constraints/c64u.xdc")) as fh:
+            self.assertEqual("pins", fh.read())
+        self.assertFalse(os.path.exists(os.path.join(self.d, "constraints/c64u.xdc.md")))
 
     def test_a_rewrite_applies_once(self):
         write(self.d, "BUILD.md",
@@ -104,8 +100,8 @@ class StageTree(unittest.TestCase):
             gx.REWRITES = keep
 
 
-class SubmoduleNotes(unittest.TestCase):
-    """write_submodule_notes reads git; the fake answers the two commands it runs."""
+class Submodule(unittest.TestCase):
+    """Since U20 A5 a ref with a submodule is refused; the fake answers git ls-tree."""
 
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="gh-export-test-")
@@ -115,41 +111,29 @@ class SubmoduleNotes(unittest.TestCase):
         gx.run = self.real_run
         shutil.rmtree(self.d, ignore_errors=True)
 
-    def test_an_empty_submodule_folder_gets_its_repository_and_commit(self):
-        cfg = ('[submodule "software/lwip"]\n\tpath = software/lwip\n'
-               '\turl = http://github.com/GideonZ/lwip\n')
-        sha = "26a22151f4b7ebb2925523192edc83fa7f31cba9"
+    def test_a_ref_with_a_gitlink_is_refused(self):
+        gx.run = lambda args, **kw: ("100644 blob 1111111111111111111111111111111111111111\tREADME.md\n"
+                                     "160000 commit 0103c58581ae900c9b97ea739a2140a52adfb010\tsoftware/x")
+        with self.assertRaises(gx.Fail) as cm:
+            gx.stage("old", self.d)
+        self.assertIn("software/x", str(cm.exception))
+        self.assertIn("92645aeb", str(cm.exception))
 
-        def fake_run(args, **kw):
-            if args[-1].endswith(":.gitmodules"):
-                return cfg
-            return "160000 commit %s\tsoftware/lwip" % sha
-
-        gx.run = fake_run
-        written = gx.write_submodule_notes(self.d, "d36dcf78")
-
-        self.assertEqual([gx.APP_PREFIX + "/software/lwip/README.md"], written)
-        with open(os.path.join(self.d, written[0])) as fh:
-            note = fh.read()
-        self.assertIn(sha, note)
-        self.assertIn("https://github.com/GideonZ/lwip", note)
-        self.assertNotIn("http://github.com", note)
-
-    def test_a_path_that_is_not_a_gitlink_gets_nothing(self):
-        def fake_run(args, **kw):
-            if args[-1].endswith(":.gitmodules"):
-                return '[submodule "x"]\n\tpath = x\n\turl = https://example.invalid/x\n'
-            return "100644 blob 0000000000000000000000000000000000000000\tx"
-
-        gx.run = fake_run
-        self.assertEqual([], gx.write_submodule_notes(self.d, "d36dcf78"))
+    def test_gitlinks_lists_only_gitlinks(self):
+        gx.run = lambda args, **kw: "100644 blob 1111111111111111111111111111111111111111\tREADME.md"
+        self.assertEqual([], gx.gitlinks("HEAD"))
 
 
 class Checks(unittest.TestCase):
+    """The link rules against a table of our own (EXCLUDE as it was: roms and the pin file)."""
+
     def setUp(self):
         self.d = tempfile.mkdtemp(prefix="gh-export-test-")
+        self.real_exclude = gx.EXCLUDE
+        gx.EXCLUDE = ["roms", "constraints/c64u.xdc"]
 
     def tearDown(self):
+        gx.EXCLUDE = self.real_exclude
         shutil.rmtree(self.d, ignore_errors=True)
 
     def test_a_link_to_an_excluded_file_loses_its_link_and_keeps_its_text(self):
@@ -241,24 +225,25 @@ class Tables(unittest.TestCase):
             self.assertEqual(rule.get("count", 1), s.count(rule["old"]),
                              "%s: %r" % (rule["path"], rule["old"][:60]))
 
-    def test_only_roms_third_party_files_and_the_submodule_wiring_stay_out(self):
-        # Alex, 2026-11-13: specs, ADRs, the task list and the other project's name go out
+    def test_only_third_party_binaries_stay_out(self):
+        # Alex, 2026-11-13: specs, ADRs, the task list and the other project's name go out; U20 D14: the pin file too
+        self.assertNotIn("constraints/c64u.xdc", gx.EXCLUDE)
+        self.assertNotIn("constraints/c64u.xdc.md", gx.PLACEHOLDERS)
         for rel in gx.EXCLUDE:
-            self.assertTrue(rel == ".gitmodules" or rel.endswith("roms") or rel.endswith(".xdc")
-                            or os.path.splitext(rel)[1].lower() in gx.BINARY_SUFFIXES, rel)
+            self.assertIn(os.path.splitext(rel)[1].lower(), gx.BINARY_SUFFIXES, rel)
 
-    def test_the_dropped_rom_directories_get_a_readme(self):
-        self.assertIn("roms", gx.EXCLUDE)
-        self.assertIn("roms/README.md", gx.PLACEHOLDERS)
-        self.assertIn(gx.APP_PREFIX + "/roms", gx.EXCLUDE)
-        self.assertIn(gx.APP_PREFIX + "/roms/README.md", gx.PLACEHOLDERS)
+    def test_no_rom_image_goes_out_and_the_trees_rom_readme_does(self):
+        self.assertIn("roms/*.bin", gx.EXCLUDE_GLOBS)
+        self.assertNotIn("roms", gx.EXCLUDE)
+        self.assertNotIn("roms/README.md", gx.PLACEHOLDERS)
+        self.assertTrue(os.path.exists(os.path.join(gx.HOST_REPO, "roms/README.md")))
 
     def test_the_placeholder_table_covers_every_dropped_single_file(self):
         for rel in gx.EXCLUDE:
             full = os.path.join(gx.HOST_REPO, rel)
             if not os.path.isfile(full):
                 continue
-            if rel.endswith(".md") or rel in ("TODO.md", ".gitmodules"):
+            if rel.endswith(".md") or rel == "TODO.md":
                 continue
             if os.path.splitext(rel)[1].lower() in gx.BINARY_SUFFIXES or rel.endswith(".xdc"):
                 self.assertIn(rel + ".md", gx.PLACEHOLDERS, rel)
@@ -266,18 +251,70 @@ class Tables(unittest.TestCase):
 
 class Replay(unittest.TestCase):
     def test_the_export_line_follows_the_first_subject(self):
-        m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"], "f3c8e991aa")
-        self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6 (application f3c8e991)."
-                            "\n\nThe body.\n")
+        m = gx.export_message(["U9: a load\n\nThe body.\n"], ["b2506f6"])
+        self.assertEqual(m, "U9: a load\n\nExport of TRX64 Ultimate b2506f6.\n\nThe body.\n")
 
     def test_folded_messages_follow_each_other(self):
-        m = gx.export_message(["T46: out\n\nwhy", "T46: the comments"], ["7a9c5bb", "8f4761e"], "fb3a7821")
+        m = gx.export_message(["T46: out\n\nwhy", "T46: the comments"], ["7a9c5bb", "8f4761e"])
         self.assertTrue(m.startswith("T46: out\n\nExport of TRX64 Ultimate 7a9c5bb, 8f4761e"))
         self.assertTrue(m.endswith("why\n\nT46: the comments\n"))
 
     def test_no_message_at_all_is_an_error(self):
         with self.assertRaises(gx.Fail):
-            gx.export_message(["", "  "], ["8f4761e"], "fb3a7821")
+            gx.export_message(["", "  "], ["8f4761e"])
+
+    def test_a_note_follows_the_export_line_and_the_trailers_stay_last(self):
+        m = gx.export_message(["U20 A5: out\n\nwhy\n\nCo-Authored-By: C <c@example.org>\n"], ["9b3cdf6"], "A note.")
+        self.assertEqual(m, "U20 A5: out\n\nExport of TRX64 Ultimate 9b3cdf6.\n\nA note.\n\nwhy\n\nCo-Authored-By: C <c@example.org>\n")
+        self.assertIsNone(gx.base_note("9b3cdf6", []))
+        self.assertIn("into 2 files that", gx.base_note("9b3cdf6", ["a", "b"]))
+
+
+class ReplayBase(unittest.TestCase):
+    """U20 E: the replay's first commit carries the message of SINCE itself, in scratch repositories (host, GitHub, its clone)."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-replay-test-")
+        self.real_host = gx.HOST_REPO
+
+    def tearDown(self):
+        gx.HOST_REPO = self.real_host
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def git(self, repo, *a):
+        env = dict(os.environ, GIT_AUTHOR_NAME="A", GIT_AUTHOR_EMAIL="pr@example.net", GIT_AUTHOR_DATE="1700000000 +0100",
+                   GIT_COMMITTER_NAME="A", GIT_COMMITTER_EMAIL="pr@example.net", GIT_COMMITTER_DATE="1700000000 +0100")
+        return subprocess.run(["git", "-C", repo] + list(a), env=env, check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+    def commit(self, repo, files, msg):
+        for rel, text in files.items():
+            write(repo, rel, text)
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-q", "-m", msg)
+        return self.git(repo, "rev-parse", "HEAD")
+
+    def test_the_first_commit_carries_the_message_of_since(self):
+        host, gh, clone = (os.path.join(self.d, n) for n in ("host", "gh", "clone"))
+        for r in (host, gh):
+            os.makedirs(r)
+            self.git(r, "init", "-q", "-b", "main")
+        # GitHub's last export: a file that went out with a home path (before the scrub) and one that SINCE changes
+        last = self.commit(gh, {"docs/old.md": "at /Users/jdoe/old\n", "a.md": "one\n"}, "export")
+        self.git(self.d, "clone", "-q", gh, clone)
+        self.commit(host, {"docs/old.md": "at /Users/jdoe/old\n", "a.md": "one\n"}, "before")
+        since = self.commit(host, {"a.md": "two\n"}, "U20 A5: out\n\nwhy\n\nClaude-Session: https://claude.ai/code/session_01x\n")
+        self.commit(host, {"b.md": "three\n"}, "U20: next")
+        gx.HOST_REPO = host
+        gx.replay(since, "HEAD", "origin/main", clone, False)
+        self.assertEqual(self.git(clone, "rev-parse", "main~2"), last)
+        first = self.git(clone, "log", "-1", "--format=%B", "main~1")
+        self.assertTrue(first.startswith("U20 A5: out\n\nExport of TRX64 Ultimate %s.\n\nThe replay's first commit: besides %s's change"
+                                         % (since[:7], since[:7])), first)
+        self.assertIn(" 1 file that went out before", first.replace("\n", " "))
+        self.assertTrue(first.endswith("\n\nwhy\n\nClaude-Session: https://claude.ai/code/session_01x"), first)
+        self.assertEqual(self.git(clone, "show", "main~1:docs/old.md"), "at ~/old")
+        self.assertEqual(self.git(clone, "show", "main~1:a.md"), "two")
+        self.assertTrue(self.git(clone, "log", "-1", "--format=%B", "main").startswith("U20: next\n\nExport of TRX64 Ultimate "))
 
 
 class PublicAddress(unittest.TestCase):
@@ -293,6 +330,100 @@ class PublicAddress(unittest.TestCase):
     def test_a_commit_in_a_clone_carries_the_public_address(self):
         env = gx.public_env()
         self.assertEqual((env["GIT_AUTHOR_EMAIL"], env["GIT_COMMITTER_EMAIL"]), (gx.PUBLIC_EMAIL,) * 2)
+
+    def test_a_personal_address_stops_the_export(self):
+        # U20 A8: an address the replay does not map (no git config user.email, a contributor's) must not go out as a personal one
+        with self.assertRaises(gx.Fail):
+            gx.checked_email("jdoe@gmail.com", "the author of x")
+        self.assertEqual(gx.checked_email(gx.PUBLIC_EMAIL, "x"), gx.PUBLIC_EMAIL)
+        self.assertEqual(gx.checked_email("pr@example.net", "x"), "pr@example.net")
+
+
+class Scrub(unittest.TestCase):
+    """U20 A8 / D15: what the public-tree check refuses, the export rewrites into placeholders; what it cannot rewrite stops it."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-export-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_hits_become_placeholders(self):
+        write(self.d, "tests/t.py", 'HOST = "10.1.2.189"\nsys.path.insert(0, "/Users/jdoe/tools")\n')
+        write(self.d, "docs/a.md", "see http://ci.corp.lan/x and https://claude.ai/artifact/abc\n")
+        write(self.d, "software/trx64u/base/menu.toml", 'default = "192.168.2.64"\n')
+        write(self.d, ".gitea/workflows/lint.yml", "      volumes:\n        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache\n")
+        done = dict(gx.scrub_stage(self.d))
+        with open(os.path.join(self.d, "tests/t.py")) as fh:
+            self.assertEqual(fh.read(), 'HOST = "192.0.2.189"\nsys.path.insert(0, "~/tools")\n')
+        with open(os.path.join(self.d, "docs/a.md")) as fh:
+            self.assertEqual(fh.read(), "see http://ci.example/x and (a private page)\n")
+        # the vendor default stays (an allowed pair); the cache volume the Gitea runners need goes out as the placeholder
+        self.assertNotIn("software/trx64u/base/menu.toml", done)
+        with open(os.path.join(self.d, ".gitea/workflows/lint.yml")) as fh:
+            self.assertIn("/srv/trx64-build/cache:/cache", fh.read())
+        self.assertEqual(gx.check_stage(self.d), [])
+
+    def test_what_no_placeholder_fixes_stops_the_export(self):
+        write(self.d, "tests/media/game.crt", "x")
+        self.assertTrue(any("game.crt" in h for h in gx.check_stage(self.d)))
+
+    def test_the_message_is_scrubbed_and_keeps_the_session_line(self):
+        m = gx.export_message(["U9: on devhost.lan\n\nfrom /home/jdoe/x\n\nClaude-Session: https://claude.ai/code/session_01Ab\n"], ["b2506f6"])
+        self.assertEqual(m, "U9: on devhost.example\n\nExport of TRX64 Ultimate b2506f6.\n\nfrom ~/x\n\n"
+                            "Claude-Session: https://claude.ai/code/session_01Ab\n")
+
+
+class Rewrite(unittest.TestCase):
+    """U20 D15: the one rewrite of a clone's commits, in a scratch repository."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-rewrite-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def git(self, *a, mail=gx.PUBLIC_EMAIL, date="1700000000 +0100"):
+        env = dict(os.environ, GIT_AUTHOR_NAME="A", GIT_AUTHOR_EMAIL=mail, GIT_AUTHOR_DATE=date, GIT_COMMITTER_NAME="C",
+                   GIT_COMMITTER_EMAIL=mail, GIT_COMMITTER_DATE=date)
+        return subprocess.run(["git", "-C", self.d] + list(a), env=env, check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+    def commit(self, files, msg, **kw):
+        for rel, text in files.items():
+            write(self.d, rel, text)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", msg, **kw)
+        return self.git("rev-parse", "HEAD")
+
+    def test_files_and_messages_are_rewritten_once(self):
+        self.git("init", "-q", "-b", "main")
+        # a blob of base's history is public already and stays as it is (the export's base, MultiCore D36)
+        base = self.commit({"README.md": "public\n", "docs/old.md": "at /Users/jdoe/old\n"}, "base")
+        write(self.d, "tools/x.sh", "#!/bin/sh\nssh admin@10.0.0.2 ls /share/CACHEDEV1_DATA\n")
+        os.chmod(os.path.join(self.d, "tools/x.sh"), 0o755)
+        self.commit({"docs/n.md": "clean\n"}, "first on devhost.lan\n\nClaude-Session: https://claude.ai/code/session_01x\n")
+        old = self.commit({"docs/n.md": "at /Users/jdoe/x\n"}, "second", date="1700000100 +0100")
+        new = gx.rewrite(base, self.d, private=os.path.join(self.d, "none.txt"))
+        self.assertNotEqual(new, old)
+        self.assertEqual(self.git("rev-parse", "main-before-rewrite"), old)
+        self.assertEqual(self.git("rev-parse", "main~2"), base)
+        self.assertEqual(self.git("show", "main:tools/x.sh"), "#!/bin/sh\nssh admin@192.0.2.2 ls /srv")
+        self.assertEqual(self.git("show", "main:docs/n.md"), "at ~/x")
+        self.assertEqual(self.git("show", "main~1:docs/n.md"), "clean")
+        self.assertEqual(self.git("show", "main:docs/old.md"), "at /Users/jdoe/old")
+        self.assertEqual(self.git("log", "-1", "--format=%B", "main~1"), "first on devhost.example\n\nClaude-Session: https://claude.ai/code/session_01x")
+        self.assertEqual(self.git("log", "-1", "--format=%an %ae %ad %cn %cd", "--date=raw", "main"),
+                         "A %s 1700000100 +0100 C 1700000100 +0100" % gx.PUBLIC_EMAIL)
+        self.assertIn("100755", self.git("ls-tree", "main", "tools/x.sh"))
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_a_personal_address_stops_the_rewrite(self):
+        self.git("init", "-q", "-b", "main")
+        base = self.commit({"README.md": "public\n"}, "base")
+        self.commit({"a.md": "x\n"}, "by hand", mail="jdoe@gmail.com")
+        with self.assertRaises(gx.Fail):
+            gx.rewrite(base, self.d, private=os.path.join(self.d, "none.txt"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

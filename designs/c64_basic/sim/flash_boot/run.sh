@@ -14,7 +14,7 @@ mkdir -p "$out"
 cd "$out"
 GH="nice -n 15 ghdl"
 F="--std=08 -frelaxed -fsynopsys"
-R=$root/cores/gideon/fpga/cpu_unit/rvlite/vhdl_source
+R=$root/vendor/gideon/fpga/cpu_unit/rvlite/vhdl_source
 # decode_comb's main process lists neither inst_rd nor inst_rs1/rs2: in a
 # simulation an instruction that differs from the one before only in those
 # fields keeps the old register numbers (synthesis ignores the list). The
@@ -23,15 +23,17 @@ sed 's/^    process(program_counter, interrupt, inst_valid, inst_func3, inst_imm
     $R/decode_comb.vhd > decode_comb_sim.vhd
 grep -q 'process(all)' decode_comb_sim.vhd || { echo "decode_comb.vhd changed: sensitivity fix not applied"; exit 1; }
 $GH -a $F $root/designs/c64_basic/sim/usb/tl_string_util_pkg.vhd \
-    $root/cores/gideon/fpga/ip/busses/vhdl_source/io_bus_pkg.vhd \
-    $root/cores/gideon/fpga/ip/busses/vhdl_source/mem_bus_pkg.vhd \
-    $root/cores/gideon/fpga/ip/busses/vhdl_source/mem_bus_arbiter_pri_32.vhd \
-    $root/cores/gideon/fpga/io/spi/vhdl_source/spi.vhd \
-    $root/cores/gideon/fpga/io/spi/vhdl_source/spi_peripheral_io.vhd \
+    $root/vendor/gideon/fpga/ip/busses/vhdl_source/io_bus_pkg.vhd \
+    $root/vendor/gideon/fpga/ip/busses/vhdl_source/mem_bus_pkg.vhd \
+    $root/vendor/gideon/fpga/ip/busses/vhdl_source/mem_bus_arbiter_pri_32.vhd \
+    $root/vendor/gideon/fpga/io/spi/vhdl_source/spi.vhd \
+    $root/vendor/gideon/fpga/io/spi/vhdl_source/spi_peripheral_io.vhd \
     $R/core_pkg.vhd $R/alu_pkg.vhd $R/alu_logical.vhd $R/alu_branch.vhd $R/multiply.vhd \
     $R/dsram.vhd $R/gprf.vhd $R/csr.vhd decode_comb_sim.vhd $R/decode.vhd $R/fetch.vhd \
     $R/execute.vhd $R/writeback.vhd $R/core.vhd $R/icache.vhd $R/bus_converter.vhd \
-    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd $R/rvlite_wrapper.vhd \
+    $root/designs/c64_basic/bootrom_pkg.vhd $R/bootrom_8k.vhd \
+    $root/designs/c64_basic/cache_cfg_pkg.vhd $root/designs/c64_basic/rv_dcache.vhd \
+    $root/designs/c64_basic/rv_icache.vhd $root/designs/c64_basic/rvlite_wrapper_dc.vhd \
     $here/flash_rom_model.vhd $here/tb_flash_boot.vhd
 $GH -e $F tb_flash_boot
 python3 "$here/run.py" "$@"

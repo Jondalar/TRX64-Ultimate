@@ -10,6 +10,7 @@
 #                    with the original reDIP, taken with `git show` from a pinned commit (no shallow clone)
 1|trx_io|120|sh designs/c64_basic/sim/trx_io/run.sh
 1|cart_unit|300|sh designs/c64_basic/sim/cart_unit/run.sh
+1|dcache|900|sh designs/c64_basic/sim/dcache/run.sh
 1|ring_f4|300|sh designs/c64_basic/sim/ring/run_f4.sh
 1|ring_trace|300|sh designs/c64_basic/sim/ring/run_trace.sh
 1|keyboard|600|ci/sim_iv.sh tb_keyboard.v

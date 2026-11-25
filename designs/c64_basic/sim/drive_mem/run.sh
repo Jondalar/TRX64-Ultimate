@@ -6,7 +6,7 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 D=$here/../..
 "$D/../../tools/gideon_sources.sh"
-B=$D/../../cores/gideon/fpga/ip/busses/vhdl_source
+B=$D/../../vendor/gideon/fpga/ip/busses/vhdl_source
 out=$here/build
 mkdir -p "$out"
 ghdl synth --std=08 -fsynopsys --out=verilog $B/mem_bus_pkg.vhd $D/drive_mem.vhd "$here/drive_mem_flat.vhd" \

@@ -128,11 +128,11 @@ read_verilog $core_stub top.v vic_scaler.v pal_ram.v hdmi_timing.v mode_req.v cd
   con_ring.v udp_stream.v udp_audio.v stream_mux.v app_i2c.v overlay.v usb_phy.v iec_bus.v \
   cart_fill.v trx_io.v trx_sys.v dma_win.v pix_layer.v c64_text.v trx_engine.v drv_dbg.v app_input.v rv_dbg.v
 read_verilog bling_io.v case_leds.v reu_ddr_map.v
-# Gideon's RISC-V and the blocks around it (cores/gideon), our boot ROM package
+# Gideon's RISC-V and the blocks around it (vendor/gideon), our boot ROM package
 # for his bootrom_8k, his 1541 drive (drive_unit.vhd, drive_mem.vhd), his
 # command interface (the UCI, uci_unit.vhd), and ultimate_sys.vhd that puts
 # them together.
-set g ../../cores/gideon/fpga
+set g ../../vendor/gideon/fpga
 read_vhdl -library work [list \
   $g/ip/busses/vhdl_source/io_bus_pkg.vhd $g/ip/busses/vhdl_source/mem_bus_pkg.vhd \
   $g/ip/busses/vhdl_source/io_bus_splitter.vhd $g/ip/busses/vhdl_source/mem_bus_arbiter_pri_32.vhd \
@@ -145,7 +145,7 @@ read_vhdl -library work [list \
   $g/cpu_unit/rvlite/vhdl_source/writeback.vhd $g/cpu_unit/rvlite/vhdl_source/core.vhd \
   $g/cpu_unit/rvlite/vhdl_source/icache.vhd $g/cpu_unit/rvlite/vhdl_source/bus_converter.vhd \
   bootrom_pkg.vhd $g/cpu_unit/rvlite/vhdl_source/bootrom_8k.vhd \
-  $g/cpu_unit/rvlite/vhdl_source/rvlite_wrapper.vhd \
+  cache_cfg_pkg.vhd rv_dcache.vhd rv_icache.vhd rvlite_wrapper_dc.vhd \
   $g/ip/clock/vhdl_source/fractional_div.vhd $g/ip/srl_fifo/vhdl_source/srl_fifo-xilinx.vhd \
   $g/ip/sync_fifo/vhdl_source/sync_fifo.vhd \
   $g/io/uart_lite/vhdl_source/tx.vhd $g/io/uart_lite/vhdl_source/rx.vhd \

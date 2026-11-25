@@ -14,8 +14,8 @@ same license").
 | VIC-II Kawari | `cores/icepi/vicii-kawari` | GPL-3.0 | |
 | hdl-util HDMI | `cores/icepi/hdmi` | MIT or Apache-2.0 | |
 | usb_hid_host | `cores/icepi/usb_hid_host` | Apache-2.0 | |
-| Gideon's 1541 Ultimate FPGA sources | `cores/gideon` (generated from the app submodule) | GPL-3.0 | |
-| Ultimate app (Gideon + our changes) | `software/ultimate-app` | GPL-3.0 | |
+| Gideon's 1541 Ultimate FPGA sources, with the few files of his tree our benches read | `vendor/gideon` (our own copy, in git; upstream commit and our patches in `vendor/gideon/VENDOR.md`, origin in `PROVENANCE.md`) | GPL-3.0 | our patches (`tools/patches/gideon`) are changes to GPL-3 files, own work |
+| Files of Gideon's firmware (1541ultimate) that trx64u's libraries copy or port | `software/trx64u` (each names its origin in a `PROVENANCE` line, e.g. `uci/rtc.h`, `base/u64cfg.cc`, `monitor/monsrv.cc`) | GPL-3.0 | the firmware itself (`ultimate.app`) is no longer in this tree: the Gitea branch `gideon-app` builds it (U20 D13) |
 
 Whoever passes on a bitstream or the app passes on the corresponding sources of every part with it
 (or an offer to provide them), under the licence of that part.

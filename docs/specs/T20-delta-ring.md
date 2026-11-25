@@ -24,7 +24,7 @@ minute, the app can write any of those frames as a `.c64re` that TRX64 opens, an
 transport plays the machine backwards the way TRX64 808 does.
 
 **Rule for this document:** what is copied or adapted from our TRX64 emulator is marked
-**[TRX64: file]**. Paths are relative to `/Users/alex/Development/C64/Tools/TRX64/`.
+**[TRX64: file]**. Paths are relative to `~/Development/C64/Tools/TRX64/`.
 Hardware facts are from the code in this repo (paths relative to its root); numbers
 from `designs/c64_basic/build/utilization*.rpt` (post-route, 2026-10-01 17:52).
 

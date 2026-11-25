@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import socket,struct,math,time,sys
+import os,socket,struct,math,time,sys
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('',11001)); s.settimeout(3)
-s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton('239.0.1.65')+socket.inet_aton('192.168.242.111'))
+s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton('239.0.1.65')+socket.inet_aton(os.environ.get('TRX_MCAST_IF', '0.0.0.0')))
 L=R=0.0;n=0;t0=time.time()
 while time.time()-t0<float(sys.argv[1] if len(sys.argv)>1 else 1.5):
     try: d,_=s.recvfrom(2000)

@@ -73,16 +73,10 @@ patch, apply it on Gitea with your name on the commit, run it through our CI and
 export then brings your commit here. The pull request is closed, naming the build that carries it.
 **Closed does not mean refused.** A refusal says so in words, with the reason.
 
-Three things follow from the export for the diff itself:
+One thing follows from the export for the diff itself (every file reads here as it does with us; Gideon's
+application, the firmware submodule, is not in the tree since U20 A5, and the bench ROMs are fetched since A6,
+`roms/README.md`):
 
-- `software/ultimate-app/` is a plain folder here and a submodule of its own repository with us, so a change
-  that spans it and the rest of the tree is two commits on our side. Keep the two apart in one PR, or send
-  two.
-- A few files exist here alone: the notes that stand in for what is left out (`roms/README.md`,
-  `constraints/c64u.xdc.md`, `software/ultimate-app/roms/README.md` and a `.md` beside each of the four
-  third-party files), and a `README.md` in each empty submodule folder of `software/ultimate-app` naming its
-  repository and commit. A patch to them cannot be applied; say what you meant and we carry it over by hand.
-  Every other file reads here as it does with us.
 - The specifications are written on Gitea, with the code they describe. Point the PR at the spec it touches
   and describe the behaviour you want; we change the spec.
 
@@ -92,12 +86,9 @@ The rules for the patch itself:
 - **Gateware** (`designs/`, `cores/`): a change to VHDL or Verilog is only reviewable with a Vivado run
   behind it. Put the worst slack and the LUT count of your run in the PR
   ([BUILD.md](BUILD.md) has the build). A design that does not close timing does not go in.
-- **Software**: the checks are `ci/lint.sh`, `ci/app.sh` and `ci/sims.sh`. Run what your change touches,
-  and say in the PR which you ran and what came out.
+- **Software**: the checks are `ci/lint.sh`, `ci/sims.sh` and, for `software/trx64u`, its `build.sh` and
+  `pack_cor.sh`. Run what your change touches, and say in the PR which you ran and what came out.
 - Add or adapt the simulation bench that fails without your change.
-- **Behaviour**: what the machine does for the user is written as scenarios in
-  [tests/bdd](tests/bdd/README.md) and run in the emulator with `tests/bdd/run_bdd.py`. A change to
-  behaviour brings its scenario; one that fixes a fault brings the scenario that fails without the fix.
 - Never make a check weaker so that it passes.
 - A change that alters what the user sees updates [docs/manual](docs/manual/README.md) in the same PR.
 - Our code is GPL-3.0-or-later; parts that keep their own licence are listed in

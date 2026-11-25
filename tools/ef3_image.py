@@ -102,9 +102,8 @@ def load_ef3(path):
 def eapi_driver(src):
     cands = [src] if src else []
     here = os.path.dirname(os.path.abspath(__file__))
-    for rel in ("../../TRX64-Ultimate-app-wt-t51/apps/trex_crt/src/eapi_drivers.c",
-                "../software/ultimate-app/apps/trex_crt/src/eapi_drivers.c"):
-        cands.append(os.path.join(here, rel))
+    # trex_crt's EAPI drivers, as ported to trx64u (U20 A5: the firmware submodule's copy is gone)
+    cands.append(os.path.join(here, "../software/trx64u/apps/trex_crt/src/eapi_drivers.c"))
     for c in cands:
         if c and os.path.exists(c):
             t = open(c).read()
@@ -113,7 +112,7 @@ def eapi_driver(src):
                 body = bytes(int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{1,2})", m.group(1)))
                 if len(body) == EAPI_SIZE and hashlib.sha256(body).hexdigest() == EAPI_MX29640B_SHA256:
                     return body
-    raise SystemExit("EAPI driver MX29LV640EB not found: give --eapi-src apps/trex_crt/src/eapi_drivers.c")
+    raise SystemExit("EAPI driver MX29LV640EB not found: give --eapi-src software/trx64u/apps/trex_crt/src/eapi_drivers.c")
 
 
 def slot_names(img):

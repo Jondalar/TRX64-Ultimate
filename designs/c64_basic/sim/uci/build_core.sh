@@ -22,7 +22,7 @@ ghdl synth --std=08 -fsynopsys --out=verilog $n/pkg_6502_defs.vhd $n/pkg_6502_op
 ghdl synth --std=08 -fsynopsys --out=verilog $C/c64_c1541/iecdrv_via6522.vhd \
   -e iecdrv_via6522 > "$out/gen/iecdrv_via6522.v" 2> "$out/gen/iecdrv_via6522.log"
 "$root/tools/gideon_sources.sh"
-G=$root/cores/gideon/fpga
+G=$root/vendor/gideon/fpga
 B=$G/ip/busses/vhdl_source
 CI=$G/io/command_interface/vhdl_source
 ghdl synth --std=08 -fsynopsys -frelaxed --out=verilog $B/io_bus_pkg.vhd $B/slot_bus_pkg.vhd \

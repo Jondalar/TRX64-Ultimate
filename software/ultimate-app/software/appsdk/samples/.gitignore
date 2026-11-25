@@ -1,5 +1,0 @@
-# Build artifacts from sample apps
-*.o
-*.elf
-*.bin
-*.u2a

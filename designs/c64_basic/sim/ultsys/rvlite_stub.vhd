@@ -26,7 +26,16 @@ port (
     io_busy         : out   std_logic;
     mem_req         : out   t_mem_req_32;
     mem_resp        : in    t_mem_resp_32;
-    dbg_pc          : out   std_logic_vector(31 downto 0) );
+    dbg_pc          : out   std_logic_vector(31 downto 0);
+    -- the data cache's ports of rvlite_wrapper_dc.vhd (U19)
+    dc_snoop_valid  : in    std_logic := '0';
+    dc_snoop_addr   : in    std_logic_vector(25 downto 0) := (others => '0');
+    dc_ext_tgl      : in    std_logic := '0';
+    dc_stat         : out   std_logic_vector(23 downto 0);
+    dc_ctl          : in    std_logic_vector(15 downto 0) := X"0007";
+    dc_data         : out   std_logic_vector(31 downto 0);
+    dc_line         : in    std_logic_vector(127 downto 0) := (others => '0');
+    dc_line_adr     : in    std_logic_vector(21 downto 0) := (others => '0') );
 end entity;
 
 architecture stub of rvlite_wrapper is
@@ -35,4 +44,6 @@ begin
     io_busy  <= '0';
     mem_req  <= c_mem_req_32_init;
     dbg_pc   <= (others => '0');
+    dc_stat  <= (others => '0');
+    dc_data  <= (others => '0');
 end architecture;

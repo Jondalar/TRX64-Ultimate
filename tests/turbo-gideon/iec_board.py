@@ -10,7 +10,7 @@ screen. Restores Turbo Control = U64 Turbo Registers, CPU Speed 1 at the end. Ex
 """
 import json, os, sys, time, urllib.parse, urllib.request
 
-IP = os.environ.get("TM_IP", "192.168.242.189")
+IP = os.environ.get("TM_IP", "192.0.2.189")
 BASE = f"http://{IP}/v1"
 SCR = 0x0400
 

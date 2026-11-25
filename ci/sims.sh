@@ -20,6 +20,11 @@
 # a bench whose key has a marker is not run again ("cached PASS"). -f ignores the
 # markers. Only a PASS writes one, and only when everything the bench reported
 # reading (ci/sim_iv.sh does, through SIM_DEPS_LOG) is covered by its deps.
+#
+# ROMs (U20 A6): the bench ROMs are not tracked. Before a bench runs, the pins of
+# ci/roms.txt it names are fetched into the tree (ci/roms.py, size and SHA-256
+# checked; store ROMS_STORE, else /cache/roms). A source that cannot be reached
+# makes the bench SKIPPED (not red, no marker); a wrong hash makes it FAIL.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -104,7 +109,7 @@ declare_specs() {
     printf 'declared\n'; printf '%s\n' $s
   else
     [ $rc -eq 3 ] || echo "ci/sims.deps is wrong for $1: whole tree" >&2
-    printf 'tree\n'; printf '%s\n' designs cores tools roms ci software/ultimate-app
+    printf 'tree\n'; printf '%s\n' designs cores vendor tools ci
   fi
 }
 
@@ -115,7 +120,7 @@ bench_key() {
   k="$(files_key "${specs[@]}")" || {
     echo "key of $name: a declared path is missing, whole tree instead" >&2
     kind=tree
-    k="$(files_key designs cores tools roms ci software/ultimate-app)"
+    k="$(files_key designs cores vendor tools ci)"
   }
   printf '%s %s\n' "$(printf '%s\n%s\n%s\n%s\n' "$k" "$name" "$cmd" "$versions" | sha256sum | cut -c1-16)" "$kind"
 }
@@ -134,10 +139,8 @@ verdict_of() {
 sandbox() {
   local dir s kind specs=() k
   dir="$(mktemp -d)"
-  { read -r kind; while IFS= read -r k; do specs+=("${k%%//*}"); done; } < <(declare_specs "$1")
+  { read -r kind; while IFS= read -r k; do specs+=("$k"); done; } < <(declare_specs "$1")
   [ "$kind" = declared ] || { echo "$1 has no declaration to check" >&2; return 1; }
-  # <submodule>//<path> narrows the KEY, not the copy: the sandbox links the whole
-  # submodule, because the scripts in it want a git checkout (tools/gideon_sources.sh).
   git -C "$ROOT" ls-files -s -z -- "${specs[@]}" | python3 -c '
 import os, shutil, sys
 root, dst = sys.argv[1:3]
@@ -147,10 +150,7 @@ for ent in sys.stdin.buffer.read().split(b"\0"):
     path = path.decode()
     src, to = os.path.join(root, path), os.path.join(dst, path)
     os.makedirs(os.path.dirname(to), exist_ok=True)
-    if meta.split()[0] == b"160000":      # a submodule: the checkout itself, linked
-        os.symlink(src, to)
-    else:
-        shutil.copy2(src, to, follow_symlinks=False)
+    shutil.copy2(src, to, follow_symlinks=False)
 ' "$ROOT" "$dir" || return 1
   printf '%s\n' "$dir"
 }
@@ -174,6 +174,22 @@ done < "$ROOT/ci/sims.txt"
 
 [ "$n_run" -eq 0 ] || heavy_lock
 
+# roms_gate <bench> <dir>: the pinned upstream ROMs the bench reads (ci/roms.txt, U20 D14) are made to exist under <dir>.
+# Sets rom_verdict: empty = go on; "SKIPPED (no ROM: <path>)" = a source could not be reached (not red, not cached);
+# "FAIL (ROM: <path>)" = size or SHA-256 wrong. MultiCore's form (T239.1 D12, S16).
+roms_gate() {
+  local out rc
+  rom_verdict=""
+  [ -n "$(python3 -I "$ROOT/ci/roms.py" need "$1")" ] || return 0
+  out="$(python3 -I "$ROOT/ci/roms.py" fetch --root "$2" --bench "$1" --strict 2>&1)"; rc=$?
+  printf '%s\n' "$out" >> "$logdir/$1.out"
+  case $rc in
+    0) ;;
+    3) rom_verdict="SKIPPED (no ROM: $(printf '%s\n' "$out" | sed -n 's/^roms: MISSING \([^ ]*\) .*/\1/p' | head -1))" ;;
+    *) rom_verdict="FAIL (ROM: $(printf '%s\n' "$out" | sed -n 's/^roms: BAD \([^ ]*\) .*/\1/p' | head -1))" ;;
+  esac
+}
+
 # run_one <bench>: in a worker. What the stage prints for the bench goes to
 # $logdir/<bench>.out, the verdict to <bench>.result (verdict|seconds|kind|note).
 run_one() {
@@ -186,9 +202,13 @@ run_one() {
   echo "--- start $name"
   if [ -n "$check" ]; then
     if ! sb="$(sandbox "$name")"; then echo "no sandbox for $name" > "$logdir/$name.out"; echo "no sandbox||$kind|" > "$logdir/$name.result"; return 0; fi
+    roms_gate "$name" "$sb"
+    if [ -n "$rom_verdict" ]; then rm -rf "$sb"; printf '%s|0|%s|\n' "$rom_verdict" "$kind" > "$logdir/$name.result"; printf -- '--- done %s: %s\n' "$name" "$rom_verdict"; return 0; fi
     (cd "$sb" && timeout "$tmo" bash -c "set -o pipefail; $cmd") > "$log" 2>&1 < /dev/null
     rc=$?
     rm -rf "$sb"
+  elif roms_gate "$name" "$ROOT"; [ -n "$rom_verdict" ]; then
+    printf '%s|0|%s|\n' "$rom_verdict" "$kind" > "$logdir/$name.result"; printf -- '--- done %s: %s\n' "$name" "$rom_verdict"; return 0
   else
     SIM_DEPS_LOG="$logdir/$name.deps" timeout "$tmo" bash -c "set -o pipefail; $cmd" > "$log" 2>&1 < /dev/null
     rc=$?
@@ -226,13 +246,8 @@ for i in "${!names[@]}"; do
   run_names+=("${tmos[$i]} $name")
 done
 if [ ${#run_names[@]} -gt 0 ]; then
-  # Gideon's VHDL is generated into cores/gideon; once, here, so that no two benches make it at the same time
-  if printf '%s\n' "${names[@]}" | while read -r n; do declare_specs "$n"; done |
-       grep -q '^software/ultimate-app\(//\|$\)'; then
-    "$ROOT/tools/gideon_sources.sh" > "$logdir/gideon_sources.log" 2>&1 || echo "gideon_sources.sh failed, see $logdir/gideon_sources.log"
-  fi
   export ROOT logdir check cache_on ok_dir
-  export -f run_one verdict_of declare_specs deps_of sandbox
+  export -f run_one verdict_of declare_specs deps_of sandbox roms_gate
   solo=() para=()
   for entry in "${run_names[@]}"; do
     if [ "${entry%% *}" -ge "$SOLO_TIMEOUT" ]; then solo+=("$entry"); else para+=("$entry"); fi
@@ -262,8 +277,13 @@ for i in "${!names[@]}"; do
     failed+=("$name"); summary+=("$(printf '%-16s %-22s' "$name" "no result")"); continue
   fi
   IFS='|' read -r verdict secs _ < "$logdir/$name.result"
-  case "$verdict" in PASS*) ;; *) failed+=("$name") ;; esac
-  summary+=("$(printf '%-16s %-22s %4ss' "$name" "$verdict" "$secs")")
+  note=""
+  case "$verdict" in
+    PASS*) ;;
+    SKIPPED*) note="  (no ROM source reached: not red, not cached)" ;;
+    *) failed+=("$name") ;;
+  esac
+  summary+=("$(printf '%-16s %-22s %4ss%s' "$name" "$verdict" "$secs" "$note")")
 done
 
 echo

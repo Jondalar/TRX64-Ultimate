@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Architecture for Gideon's pseudo_dpram_8x32 entity (cores/gideon) that
+-- Architecture for Gideon's pseudo_dpram_8x32 entity (vendor/gideon) that
 -- infers one 7-series block RAM: 512 x 32 with byte write enables. His
 -- Xilinx variant uses RAMB16_S9_S36, which 7-series no longer has.
 library ieee;

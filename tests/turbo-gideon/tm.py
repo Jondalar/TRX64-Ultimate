@@ -10,7 +10,7 @@
 """
 import json, os, sys, time, urllib.parse, urllib.request
 
-IP = os.environ.get("TM_IP", "192.168.242.189")
+IP = os.environ.get("TM_IP", "192.0.2.189")
 BASE = f"http://{IP}/v1"
 PRG = "/USB1/xander/turbomeas.prg"
 CIA_HZ = 985248.0

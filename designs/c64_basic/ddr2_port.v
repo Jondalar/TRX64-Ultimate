@@ -82,6 +82,7 @@ module mig_arb #(
     output reg  [2:0]   done_tgl = 3'b000,
     output reg  [63:0]  rdata,              // {client 1, client 0}
     output reg  [127:0] rdata_line,         // client 2
+    output reg  [127:0] rline0,             // U19 (MultiCore T133): the whole 128-bit word of client 0's last read (ui_clk, stable until its next read answers)
 
     input  wire [26:0]  c_addr,             // cart_fill: a write offers both
     input  wire [2:0]   c_cmd,              // command and data at once
@@ -113,6 +114,12 @@ module mig_arb #(
     input  wire [15:0]  e_wdf_mask,
     input  wire         e_wdf_wren,
     output wire         e_rd_data_valid,    // data on c_rd_data
+
+    // U19 (MultiCore T133): toggles for every write into the RISC-V's cacheable window (byte address < 0xEA0000) that is not
+    // client 0's (client 0 = the RISC-V and the MAC, WiFi and USB DMA behind it, seen exactly in cpu_clk):
+    // cart_fill, the drive, REU / JTAG window / sampler, the engine, the video client. The data cache
+    // (rv_dcache) clears itself on every edge.
+    output reg          ext_wr_tgl = 1'b0,
 
     output reg  [26:0]  app_addr,
     output reg  [2:0]   app_cmd,
@@ -203,6 +210,8 @@ module mig_arb #(
             end else
                 app_wdf_wren <= 1'b1;
         end
+        if (take && s_cmd == 3'b000 && !(src == 2'd3 && pick == 2'd0) && s_addr < 27'h0750000)
+            ext_wr_tgl <= ~ext_wr_tgl;
         if (vid) vturn <= 1'b0;
         if (go) begin
             if (pick != 2'd2) vturn <= 1'b1;
@@ -218,6 +227,7 @@ module mig_arb #(
             if (!r[4]) begin
                 if (r[3:2] == 2'd2) rdata_line <= app_rd_data;
                 else if (r[3:2] != 2'd3) rdata[32*r[2] +: 32] <= app_rd_data[32*r[1:0] +: 32];
+                if (r[3:2] == 2'd0) rline0 <= app_rd_data;
                 if (r[3:2] != 2'd3) done_tgl[r[3:2]] <= ~done_tgl[r[3:2]];
             end
         end
@@ -256,12 +266,18 @@ module cpu_mem_bridge (
     output reg  [31:0]  a_wdata,
     output reg  [3:0]   a_be,
     input  wire         done_tgl,           // mig_arb (ui_clk)
-    input  wire [31:0]  done_rdata
+    input  wire [31:0]  done_rdata,
+    // U19 (MultiCore T133): the 128-bit word of the last read and its line address (address[25:4]), valid from the clock the read's dack is given until the next read answers;
+    // the data caches fill whole 16-byte lines from it
+    input  wire [127:0] done_rline,
+    output reg  [127:0] line,
+    output reg  [21:0]  line_adr
 );
     (* ASYNC_REG = "TRUE" *) reg [1:0] done_s = 2'b00;
     wire idle = (done_s[1] == req_tgl);
     reg       rd_wait = 1'b0;
     reg [7:0] rd_tag;
+    reg [21:0] rd_ladr;
     always @(posedge clk) begin
         done_s   <= {done_s[0], done_tgl};
         rack     <= 1'b0;
@@ -269,6 +285,8 @@ module cpu_mem_bridge (
         dack_tag <= 8'h00;
         if (rd_wait && idle) begin
             rdata    <= done_rdata;
+            line     <= done_rline;
+            line_adr <= rd_ladr;
             dack_tag <= rd_tag;
             rd_wait  <= 1'b0;
         end else if (request && idle && !rd_wait && !rack && !rst) begin
@@ -281,6 +299,7 @@ module cpu_mem_bridge (
             rack_tag <= tag;
             rd_wait  <= read_writen;
             rd_tag   <= tag;
+            rd_ladr  <= address[25:4];
         end
         if (rst) rd_wait <= 1'b0;
     end

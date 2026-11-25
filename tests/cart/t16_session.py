@@ -53,7 +53,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-HOST = os.environ.get("TRX64_HOST", "192.168.242.189")
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 OUT = Path(os.environ.get("T16_OUT", Path.home() / ".cache" / "trx64-t16"))
 BASELINES = HERE / "data" / "baseline_candidates.json"
 
@@ -1144,10 +1144,11 @@ def st_gate(ctx: Ctx) -> None:
 
 
 def app_file(ctx: Ctx) -> Path:
-    for cand in (ctx.a.app_u2a, os.environ.get("TREX_CRT_U2A"), str(ROOT / "software/ultimate-app/apps/trex_crt/trex_crt.u2a")):
+    for cand in (ctx.a.app_u2a, os.environ.get("TREX_CRT_U2A")):
         if cand and Path(cand).is_file():
             return Path(cand)
-    raise Abort("trex_crt.u2a not found: build it (apps/trex_crt/build.sh) and give --app-u2a PATH")
+    raise Abort("trex_crt.u2a not found: give --app-u2a PATH or TREX_CRT_U2A (the Gideon app's build, fork TREX/1541ultimate "
+                "apps/trex_crt/build.sh; the firmware submodule left this tree with U20 A5)")
 
 
 def app_path(ctx: Ctx) -> str:
@@ -1810,14 +1811,17 @@ MINUTES = {"pre": 1, "boot": 2, "port": 1, "gate": 1, "dump": 12, "app_up": 1, "
 # ---------------------------------------------------------------------------
 
 def fetch_app(dest: Path, version: str = "main-latest") -> Path:
+    # Gitea's token and server: GITEA_TOKEN and GITEA_URL, else the token: and url: of the tea login (U20 A8: the tree names no host)
     cfg = Path.home() / "Library/Application Support/tea/config.yml"
-    token = os.environ.get("GITEA_TOKEN", "")
-    if not token and cfg.exists():
-        for line in cfg.read_text().splitlines():
-            if "token:" in line:
-                token = line.split("token:")[1].strip()
-                break
-    url = os.environ.get("GITEA_URL", "http://gitea.fritz.box") + "/api/packages/TREX/generic/trx64-ultimate/" + version + "/ultimate.app"
+    tea = {}
+    for line in cfg.read_text().splitlines() if cfg.exists() else []:
+        k, _, v = line.strip().partition(":")
+        tea.setdefault(k, v.strip())
+    token = os.environ.get("GITEA_TOKEN", "") or tea.get("token", "")
+    server = os.environ.get("GITEA_URL", "") or tea.get("url", "")
+    if not server:
+        raise SystemExit("no Gitea server: set GITEA_URL (or log in with tea)")
+    url = server.rstrip("/") + "/api/packages/TREX/generic/trx64-ultimate/" + version + "/ultimate.app"
     r = urllib.request.Request(url, headers={"Authorization": f"token {token}"})
     with urllib.request.urlopen(r, timeout=60) as f:
         dest.write_bytes(f.read())

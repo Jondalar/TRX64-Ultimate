@@ -8,14 +8,16 @@
 #
 # Back to the flashed image: unplug the Blaster's USB, power off, power on.
 set -euo pipefail
-GITEA="${GITEA_URL:-http://gitea.fritz.box}"
+# Gitea's server and token: GITEA_URL and GITEA_TOKEN, else the url: and token: of the tea login (U20 A8: the tree names no host)
 TEA_CONFIG="${TEA_CONFIG:-$HOME/Library/Application Support/tea/config.yml}"
+GITEA="${GITEA_URL:-$(awk '/^ *url:/{print $2; exit}' "$TEA_CONFIG" 2>/dev/null || true)}"
 TOKEN="${GITEA_TOKEN:-$(awk '/token:/{print $2; exit}' "$TEA_CONFIG" 2>/dev/null || true)}"
 
 if [[ "${1:-}" == *.bit ]]; then
     bit="$1"
 else
     design="${1:-hdmi_test}"; version="${2:-main-latest}"
+    [ -n "$GITEA" ] || { echo "no Gitea server: set GITEA_URL (or log in with tea)" >&2; exit 1; }
     bit="$(mktemp -d)/$design.bit"
     curl -sf -H "Authorization: token $TOKEN" -o "$bit" \
         "$GITEA/api/packages/TREX/generic/trx64-ultimate/$version/$design.bit" \

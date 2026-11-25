@@ -33,7 +33,7 @@ ground for the LVGL UI (T24).
 Marks:
 
 - **[TRX64: file]** copied or adapted from our emulator, paths relative to
-  `/Users/alex/Development/C64/Tools/TRX64/`.
+  `~/Development/C64/Tools/TRX64/`.
 - **[new]** FPGA-specific, nothing to copy.
 - Gideon's app = `1541ultimate` `upstream/master` (1e17efcb, 2026-09-30), unmodified.
   Its code is cited as `c64.cc:<line>` in that revision.

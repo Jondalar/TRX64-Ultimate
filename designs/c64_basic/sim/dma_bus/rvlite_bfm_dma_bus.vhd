@@ -146,6 +146,31 @@ begin
         stub("sockets off again, read $D419", 16#D419#);
         bfm_step <= 4;
 
+        -- D37: the ICAP loader (0x060600): its ID, the enable read back, four bytes at +10 make one word with the first byte in
+        -- bits 31:24, the word counter, and a new session (the enable set again) that clears the counter and restarts the bytes
+        io_access(16#060600#, false, X"00", dummy);
+        chk("ICAP ID " & to_hstring(dummy), dummy = X"7A");
+        wr(16#060614#, X"01");
+        io_access(16#060614#, false, X"00", dummy);
+        chk("ICAP enable reads " & to_hstring(dummy), dummy = X"01");
+        wr(16#060610#, X"DE"); wr(16#060610#, X"AD"); wr(16#060610#, X"BE"); wr(16#060610#, X"EF");
+        wr(16#060610#, X"01"); wr(16#060610#, X"02"); wr(16#060610#, X"03"); wr(16#060610#, X"04");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        chk("ICAP words " & integer'image(ic_cnt) & " " & to_hstring(ic_first) & " " & to_hstring(ic_last),
+            ic_cnt = 2 and ic_first = X"DEADBEEF" and ic_last = X"01020304");
+        io_access(16#060618#, false, X"00", dummy);
+        chk("ICAP count " & to_hstring(dummy), dummy = X"02");
+        wr(16#060610#, X"A5");                                          -- one byte of a word, then a new session
+        wr(16#060614#, X"00"); wr(16#060614#, X"01");
+        io_access(16#060618#, false, X"00", dummy);
+        chk("ICAP count after a new session " & to_hstring(dummy), dummy = X"00");
+        wr(16#060610#, X"B1"); wr(16#060610#, X"B2"); wr(16#060610#, X"B3"); wr(16#060610#, X"B4");
+        for i in 1 to 4 loop wait until rising_edge(clock); end loop;
+        chk("ICAP word of the new session " & integer'image(ic_cnt) & " " & to_hstring(ic_last),
+            ic_cnt = 3 and ic_last = X"B1B2B3B4");
+        wr(16#060614#, X"00");
+        bfm_step <= 5;
+
         bfm_errors <= errs;
         bfm_step <= 99;
         wait;

@@ -3,11 +3,12 @@
 # Run tools/pincheck.tcl in vivado-env on the NAS (T53). Reads, writes nothing there.
 #
 #   tools/pincheck.sh [part A [part B]]
+# The NAS from the environment as in tools/vivado.sh: TRX_NAS, TRX_NAS_DATA, TRX_NAS_DOCKER (U20 A8; the defaults are placeholders).
 set -euo pipefail
-NAS="${TRX_NAS:-admin@192.168.242.2}"
-DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+NAS="${TRX_NAS:-admin@192.0.2.2}"
+DOCKER="${TRX_NAS_DOCKER:-docker}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-work=/share/CACHEDEV2_DATA/trx64-build/work/pincheck
+work="${TRX_NAS_DATA:-/srv}/trx64-build/work/pincheck"
 ssh "$NAS" "rm -rf '$work' && mkdir -p '$work/designs/c64_basic' '$work/constraints' '$work/tools'"
 scp -q "$ROOT"/designs/c64_basic/*.xdc "$NAS:$work/designs/c64_basic/"
 scp -q "$ROOT/constraints/c64u.xdc" "$ROOT/constraints/mig_ddr2.prj" "$NAS:$work/constraints/"

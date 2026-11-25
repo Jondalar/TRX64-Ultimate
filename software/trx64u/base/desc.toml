@@ -1,0 +1,132 @@
+# The API TOML of the trx64u core (D7: menu.toml is its UI TOML). tools/descrec.py compiles both into the core's description record (record 6 of
+# trx64u.cor: cor_pack.py pack --desc menu.toml --desc desc.toml, refusing a table or key that is in both; U18 D1: our package delivers the .cor). The
+# library build does not read the file.
+#
+# ---- the descriptor's data (T239.3 D17, record version 6) -------------------------------------------------------------------------------------------
+# What MultiCore's coreapp/cores/c64.cc (t239.3 beee9b09) held as the TRX2 descriptor `c64_desc`, as the sections of their tools/descrec.py. Its code is
+# this library: the operations the data names (put_op, service_op, type_op, run_op, the hotkey's core_op) are lib_trx64u.cc's record, and init, release,
+# media_flush, media_pending and the [mount] slots' spec, mount and eject are the export "corehooks" (c64core.cc) of the library [core] hooks names. The
+# settings, tasks, media rows, file types, machine_info and the key table are menu.toml's. The register numbers of [freeze] and [[report_reg]] are offsets
+# in the TRX block (trx_io at 0x101A0000 in c64_basic's TOML A, ../gateware/c64_basic.toml: ident +0x004 caps, +0x005 caps2; trx_gate +0x100 ctrl).
+# The registers our libraries drive are not here: they are the TOML A's blocks, which the libraries are linked against (drvtab.h).
+
+[core]
+id = "TRX2"                            # the ID block of the TRX64 Ultimate bitstream
+name = "TRX64U"                        # the manifest name of trx64u.cor: the hand-over and the bundle's records are matched by it
+title = "TRX64 C64"
+short_title = "C64"
+folder = "c64"
+store = "C64 Settings"
+min_contract = 1
+hooks = "trx64u"                       # the library whose export "corehooks" holds this core's hooks: this one (Makefile LIB_NAME)
+reset_ms = 50
+service_op = "c64.service"
+service_period_ms = 20                 # not poll_when_frozen: a program waits for READY while the machine runs, not while the menu holds it
+type_op = "c64.type_script"
+run_op = "prg.run"
+caps = ["iec", "drive_a", "cartridge", "reu", "ring", "uci", "sid_sockets"]
+board_caps = true                      # the board strikes the names its probes deny (T104.2 D3)
+own_volume = true                      # the TRX64U mixer ("Vol Master"), no generic Volume (T160 P4)
+no_tone = true                         # the TRX64-Ultimate bitstream has no host/trx_tone.v
+
+# the C64's picture goes through Gideon's video path, not through the pixel layer: no buffers, no registers
+[video]
+w = 0
+h = 0
+scale = 0
+x0 = 0
+y0 = 0
+fb_base = 0
+fb_stride = 0
+nbuf = 0
+reg_latest = 0
+reg_seq = 0
+reg_fb_base = 0
+reg_fb_stride = 0
+
+[freeze]
+reg_status = 0x101                     # trx_gate.ctrl's byte 1: its b8 (halted) of the 32 bit register, read as a word
+mask = 0x01
+timeout_ms = 200
+word = true
+
+# CTRL + RESTORE menu, + "+" / "-" volume, + R reset, + P picture mode, + D swap the disk of drive A without the menu (TRX-Ultimate userinterface.cc:444-445).
+# Keys as hotkeys.h: 0-63 = col * 8 + row, 64 = RESTORE, 255 = none; actions in the order of HKA_* (menu, volume up, volume down, reset, swap joystick,
+# picture, core). No swap joystick: the core names no "kbd_joystick" cap, so the base has no "Joystick Input" for it, and the menu has no "Joystick ports"
+# (the base's fallback when swap_key is not given, hotkeys.cc hk_swap_joystick).
+[hotkeys]
+mod = [58, 255]
+actions = [64, 40, 43, 17, 255, 41, 18]
+vol_key = "Vol Master"
+own_keys = [56, 59, 8, 11, 16, 19, 24, 27, 32, 35]          # the digit keys: CTRL + 1..8 are the colours and CTRL + 9 / 0 reverse on / off
+core_op = "drive.swap"
+core_key = "Hotkey swap disk"
+core_label = "Swap disk"
+
+# the slots of the core's own media engines, for "Persist medium mounts", the media sets and ctx.media_source (T180 D2, D5): slot 0 drive A (the drive
+# library), slot 1 the cartridge port (the .crt's path). Their spec, mount and eject are CoreHooks' slot_spec, slot_mount, slot_eject (c64core.cc), by
+# position in this list (SLOT_DRIVE_A, SLOT_CART in trx64u_lib.h).
+[mount]
+names = ["Drive A", "Cartridge"]
+
+# T162 D3: the state block of the bug report (reads without side effects only; the state bus and the debugger's command registers are left out)
+[[report_reg]]
+name = "CAPS"
+reg = 0x004
+bytes = 1
+
+[[report_reg]]
+name = "CAPS2"
+reg = 0x005
+bytes = 1
+
+[[report_reg]]
+name = "GATE_CTRL (b0 freeze)"
+reg = 0x100
+bytes = 1
+
+[[report_reg]]
+name = "GATE_STATUS (b0 halted)"
+reg = 0x101
+bytes = 1
+
+# the USB mouse as a 1351 on the POT lines (T104.1 5.6): the board's pots write the position; the 1351 backend uses none of the numbers
+[mouse]
+kind = "pot1351"
+reg_dx = 0
+reg_dy = 0
+reg_btn = 0
+clamp = 0
+step = 0
+interval_ms = 0
+
+# ---- ROMs. The names in Gideon's /flash/roms (FTP listing of the board, 2026-10-28: basic-901226-01.bin, kernal-901227-03.bin, chargen-901225-01.bin)
+# first, then other common names and those of the MultiCore line's ROM set.
+[[rom]]
+role = "BASIC"
+names = ["basic-901226-01.bin", "basic.bin", "basic.901226-01", "basic.901226-01.bin", "basic.rom"]
+sizes = [8192]
+required = true
+put_op = "c64.put_basic"
+
+[[rom]]
+role = "KERNAL"
+names = ["kernal-901227-03.bin", "kernal.bin", "kernal.901227-03", "kernal.901227-03.bin", "kernal.rom"]
+sizes = [8192]
+required = true
+put_op = "c64.put_kernal"
+
+[[rom]]
+role = "CHAR"
+names = ["chargen-901225-01.bin", "chars.bin", "characters.901225-01", "characters.901225-01.bin", "chargen.bin", "chars.rom"]
+sizes = [4096]
+required = true
+put_op = "c64.put_char"
+
+# drive A's ROM (MultiCore cbm1541_desc.h CBM1541_ROM): the drive library's operation, the file shared with the other cores' drives
+[[rom]]
+role = "1541 drive"
+names = ["1541.rom", "1541.bin", "1541-ii.bin", "1541-ii.rom", "1541ii.rom", "1541c.rom", "dos1541.rom", "dos1541-325302-01+901229-05.bin"]
+sizes = [16384, 32768]
+shared = true
+put_op = "drive.put_rom"

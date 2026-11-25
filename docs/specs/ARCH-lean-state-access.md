@@ -24,7 +24,7 @@ edge, and the engine copies the shadows to DDR2 during the following frame, so t
 never stops for it.
 
 **Marks.** **[TRX64: file]** = concept copied from our emulator, paths relative to
-`/Users/alex/Development/C64/Tools/TRX64/`. Hardware facts are from this repo's code, paths
+`~/Development/C64/Tools/TRX64/`. Hardware facts are from this repo's code, paths
 relative to its root. Numbers from `designs/c64_basic/build/utilization*.rpt` (build m10,
 post-route, 2026-10-01).
 

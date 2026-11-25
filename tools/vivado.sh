@@ -7,11 +7,13 @@
 # The design directory is copied to the NAS work area, Vivado 2024.1 runs in
 # the vivado-env:2024.1 container there (tools baked into the image, see
 # vivado/), and build/ comes back next to the sources.
+# The NAS from the environment (U20 A8: the public tree names no host or NAS path): TRX_NAS (login@host), TRX_NAS_DATA (the
+# data volume that holds trx64-build/), TRX_NAS_DOCKER (the docker binary there); the defaults are placeholders.
 set -euo pipefail
 
-NAS="${TRX_NAS:-admin@192.168.242.2}"
-BASE=/share/CACHEDEV2_DATA/trx64-build
-DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+NAS="${TRX_NAS:-admin@192.0.2.2}"
+BASE="${TRX_NAS_DATA:-/srv}/trx64-build"
+DOCKER="${TRX_NAS_DOCKER:-docker}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 design="${1:?design directory, e.g. designs/hdmi_test}"
@@ -22,7 +24,7 @@ work="$BASE/work/$name"
 "$ROOT/tools/gideon_sources.sh"
 
 ssh "$NAS" "mkdir -p '$work' && rm -rf '$work/src' && mkdir -p '$work/src'"
-COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --exclude build -czf - "$design" constraints cores tools/vivado_lib.tcl | ssh "$NAS" "tar -C '$work/src' -xzf -"
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --exclude build -czf - "$design" constraints cores vendor tools/vivado_lib.tcl | ssh "$NAS" "tar -C '$work/src' -xzf -"
 ssh "$NAS" "mkdir -p '$BASE/cache' && $DOCKER run --rm --cpus=3 -v '$work:/work' \
     -v '$BASE/cache:/cache' -e TRX_CACHE=/cache -e HOME=/tmp \
     -w '/work/src/$design' vivado-env:2024.1 \

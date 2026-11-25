@@ -41,7 +41,7 @@ jobs:
       # which never reaps, and Vivado's helper processes end up as zombies (runs 222, 225)
       options: --init
       volumes:
-        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache
+        - /srv/trx64-build/cache:/cache
     timeout-minutes: 150
     defaults:
       run:
@@ -56,8 +56,8 @@ jobs:
           git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
             "http://actions:${TOKEN}@${SERVER}/${GITHUB_REPOSITORY}.git" src
           git -C src log --oneline -1
-      # The 100T runs only when asked for (ci/select.sh ue2). Decided here, before the
-      # submodule is fetched; a step-level `if:` is safe, a job-level one is not
+      # The 100T runs only when asked for (ci/select.sh ue2). Decided here, before
+      # Vivado; a step-level `if:` is safe, a job-level one is not
       # (docs/specs/T31-ci-pipeline.md, decision 2).
       - name: Decide (100T skipped here unless requested)
         env:
@@ -74,11 +74,6 @@ jobs:
       - name: bit-ue2 SKIPPED, not requested
         if: env.SKIP == '1'
         run: echo "bit-ue2 SKIPPED, the 100T bitstream was not requested; nothing was built"
-      - name: Fetch the Ultimate app submodule
-        if: env.SKIP != '1'
-        env:
-          APP_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
-        run: src/ci/submodule.sh
       - name: Vivado
         if: env.SKIP != '1'
         env:

@@ -1,0 +1,206 @@
+name: Ephemeral runner (U20 F-a)
+
+# U20 D17, experiment F-a (docs/specs/U20-github-home.md §6 "F"): one small job on a Hetzner Cloud server that exists for
+# this run only. Job start creates the server through the Hetzner Cloud API, with a GitHub just-in-time runner config in
+# its cloud-init user data (ci/ephemeral/user-data.sh); job work runs on that runner, which takes this one job and
+# deregisters; job stop deletes the server and the registration, whatever happened before.
+#
+# The documented exception to the workflow rule "every runs-on is a GitHub-hosted image" (tools/check_workflows.py rule 6,
+# U20 B; its EXCEPTIONS list names this job and its label expression): job work runs on a self-hosted runner. It may, because
+#  - nothing but a push to scratch/ephemeral-* and workflow_dispatch starts this workflow: no pull_request,
+#    pull_request_target or other event that carries fork code, which must never reach a self-hosted machine
+#    (the repository is public). GitHub offers workflow_dispatch only for workflows on the default branch, so before the
+#    switch a push to a scratch/ephemeral-* branch is how it runs; only accounts with write access push branches;
+#  - the runner is just-in-time: exactly one job, then it deregisters; it carries ONE label, new per run (run id, attempt
+#    and a random part), and job work names only that label. No `self-hosted`, no OS or architecture label: a fork pull
+#    request can bring its own workflow whose job waits up to 24 h for `runs-on: self-hosted`, and that job must never
+#    match this runner. ci/ephemeral/ghrunner.sh refuses such labels and fails when GitHub's answer lists any label but
+#    the requested one (the runner's --jitconfig path adds none; GitHub's documentation does not say what its server adds);
+#  - the server goes: job stop (if: always()) deletes it by id and by this run's label; the next run's start sweeps this
+#    repository's experiment servers older than EPH_SWEEP_MINUTES; `ci/ephemeral/hcloud.sh sweep` does it by hand. The
+#    server powers itself off EPH_CAP_MINUTES after boot (Hetzner bills it until it is deleted). No token is on it.
+# Secrets by name only, never printed: HCLOUD_TOKEN (Hetzner Cloud project token, Read & Write) and RUNNER_REG_TOKEN
+# (fine-grained PAT on this repository, Administration: Read and write), both in start and stop. Job work gets none.
+# Re-run with "Re-run all jobs". "Re-run failed jobs" fits only a failed stop: a re-run work would wait for a runner
+# that is spent (start's outputs are reused) until GitHub drops the job after 24 h.
+
+on:
+  push:
+    branches: ['scratch/ephemeral-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ephemeral-a-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # the first type/location pair the API lists as available wins; CPX02 (1 vCPU, 1 GB) is Hetzner's smallest shared type
+  EPH_TYPES: cpx02 cpx12 cx23 cpx22
+  # German locations: Nuremberg, Falkenstein
+  EPH_LOCATIONS: nbg1 fsn1
+  EPH_IMAGE: ubuntu-24.04
+  # the server powers itself off this long after its user data starts: start (20) + work (15) + margin
+  EPH_CAP_MINUTES: '45'
+  # start deletes this repository's experiment servers older than this: none of a live run is (start + work + stop = 45)
+  EPH_SWEEP_MINUTES: '90'
+
+jobs:
+  start:
+    name: Start (Hetzner server with a just-in-time runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      label: ${{ steps.names.outputs.label }}
+      runner_id: ${{ steps.jit.outputs.runner_id }}
+      server_id: ${{ steps.create.outputs.server_id }}
+      server_type: ${{ steps.create.outputs.server_type }}
+      location: ${{ steps.create.outputs.location }}
+      price_hourly: ${{ steps.create.outputs.price_hourly }}
+      t_create: ${{ steps.create.outputs.t_create }}
+      t_running: ${{ steps.running.outputs.t_running }}
+      t_online: ${{ steps.online.outputs.t_online }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Names
+        id: names
+        run: |
+          run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rnd="$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "run=$run"
+            echo "name=gh-eph-$run"
+            echo "label=eph-$run-$rnd"
+            echo "repo=${GITHUB_REPOSITORY//\//.}"
+          } | tee -a "$GITHUB_OUTPUT"
+      - name: Sweep this repository's experiment servers left by earlier runs
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          REPO_LABEL: ${{ steps.names.outputs.repo }}
+        run: ci/ephemeral/hcloud.sh sweep --older-than "$EPH_SWEEP_MINUTES" --selector "purpose=gh-ephemeral,repo=$REPO_LABEL"
+      - name: Just-in-time runner config
+        id: jit
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          NAME: ${{ steps.names.outputs.name }}
+          LABEL: ${{ steps.names.outputs.label }}
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/eph"
+          ci/ephemeral/ghrunner.sh jit --repo "$GITHUB_REPOSITORY" --name "$NAME" --label "$LABEL" \
+            --out "$RUNNER_TEMP/eph/jit" --outputs "$GITHUB_OUTPUT"
+      - name: User data
+        env:
+          LABEL: ${{ steps.names.outputs.label }}
+        run: |
+          ci/ephemeral/ghrunner.sh user-data --jit-file "$RUNNER_TEMP/eph/jit" --label "$LABEL" \
+            --cap-minutes "$EPH_CAP_MINUTES" --out "$RUNNER_TEMP/eph/user-data"
+      - name: Create the server
+        id: create
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          NAME: ${{ steps.names.outputs.name }}
+          RUN: ${{ steps.names.outputs.run }}
+          REPO_LABEL: ${{ steps.names.outputs.repo }}
+        run: |
+          ci/ephemeral/hcloud.sh create --name "$NAME" \
+            --label purpose=gh-ephemeral --label "repo=$REPO_LABEL" --label "run=$RUN" \
+            --user-data "$RUNNER_TEMP/eph/user-data" --types "$EPH_TYPES" --locations "$EPH_LOCATIONS" --image "$EPH_IMAGE" \
+            --outputs "$GITHUB_OUTPUT"
+      - name: Drop the JIT config from this machine
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/eph"
+      - name: Wait until the server runs
+        id: running
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          SERVER_ID: ${{ steps.create.outputs.server_id }}
+        run: ci/ephemeral/hcloud.sh wait --id "$SERVER_ID" --timeout 300 --outputs "$GITHUB_OUTPUT"
+      - name: Wait until the runner is online
+        id: online
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          RUNNER_ID: ${{ steps.jit.outputs.runner_id }}
+        run: ci/ephemeral/ghrunner.sh wait-online --repo "$GITHUB_REPOSITORY" --id "$RUNNER_ID" --timeout 600 --outputs "$GITHUB_OUTPUT"
+
+  work:
+    name: Work (proof job on the server)
+    needs: start
+    # only the run's random label (header): a self-hosted runner, though no `self-hosted` label names it
+    runs-on: ['${{ needs.start.outputs.label }}']
+    timeout-minutes: 15
+    steps:
+      - name: Job start
+        run: echo "T_JOB=$(date -u +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Machine and timings
+        env:
+          T_CREATE: ${{ needs.start.outputs.t_create }}
+          T_RUNNING: ${{ needs.start.outputs.t_running }}
+          T_ONLINE: ${{ needs.start.outputs.t_online }}
+          SERVER_TYPE: ${{ needs.start.outputs.server_type }}
+          SERVER_LOCATION: ${{ needs.start.outputs.location }}
+          PRICE_HOURLY: ${{ needs.start.outputs.price_hourly }}
+          RUNNER_LABEL: ${{ needs.start.outputs.label }}
+        run: |
+          uname -a
+          nproc
+          free -m
+          df -h /
+          ci/ephemeral/proof.sh
+
+  stop:
+    name: Stop (delete the server and the runner registration)
+    needs: [start, work]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      # by id (start's output) and by label (every attempt of this run), so a start that failed before its outputs leaves nothing
+      - name: Delete the server
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          SERVER_ID: ${{ needs.start.outputs.server_id }}
+        run: |
+          rc=0
+          runs=""
+          for a in $(seq 1 "$GITHUB_RUN_ATTEMPT"); do runs="$runs${runs:+,}$GITHUB_RUN_ID-$a"; done
+          if [ -n "$SERVER_ID" ]; then ci/ephemeral/hcloud.sh delete --id "$SERVER_ID" || rc=1; fi
+          ci/ephemeral/hcloud.sh delete --selector "purpose=gh-ephemeral,run in ($runs)" || rc=1
+          exit "$rc"
+      - name: Remove the runner registration
+        if: ${{ always() }}
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          RUNNER_ID: ${{ needs.start.outputs.runner_id }}
+        run: |
+          rc=0
+          if [ -n "$RUNNER_ID" ]; then ci/ephemeral/ghrunner.sh delete --repo "$GITHUB_REPOSITORY" --id "$RUNNER_ID" || rc=1; fi
+          for a in $(seq 1 "$GITHUB_RUN_ATTEMPT"); do
+            ci/ephemeral/ghrunner.sh delete --repo "$GITHUB_REPOSITORY" --name "gh-eph-$GITHUB_RUN_ID-$a" || rc=1
+          done
+          exit "$rc"
+      - name: Experiment servers after this run
+        if: ${{ always() }}
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          {
+            echo "### Hetzner servers with purpose=gh-ephemeral after this run"
+            echo
+            echo '```'
+            ci/ephemeral/hcloud.sh list
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
