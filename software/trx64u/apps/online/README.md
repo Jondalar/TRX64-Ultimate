@@ -1,12 +1,12 @@
-The online search of trx64u: a resident sub-app of format 3 (`APP_KIND = lib`, needs `base>=3.5`, version 2.0) that searches Assembly64, CommoServe and
-Beyond64 and lists what it found in the folder `/Online` of the Library. Spec: `docs/specs/U21-online-search-rework.md` (form, results tab, Beyond64; D1-D9).
+The online search of trx64u: a resident sub-app of format 3 (`APP_KIND = lib`, needs `base>=3.6`, version 2.0) that searches Assembly64, CommoServe and
+Beyond64 and lists what it found in the folder `/Online` of the Library. Spec: `docs/specs/U21-online-search-rework.md` (form, results tab, Beyond64; D1-D11).
 
 PROVENANCE. It began as a copy of `apps/online` of TRX64U-MultiCore (branch `t239.3`, commit `6e280710`, the commit SDK 0.4.6 is packed from; ours since U20
 D22); Alex Damhuis' code in both repositories. MultiCore's `PROVENANCE.md` (rows "Assembly64 / CommoServe client" and "Online search"): ours,
 GPL-3.0-or-later; the host name, the URLs, the headers of a request (`Client-Id`, `User-Agent`, `Connection: close`) and the URL encoding follow Gideon's
 `software/network/assembly.cc` and `components/pattern.cc` (`url_encode`), the Assembly64 query is built the way his `software/userinterface/assembly_search.cc`
 builds it; none of his client (BSD sockets, `HttpRequest`, the server library's body parser, `json.h`) is copied. U21 rewrote `online_search.cc` and `app.toml`
-on SDK 0.5.0 and added the Beyond64 client (its public JSON API, https://beyond64.org/#help/json-api); MultiCore's copy is no longer the reference.
+on SDK 0.5.0 (now 0.5.1) and added the Beyond64 client (its public JSON API, https://beyond64.org/#help/json-api); MultiCore's copy is no longer the reference.
 
 The parts. `online_lib.cc` is `lib_register`: it registers the operations `online.*` and the state values of the form and the results (`online_search.cc`) and
 exports the table "online" (`online_api.h` of the SDK's `include/`, major 1), which the base's file manager (`netfs.cc`) reads the folder `/Online` through; the
@@ -21,12 +21,15 @@ Name, Group, Handle, Event, Category, Subcategory, Archive, Year, Added within, 
 File type, Sort by; Order once Sort by is chosen; Beyond64: Text, Look in, Category, Platform, Environment, Hardware, AI, Show; Category match and Hardware
 match once two are chosen), Clear the form, and Search at the foot (`F3/online/mainfoot`, a `job` with the `busy` caption "Searching <source>", greyed
 without a network, the hint names F8 System > Network). The choices of Assembly64 and CommoServe (`/leet/search/aql/presets`) and of Beyond64
-(`/api/c64/filters`) load by themselves when the form is shown with a network. Keys (`base/menu.toml`, a library's menu record holds no key table): S the next
-source, X clear (form) / N new search, X clear (results). The results tab: its title is "<source> • <text> • <count>", the node Results is a `list` (one row per
+(`/api/c64/filters`) load by themselves when the form is shown with a network. Keys (the `[[key]]` rows of `app.toml`, base 3.6, each in its tab's foot legend): S the next
+source, X clear (form) / N new search, X clear (results). The texts are free (`ask_any`): Name / Text up to 120 characters, Group, Handle and Event up to
+47 (`ask_max`); Assembly64 and CommoServe refuse a `"` (their query quotes each text and has no escape), and a search whose request would not fit says so. The results tab: its title is "<source> • <text> • <count>", the node Results is a `list` (one row per
 result: title, the year or Beyond64's category, the side lines; Beyond64's last row asks for the next page), RETURN on a result opens its folder
 `/Online/<result>/` in Browse (`lib.show`, `goto_screen`), and RETURN on a file there is the Library's action sheet (Run downloads, the menu closes).
+A Beyond64 release with one loadable file lists it at once (the details of the search named it); Beyond64 names no size, the list shows "-". Opening the
+file's action sheet straight from a result (`ctx.browse_sheet`) waits for MultiCore's SDK 0.5.2 (U21 §7, finding 15).
 Beyond64's Show: Loadable only (default, D8) lists the releases with a `.prg`, `.d64` or `.d81` (the files the download bridge serves; one details request per
-release, D5); All releases lists the others too, "Only on a computer".
+release, D5); All releases lists the others too, "Only on a computer", the whole row grey (tone `disabled`, base 3.6).
 
 Built by `build.sh online` (`build/online/online.u2a`), carried in record 7 of `trx64u.cor` (`pack_cor.sh --lib`), and an asset of the `fw-<branch>-<sha8>`
 pre-release (U20 D22, MultiCore T261 D7). MultiCore's host test of the 0.4.6 copy (`tests/loader/test_online.inc`) is not copied; here the emulator check

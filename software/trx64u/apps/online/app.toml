@@ -5,7 +5,8 @@
 #    the side panel: the source and the last search.
 #  - F3 "Results" (U21 D1): on the strip only while there are results (`show`, api.md 6.11.7). Its list (kind `list`, api.md 6.19) opens the result rows; RETURN on a row
 #    calls online.open, the last row of Beyond64 asks online.more for the next page.
-# The keys of both tabs in the foot legend are rows of the core's key table (base/menu.toml): a library's menu record has none (the SDK's u2a_pack.py refuses one).
+# The keys of both tabs, each in the foot legend of its tab (`legend`, api.md 6.18.3), are the `[[key]]` rows at the end: a library's menu record holds them since
+# base 3.6 (api.md 6.18.5); the menu merges them behind the core's own rows while the sub-app is loaded.
 
 [[tab]]
 area = "F3"
@@ -45,7 +46,7 @@ id = "online.name"
 op = "online.set"
 bind = [ { arg = "field", str = "name" }, { arg = "text", text = true } ]
 order = 20
-ui = { label = "@online.lbl.name", ask = "The text to look for", ask_state = "online.p.name", chip = "@online.v.name", tone = "cyan" }
+ui = { label = "@online.lbl.name", ask = "The text to look for", ask_state = "online.p.name", ask_max = "120", ask_any = true, chip = "@online.v.name", tone = "cyan" }
 
 [[node]]
 anchor = "F3/online"
@@ -65,7 +66,7 @@ id = "online.group"
 op = "online.set"
 bind = [ { arg = "field", str = "group" }, { arg = "text", text = true } ]
 order = 22
-ui = { ask = "The group or the publisher", ask_state = "online.p.group", chip = "@online.v.group", tone = "cyan", hide = "@online.h.ac" }
+ui = { ask = "The group or the publisher", ask_state = "online.p.group", ask_max = "47", ask_any = true, chip = "@online.v.group", tone = "cyan", hide = "@online.h.ac" }
 
 [[node]]
 anchor = "F3/online"
@@ -75,7 +76,7 @@ id = "online.handle"
 op = "online.set"
 bind = [ { arg = "field", str = "handle" }, { arg = "text", text = true } ]
 order = 23
-ui = { ask = "The scener's handle", ask_state = "online.p.handle", chip = "@online.v.handle", tone = "cyan", hide = "@online.h.ac" }
+ui = { ask = "The scener's handle", ask_state = "online.p.handle", ask_max = "47", ask_any = true, chip = "@online.v.handle", tone = "cyan", hide = "@online.h.ac" }
 
 [[node]]
 anchor = "F3/online"
@@ -85,7 +86,7 @@ id = "online.event"
 op = "online.set"
 bind = [ { arg = "field", str = "event" }, { arg = "text", text = true } ]
 order = 24
-ui = { ask = "The party or the event", ask_state = "online.p.event", chip = "@online.v.event", tone = "cyan", hide = "@online.h.ac" }
+ui = { ask = "The party or the event", ask_state = "online.p.event", ask_max = "47", ask_any = true, chip = "@online.v.event", tone = "cyan", hide = "@online.h.ac" }
 
 # Assembly64 and CommoServe: the server's presets (online_search.cc k_ach)
 [[node]]
@@ -353,3 +354,31 @@ label = "Not loadable"
 state = "online.r.hidden"
 order = 43
 ui = { hide = "@online.r.nohidden" }
+
+# ---- the keys (base 3.6, api.md 6.18.5) -----------------------------------------------------------------------------------------------------------------------------
+[[key]]
+node = "online"
+key = "s"
+op = "online.next_source"
+status = true
+legend = "Source"
+
+[[key]]
+node = "online"
+key = "x"
+op = "online.clear"
+status = true
+legend = "Clear"
+
+[[key]]
+node = "results"
+key = "n"
+op = "online.new"
+legend = "New search"
+
+[[key]]
+node = "results"
+key = "x"
+op = "online.forget"
+status = true
+legend = "Clear"

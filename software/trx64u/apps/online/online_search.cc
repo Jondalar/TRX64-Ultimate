@@ -123,6 +123,9 @@ struct Res {
     char right[40];
     char side[3][64];
     bool loadable;                         // Beyond64: a file the download bridge serves (.prg, .d64, .d81); the others always
+    int nfiles;                            // Beyond64: how many of its files load here (the details name them); 0: not known (Assembly64, CommoServe name none in a search)
+    char file1[64];                        // Beyond64, nfiles 1: that file's name in the folder, and its place in the release's f (the download names it)
+    int file1_idx;
 };
 
 struct Results {
@@ -143,7 +146,7 @@ struct Results {
 struct Ent {
     char name[64];
     int idx;
-    uint32_t size;                         // 0: not known (Beyond64 names no size)
+    uint64_t size;                         // FS_SIZE_UNKNOWN (fsif.h, base 3.6): Beyond64 names no size, the file list shows "-"
 };
 
 const LibApi *g_api;
@@ -581,7 +584,7 @@ void b64_files(const JNode *rel, Ent *out, int *n, int max)
             }
             clean(out[*n].name, sizeof(out[*n].name), nm);
             out[*n].idx = i;
-            out[*n].size = 0;
+            out[*n].size = FS_SIZE_UNKNOWN;
         }
         (*n)++;
     }
@@ -620,6 +623,14 @@ void b64_details(const JNode *rel, Res &x)
     int nf = 0;
     b64_files(rel, 0, &nf, 0);
     x.loadable = nf > 0;
+    x.nfiles = nf;
+    if (nf == 1) {
+        Ent one;
+        int k = 0;
+        b64_files(rel, &one, &k, 1);
+        ot_copy(x.file1, sizeof(x.file1), one.name);
+        x.file1_idx = one.idx;
+    }
 }
 
 // Beyond64: one page of releases, then the details of each (the list carries no files, D5). Logs the time of both (U21 D8).
@@ -1419,6 +1430,19 @@ void param(char *path, int n, const char *key, const char *value)
     url_cat(path, n, value);
 }
 
+// ot_cat cuts at the end of the buffer: a request that filled it may be cut and is not sent. The texts hold up to 120 characters (ask_max), each byte that is no
+// letter or digit takes three in the URL; SEARCH_PATH_MAX leaves http_get's REQ_MAX room for the request line's other words and the headers.
+#define SEARCH_PATH_MAX 768
+bool fits(const char *t, int n, char *why, int whyn)
+{
+    const int l = ot_len(t);
+    if (l < n - 1 && l <= SEARCH_PATH_MAX) {
+        return true;
+    }
+    ot_copy(why, whyn, "The search is too long: shorten a text");
+    return false;
+}
+
 // The request of the form's search into `path`. False with the reason in `why`.
 bool build_search(char *path, int n, char *why, int whyn)
 {
@@ -1445,9 +1469,18 @@ bool build_search(char *path, int n, char *why, int whyn)
         if (set_count(g_f.b[B_HW]) > 1 && g_f.b[B_HWM][0]) {
             param(path, n, "hm", g_f.b[B_HWM]);
         }
-        return true;
+        return fits(path, n, why, whyn);
     }
-    char q[400];
+    // the texts are free since base 3.6 (ask_any): a " would end the server's quoted value, (field:"value") has no escape for it
+    const char *texts[] = { g_f.name, g_f.group, g_f.handle, g_f.event };
+    for (unsigned i = 0; i < sizeof(texts) / sizeof(texts[0]); i++) {
+        if (strchr(texts[i], '"')) {
+            ot_copy(why, whyn, k_src[g_f.src]);
+            ot_cat(why, whyn, " takes no \" in a text");
+            return false;
+        }
+    }
+    char q[600];
     q[0] = 0;
     if (g_f.name[0]) add_term(q, sizeof(q), "name", g_f.name, false);
     if (g_f.group[0]) add_term(q, sizeof(q), "group", g_f.group, false);
@@ -1464,9 +1497,12 @@ bool build_search(char *path, int n, char *why, int whyn)
         ot_copy(why, whyn, "Type a name or choose a filter first");
         return false;
     }
+    if (!fits(q, (int)sizeof(q), why, whyn)) {
+        return false;
+    }
     ot_copy(path, n, URL_SEARCH);
     url_cat(path, n, q);
-    return true;
+    return fits(path, n, why, whyn);
 }
 
 // ---- operations ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -1700,7 +1736,8 @@ int op_search(CoreCtx *, const OpArgs &, OpOut &o)
 }
 
 // RETURN on a result (the list's `op`, api.md 6.19.3): its files in the Library, the folder "/Online/<result>" (lib.show, then the menu goes to F3, whose first tab is the
-// Library). A result of Beyond64 with no file this machine can load says so instead (D4).
+// Library). A result of Beyond64 with no file this machine can load says so instead (D4). Not yet the file's action sheet: ctx.browse_sheet of base 3.6 is not acted on
+// when a list row's operation calls it (MultiCore SDK 0.5.1, U21 §7 finding 15).
 int op_open(CoreCtx *, const OpArgs &a, OpOut &o)
 {
     collect();
@@ -2043,7 +2080,7 @@ const char *st_rows(CoreCtx *)
         ot_cat(line, sizeof(line), "\t");
         ot_cat(line, sizeof(line), x.right);
         ot_cat(line, sizeof(line), "\t");
-        ot_cat(line, sizeof(line), x.loadable ? "" : "muted");
+        ot_cat(line, sizeof(line), x.loadable ? "" : "disabled");   // base 3.6: the whole row grey; RETURN on it still says why (op_open)
         for (int k = 0; k < 3; k++) {
             ot_cat(line, sizeof(line), "\t");
             ot_cat(line, sizeof(line), x.side[k]);
@@ -2159,6 +2196,17 @@ bool have_entries(int ri)
     if (ent_for == ri && ent_gen == g_res.gen) {
         return true;
     }
+    const Res &x = g_res.r[ri];
+    if (g_res.src == S_B64 && x.nfiles == 1 && x.file1[0]) {        // the details of the search named its one file: the folder lists it at once, no request
+        memset(&ent[0], 0, sizeof(ent[0]));
+        ot_copy(ent[0].name, sizeof(ent[0].name), x.file1);
+        ent[0].idx = x.file1_idx;
+        ent[0].size = FS_SIZE_UNKNOWN;
+        nent = 1;
+        ent_for = ri;
+        ent_gen = g_res.gen;
+        return true;
+    }
     char path[160];
     if (g_res.src == S_B64) {
         ot_copy(path, sizeof(path), B64_RELEASE);
@@ -2234,7 +2282,7 @@ bool tab_stat(const char *rel, uint64_t *size, bool *dir)
     for (int i = 0; i < nent; i++) {
         if (ot_ieq(ent[i].name, file)) {
             *dir = false;
-            *size = ent[i].size;
+            *size = fs_size_known(ent[i].size) ? ent[i].size : 0;   // the "-" is the listing's (tab_list); the base's callers of stat read a length and test for no FS_SIZE_UNKNOWN
             return true;
         }
     }

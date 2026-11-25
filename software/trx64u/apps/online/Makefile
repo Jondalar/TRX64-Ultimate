@@ -1,10 +1,10 @@
 # Online search on ABI 3 (MultiCore T239.3 L-3): a resident sub-app, format 3, built by software/trx64u/build.sh against the pinned SDK; see the SDK's mk/app.mk
 # (make SDK=<the SDK's folder>).
-# `base>=3.5`: api->net connects (SvcNet::connect, resolve, 3.3), the loader serves the named export (3.2), and the menu record has a node of kind list, `pick = "@state"`, a tab's `show` and a job's `busy` (3.5, T262). APP_EXPORTS lists the table the file manager finds.
+# `base>=3.6`: api->net connects (SvcNet::connect, resolve, 3.3), the loader serves the named export (3.2), the menu record has a node of kind list, `pick = "@state"`, a tab's `show` and a job's `busy` (3.5, T262), and its `[[key]]` rows and `ask_max`/`ask_any` (3.6, T262 D4). APP_EXPORTS lists the table the file manager finds.
 APP_NAME = online
 APP_KIND = lib
 APP_VERSION = 2.0
-APP_NEEDS = base>=3.5
+APP_NEEDS = base>=3.6
 APP_EXPORTS = online=1
 APP_MENU = app.toml
 # S13 budget. heap_keep 0: the form, the results and the entries are static arrays of the image (bss); at rest the sub-app holds through api->mem only the last download, which the

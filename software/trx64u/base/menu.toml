@@ -7,7 +7,7 @@
 # the core's tabs C64, TRX and Expansion with headings, then Video, Audio (R5: "SID sockets" and "Emulated SIDs" are two rows under the heading reDIP:SID at its
 # end, each opens a page), Input. F7 is one tab of sections (T212 D12); the sub-apps' rows are not here: each brings them in its own menu record (TREX CRT's
 # Dump, Inspect and Flash on F7; no Softboot in trx64u, Alex 2026-11-24: it runs a .cfw's firmware application, not on this bitstream), and the F3 tabs Online
-# and Results come with the online sub-app (record 7, MultiCore T239.3 L-3, U21; their keys are rows of the key table below). R6: F8 is the one generic System tab; under its Network heading
+# and Results come with the online sub-app (record 7, MultiCore T239.3 L-3, U21; their keys are in its record too, base 3.6). R6: F8 is the one generic System tab; under its Network heading
 # three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs) are in no tab
 # (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
 # Drive A and the cartridge port are media slots whose rows open the drive list (T212 D5); the generic items (Persist mounts, Enter home, Menu opens at, Home
@@ -552,37 +552,6 @@ close = true
 layout = "timeline"
 codes = [32, 126]
 do = "swallow"
-
-# The online search (apps/online, U21): the keys of its form (the tab "online") and of its results (the tab "results"), each in the foot legend of its tab (`legend`,
-# base 3.5, api.md 6.18.3). The rows stand here because a library's menu record has no key table (the SDK's u2a_pack.py refuses one); the operations are the
-# sub-app's, which this core carries (record 7).
-[[key]]
-node = "online"
-key = "s"
-op = "online.next_source"
-status = true
-legend = "Source"
-
-[[key]]
-node = "online"
-key = "x"
-op = "online.clear"
-status = true
-legend = "Clear"
-
-[[key]]
-node = "results"
-key = "n"
-op = "online.new"
-legend = "New search"
-
-[[key]]
-node = "results"
-key = "x"
-op = "online.forget"
-status = true
-legend = "Clear"
-
 
 [[task]]
 group = "c64"

@@ -23,13 +23,13 @@ against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with Mul
 trx64u (Alex, 2026-11-24): it starts the firmware application inside a `.cfw` on the running bitstream, and c64_basic
 under this app is not the bitstream that application needs. It stays in the firmware build (`TREX/1541ultimate:apps/softboot`); it is not
 ours to ship (U20 D22). The online search began as a copy of MultiCore's `apps/online` at `t239.3` `6e280710` (U20 D22, MultiCore T261 D6: their
-SDK lane no longer builds it), is built here and carried in record 7; U21 reworked it on SDK 0.5.0 (a form, a results tab, Beyond64 as a third source,
+SDK lane no longer builds it), is built here and carried in record 7; U21 reworked it on SDK 0.5.0 and moved it to 0.5.1 (a form, a results tab, Beyond64 as a third source,
 `docs/specs/U21-online-search-rework.md`), so it is no longer the `online.u2a` that `sdk.pin` pinned before.
 Both sub-apps are assets of the `fw-<branch>-<sha8>` pre-release beside `trx64u.cor` (MultiCore's package takes them from there).
 
 ## State
 
-The three libraries and the two sub-apps build on MultiCore's SDK 0.5.0 (base 3.5, the release `sdk-0.5.0-199705ec`, U21): every link
+The three libraries and the two sub-apps build on MultiCore's SDK 0.5.1 (base 3.6, the release `sdk-0.5.1-40f47ac8`, U21): every link
 closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (TREX CRT declares
 none, the online search heap_keep 0 and heap_peak 16 MiB). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
@@ -37,14 +37,14 @@ TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships 
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
 has the figures and what is open). The ring library's Timewarp picture (U18 T-3) needs SDK 0.4.3 or later
 (`api->overlay->frame`, `still_palette`), and 0.4.5 for its bar on the smaller canvases (`canvas()`) and as the only
-bar (the base draws none since 0.4.5); the pin is 0.5.0 (U21 §7; 0.4.6 until then, U18 §5).
+bar (the base draws none since 0.4.5); the pin is 0.5.1 (U21 §7; 0.5.0 and 0.4.6 before, U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
 the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b; on 0.4.6 too, and the UCI answers the DOS target from our own server,
 U18 §5). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5). With the submodule empty and the SID player gone (U20 A2, A3, 2026-11-24) the
 build, the pack and `--emu` pass the same way: 388 lines, none missing either way. On 0.5.0 (2026-11-25, U21 §7) the list is 384 lines: the base has
 no group "look" any more (MultiCore T239.3 D56), so `base.overlay`, `base.scheme`, `base.squeeze` and `base.nav` are gone. With the reworked online
-search (U21, 2026-11-25: 8 operations and 75 states of `online.*`) it is 412 lines (198 operations, 214 states), none missing either way.
+search (U21, 2026-11-25: 8 operations and 75 states of `online.*`) it is 412 lines (198 operations, 214 states), none missing either way; on 0.5.1 (2026-11-25) the same 412.
 
 The SID and music player is gone (Alex, U20 D6, A3): no `.sid`, `.mus` or `.str` file types, no operations `c64.sid_play`,
 `c64.sid_songs`, `c64.sid_valid`, `c64.sid_info` and `dma.sidcrt`, no settings group "SID player behavior" (its two settings were read
@@ -96,7 +96,7 @@ U18 §5). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-e
 
 1. The SDK: `./fetch_sdk.sh --release` takes the pinned tarball from MultiCore's SDK release (`sdk.pin` `sdk_release`, U20 D11),
    `./fetch_sdk.sh --download` from our Gitea registry when `sdk.pin` names an `sdk_package` (TREX generic `trx64-sdk/<version>-<commit8>`; the
-   0.5.0 pin names none: there is no registry copy of it, and the script says so), `./fetch_sdk.sh <tarball>` a local file
+   0.5.1 pin names none: there is no registry copy of it, and the script says so), `./fetch_sdk.sh <tarball>` a local file
    (MultiCore's `.ci/sdk/` holds them). A new pin: fetch the SDK of a MultiCore release, put its sha256 and hashes into `sdk.pin`, and check
    that `apps/online` still builds against it (the base takes the table "online" only when it is at least its own `OnlineApi`'s size).
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
