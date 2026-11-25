@@ -90,6 +90,10 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
 - **D20 (Alex, 2026-11-25, on A8):** the public-tree check stays after the switch, as at MultiCore, "minimal" in effort: the script
   `tools/check_public_tree.py` (regex and hashes, no agent; the whole tree in 1.7 s on the Mac) in the pre-push hook, `public-tree.yml` and lint.
   The export tooling (`tools/gh_export.py`, `--replay`, `--rewrite`) goes after the switch, as MultiCore's `github_snapshot.py` did.
+- **D21 (Alex, 2026-11-25, on A8 open point 4):** GitHub `main`'s history is not rewritten: "Wir machen das so wie empfohlen." Its two ROM
+  hits (`software/ultimate-app/recovery/u64ii/ultimate.bin`, `software/6502/unsorted/tcpimage.crt`) are the same blobs as in Gideon's public
+  `GideonZ/1541ultimate` (8b78db63, bf857f6e, read 2026-11-25); the other hits are private-range addresses, hosts and paths of old export
+  commits. A rewrite would need `no-rewrite` off and a force push that breaks every clone and fork; the check keeps new hits out from E on.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
