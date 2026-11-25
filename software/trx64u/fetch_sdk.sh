@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Unpack the pinned TRX64 SDK (sdk.pin) into software/trx64u/.sdk/ and put the pinned online sub-app beside it (U18).
 #   software/trx64u/fetch_sdk.sh <path to the tarball sdk.pin names> [<path to online.u2a>]
-#   software/trx64u/fetch_sdk.sh --download      (our registry's copies, sdk.pin's sdk_package and online_package; GITEA_URL, default
-#                                                  http://gitea.example, CI passes its server)
+#   software/trx64u/fetch_sdk.sh --download      (our registry's copies, sdk.pin's sdk_package and online_package; the server is GITEA_URL,
+#                                                  which CI sets to its own server, else the url: of the tea login)
 #   software/trx64u/fetch_sdk.sh --release       (the release sdk.pin's sdk_release of the builds repository, U20 D11: tools/builds.sh fetch checks
 #                                                  each asset against the SHA-256 GitHub lists and the release's SHA256SUMS; GitHub's runners)
 # Each file is checked against its sha256 in sdk.pin first; a different file is refused. The tarball unpacks to trx64-sdk-<sdk_version>/
@@ -21,7 +21,13 @@ TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)> [<path to $(pin onlin
 ONL="${2:-}"
 if [ "$TAR" = --download ]; then
     mkdir -p "$HERE/.sdk"
-    REG="${GITEA_URL:-http://gitea.example}/api/packages/TREX/generic"
+    # the Gitea server: GITEA_URL, else the url: of the tea login (tea's config on macOS, then on Linux); the public tree names no host (U20 A8)
+    SRV="${GITEA_URL:-}"
+    for c in "$HOME/Library/Application Support/tea/config.yml" "$HOME/.config/tea/config.yml"; do
+        [ -n "$SRV" ] || [ ! -f "$c" ] || SRV="$(awk '/^ *url:/ { print $2; exit }' "$c")"
+    done
+    [ -n "$SRV" ] || { echo "fetch_sdk.sh --download: no Gitea server: set GITEA_URL (or log in with tea)" >&2; exit 1; }
+    REG="${SRV%/}/api/packages/TREX/generic"
     TAR="$HERE/.sdk/$(pin sdk_tarball)"
     curl -sfL -o "$TAR" "$REG/$(pin sdk_package)/$(pin sdk_tarball)" || {
         echo "fetch_sdk.sh: cannot download $(pin sdk_package)/$(pin sdk_tarball)" >&2; exit 1; }

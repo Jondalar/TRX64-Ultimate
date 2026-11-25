@@ -3,7 +3,7 @@
 # PROVENANCE: TRX64U-MultiCore tools/check_workflows.py (t239.3 d9ddadeb1; Alex Damhuis' code in both repositories), U20 B.
 # Changed here: rule 2 names our refs (main, v* tags); rule 6 accepts only GitHub-hosted images and one listed exception (U20 F, ephemeral-a.yml's job
 # `work`, whose runs-on is the run's random label: MultiCore's word test for `self-hosted` did not see it, U20 §6 F open point 4); rule 7 names our
-# private repository and the internal hosts; rule 8 is new (the references to needs and steps outputs; actionlint is not in our images).
+# private repository and, through tools/check_public_tree.py's text rules (U20 A8), every internal host, address and path; rule 8 is new (the references to needs and steps outputs; actionlint is not in our images).
 """U20 B (MultiCore T239.1 D1, S9): the rules a workflow of .github/ must keep, read from the parsed YAML (and, for the names, the raw text).
 
   1. no pull_request_target, workflow_run or issue_comment trigger in a workflow that names a secret (secrets.X, secrets: inherit) or an environment
@@ -12,7 +12,8 @@
   4. every `uses:` is a local path (./) or pinned by a full 40-hex commit SHA; docker:// needs a digest
   5. every container / service image carries @sha256:<64 hex>
   6. every `runs-on` is a GitHub-hosted image (ubuntu-*, windows-*, macos-*); never self-hosted; the one exception is listed in EXCEPTIONS
-  7. no name of a private repository (the builder's) and no internal host or path anywhere under .github/
+  7. no name of a private repository (the builder's) and no hit of tools/check_public_tree.py's text rules (internal hosts, private
+     addresses, home and NAS paths, logins, personal mail addresses, claude.ai links) anywhere under .github/
   8. every needs.<job>.outputs.<name> names a job of the job's needs that declares that output (a called workflow's outputs are not checked), every
      steps.<id> names a step of the same job
 
@@ -26,8 +27,10 @@ import tempfile
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import check_public_tree  # noqa: E402  (rule 7: the text rules of the public-tree check, one source)
 RISKY = ("pull_request_target", "workflow_run", "issue_comment")
-PRIVATE_NAMES = re.compile(r"trx64mc-builder\b|fritz\.box|CACHEDEV\d|/share/[A-Za-z]|\b192\.168\.\d", re.I)
+PRIVATE_NAMES = re.compile(r"trx64mc-builder\b", re.I)
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}\b")
 HOSTED = re.compile(r"^(ubuntu|windows|macos)-[0-9a-z.-]+$")
@@ -193,9 +196,11 @@ def check_dir(d):
             p = os.path.join(base, f)
             if f.endswith((".yml", ".yaml")) and os.path.basename(base) == "workflows":
                 bad += check_file(p)
-            m = PRIVATE_NAMES.search(open(p, errors="replace").read())
+            data = open(p, "rb").read()
+            m = PRIVATE_NAMES.search(data.decode(errors="replace"))
             if m:
-                bad.append("%s: names a private repository or an internal host (%s)" % (os.path.relpath(p, d), m.group(0)))
+                bad.append("%s: names a private repository (%s)" % (os.path.relpath(p, d), m.group(0)))
+            bad += ["%s: %s (tools/check_public_tree.py)" % (os.path.relpath(p, d), h) for h in check_public_tree.text_hits(data)]
     return bad
 
 
@@ -251,7 +256,8 @@ def selftest():
         "runs-on a custom label": lambda s: s.replace("  a:\n    runs-on: ubuntu-latest", "  a:\n    runs-on: [eph-1]"),
         "runs-on an expression": lambda s: s.replace("  a:\n    runs-on: ubuntu-latest", "  a:\n    runs-on: ${{ inputs.r }}"),
         "builder repository name": lambda s: s + "# trx64mc-builder\n",
-        "internal host": lambda s: s + "# http://example.fritz.box\n",
+        "internal host": lambda s: s + "# http://devhost.lan\n",
+        "private address": lambda s: s.replace("echo o=1", "curl http://10.0.0.5/; echo o=1"),
         "needs output of a job not needed": lambda s: s.replace("    needs: a\n", "    needs: prerelease\n"),
         "needs output not declared": lambda s: s.replace("needs.a.outputs.o", "needs.a.outputs.p"),
         "steps ref to no step": lambda s: s.replace("${{ steps.s.outputs.o }}", "${{ steps.t.outputs.o }}"),

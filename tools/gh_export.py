@@ -15,7 +15,11 @@ and also kept back the working documents and the other project's name; since
 then (Alex, 2026-11-13) everything else goes out and each host commit is an
 export commit of its own (--replay). This script does that, checks the result
 and commits it; it pushes only when told to. Its commits carry PUBLIC_EMAIL in
-place of the maintainer's own address (Alex, 2026-11-16).
+place of the maintainer's own address (Alex, 2026-11-16). Since U20 A8 every file
+and every message of an export goes through the public-tree check's scrub
+(tools/check_public_tree.py: internal hosts, private addresses, home and NAS
+paths, logins, personal mail addresses and claude.ai links become placeholders)
+and the check itself; an author or committer with a personal mail address stops it.
 
     tools/gh_export.py --check                 # stage and check, touch nothing
     tools/gh_export.py -m "U5: ..."            # stage, check, sync, commit
@@ -23,6 +27,9 @@ place of the maintainer's own address (Alex, 2026-11-16).
     tools/gh_export.py --replay 1eb3944c --onto bb3ffb4
                                                # one export commit per host commit
                                                # since 1eb3944c, in the clone only
+    tools/gh_export.py --rewrite origin/main   # U20 D15: the one rewrite of the clone's
+                                               # commits since origin/main (made by an
+                                               # older tool) before their first push
 
 The checks are the point: an export with a link to a file that is not exported,
 or a binary the last export did not have, stops with a report instead of being
@@ -44,6 +51,8 @@ import tarfile
 import tempfile
 
 HOST_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(HOST_REPO, "tools"))
+import check_public_tree as cpt  # noqa: E402  (U20 A8: the scrub and the check of what goes out)
 DEFAULT_CLONE = os.path.expanduser("~/Development/TRX64-Ultimate-gh")
 GH_REPO = "Jondalar/TRX64-Ultimate"
 
@@ -334,11 +343,12 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes
     write_placeholders(stage_dir)
     errors = apply_rewrites(stage_dir)
     stripped = strip_links_to_excluded(stage_dir)
+    scrubbed = scrub_stage(stage_dir)
 
     files = sum(1 for _ in walk(stage_dir))
     out("export of host %s: %d files, %d paths left out, %d placeholders, "
-        "%d rewrites, %d links stripped"
-        % (host_rev, files, len(dropped), len(PLACEHOLDERS), len(REWRITES), len(stripped)))
+        "%d rewrites, %d links stripped, %d files scrubbed"
+        % (host_rev, files, len(dropped), len(PLACEHOLDERS), len(REWRITES), len(stripped), len(scrubbed)))
 
     problems = []
     if errors:
@@ -357,7 +367,61 @@ def build_export(ref, stage_dir, clone_dir, allow_new_binaries, out=print, notes
     if bins:
         problems.append("binary files the last export did not have (%d):" % len(bins))
         problems += ["  " + b for b in bins[:40]]
+    hits = check_stage(stage_dir)
+    if hits:
+        problems.append("the public-tree check finds (%d, tools/check_public_tree.py):" % len(hits))
+        problems += ["  " + h for h in hits[:60]]
     return problems
+
+
+def scrub_stage(stage_dir):
+    """U20 D15, A8: every text file of the export through the public-tree check's scrub, so the public copy holds no internal host, address or
+    path (the hits a commit made before A8 still carries, and the GITEA_KEPT lines the Gitea runners need). Returns [(path, rules)]."""
+    done = []
+    for rel, full in walk(stage_dir):
+        if os.path.islink(full):
+            continue
+        with open(full, "rb") as fh:
+            data = fh.read()
+        new, rules = cpt.scrub(data, rel)
+        if rules:
+            with open(full, "wb") as fh:
+                fh.write(new)
+            done.append((rel, rules))
+    return done
+
+
+def check_stage(stage_dir, private=cpt.PRIVATE):
+    """The public-tree check over the staged tree (after the scrub only what no placeholder can fix is left: a private path, a copy or a window
+    of a private file, a symlink to one)."""
+    items = []
+    for rel, full in sorted(walk(stage_dir)):
+        if os.path.islink(full):
+            t = os.readlink(full)
+            items.append((rel, t.encode("utf-8", "surrogateescape"), t))
+        else:
+            with open(full, "rb") as fh:
+                items.append((rel, fh.read()))
+    files, wins = cpt.load_private(private)
+    return cpt.check_items(items, files, wins)
+
+
+def scrub_message(body):
+    """The message as it goes out: through the scrub (the Claude-Session trailer stays), then checked; (text, rules that rewrote something)."""
+    new, rules = cpt.scrub(body.encode("utf-8", "surrogateescape"), message=True)
+    left = [r[0] for r in cpt.RULES if cpt.rule_fires(r, cpt.message_text(new))]
+    if left:
+        raise Fail("the message still has %s after the scrub" % ", ".join(left))
+    return new.decode("utf-8", "surrogateescape"), rules
+
+
+def checked_email(email, what):
+    """An author's or committer's address as it goes out; a personal mail address stops the export (the host repository's own address
+    becomes PUBLIC_EMAIL only when git config user.email names it)."""
+    if cpt.text_hits(email.encode("utf-8", "surrogateescape")):
+        raise Fail("%s would go out with a personal mail address: set the host repository's git config user.email to the maintainer's own "
+                   "address (it goes out as %s), or rewrite that commit's author" % (what, PUBLIC_EMAIL))
+    return email
 
 
 # ------------------------------------------------------------------- the replay
@@ -397,7 +461,7 @@ def export_message(parts, hosts):
     line = "Export of TRX64 Ultimate %s." % ", ".join(hosts)
     head = first[0] + "\n\n" + line
     rest = [first[1].strip()] if len(first) > 1 and first[1].strip() else []
-    return "\n\n".join([head] + rest + msgs[1:]) + "\n"
+    return scrub_message("\n\n".join([head] + rest + msgs[1:]) + "\n")[0]
 
 
 def commit_export(clone_dir, body, sha):
@@ -406,9 +470,9 @@ def commit_export(clone_dir, body, sha):
     who = run(["git", "-C", HOST_REPO, "log", "-1",
                "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", sha]).split("\x00")
     own = own_email()
-    env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_EMAIL=public_email(who[1], own),
-               GIT_AUTHOR_DATE=who[2], GIT_COMMITTER_NAME=who[3],
-               GIT_COMMITTER_EMAIL=public_email(who[4], own), GIT_COMMITTER_DATE=who[5])
+    env = dict(os.environ, GIT_AUTHOR_NAME=who[0], GIT_AUTHOR_DATE=who[2], GIT_COMMITTER_NAME=who[3], GIT_COMMITTER_DATE=who[5],
+               GIT_AUTHOR_EMAIL=checked_email(public_email(who[1], own), "the author of %s" % sha[:8]),
+               GIT_COMMITTER_EMAIL=checked_email(public_email(who[4], own), "the committer of %s" % sha[:8]))
     run(["git", "-C", clone_dir, "add", "-A"])
     r = subprocess.run(["git", "-C", clone_dir, "commit", "-q", "-F", "-"], input=body, env=env,
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
@@ -478,6 +542,95 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
     return 0
 
 
+# ------------------------------------------------------------------- the rewrite
+
+def rewrite(base, clone_dir, private=cpt.PRIVATE):
+    """U20 D15 (MultiCore D36's form): the one rewrite of the clone's commits base..HEAD before their first push, for export commits that a
+    tool before A8 made (the replay of the commits before U20 A5 runs with the tool of u18 92645aeb, which has no scrub). The commits must form
+    one line on base. Each is made again with every text file and its message through the public-tree scrub, author, committer and dates kept;
+    a blob that base's history already holds stays as it is (it is public already; MultiCore D36 left GitHub main's blobs alone, too). The old
+    head stays as the branch <branch>-before-rewrite. Then the check's commits mode and message mode (with the addresses) over the new commits
+    must be clean. Returns the new head."""
+    def git(*a, **kw):
+        return run(["git", "-C", clone_dir] + list(a), **kw)
+    branch = git("symbolic-ref", "--short", "HEAD")
+    old_head = git("rev-parse", "HEAD")
+    parent = git("rev-parse", base + "^{commit}")
+    public = {ln.split()[0] for ln in git("rev-list", "--objects", parent).splitlines() if ln}
+    lines = git("rev-list", "--reverse", "--parents", "%s..HEAD" % parent).splitlines()
+    if not lines:
+        raise Fail("no commits in %s..HEAD" % base)
+    cat = subprocess.Popen(["git", "-C", clone_dir, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    def obj(sha):
+        cat.stdin.write(sha.encode() + b"\n"); cat.stdin.flush()
+        size = int(cat.stdout.readline().split()[2])
+        data = cat.stdout.read(size); cat.stdout.read(1)
+        return data
+
+    blobs, made, files_changed, msgs_changed = {}, parent, 0, 0
+    index = tempfile.NamedTemporaryFile(prefix="trx64-rewrite-index-", delete=False).name
+    try:
+        prev = parent
+        for ln in lines:
+            c, *parents = ln.split()
+            if parents != [prev]:
+                raise Fail("%s is no single-parent commit on %s: the rewrite takes one line of commits" % (c[:8], prev[:8]))
+            prev = c
+            ents = []
+            for e in subprocess.run(["git", "-C", clone_dir, "ls-tree", "-r", "-z", c], stdout=subprocess.PIPE, check=True).stdout.split(b"\0"):
+                if not e:
+                    continue
+                meta, path = e.split(b"\t", 1)
+                mode, kind, sha = meta.decode().split()
+                if kind == "blob" and mode in ("100644", "100755") and sha not in public:
+                    key = (path, sha)
+                    if key not in blobs:
+                        new, rules = cpt.scrub(obj(sha), path.decode("utf-8", "surrogateescape"))
+                        blobs[key] = sha if not rules else subprocess.run(
+                            ["git", "-C", clone_dir, "hash-object", "-w", "--stdin"], input=new, stdout=subprocess.PIPE, check=True).stdout.decode().strip()
+                        files_changed += bool(rules)
+                    sha = blobs[key]
+                ents.append(b"%s %s\t%s" % (mode.encode(), sha.encode(), path))
+            env = dict(os.environ, GIT_INDEX_FILE=index)
+            os.path.exists(index) and os.remove(index)
+            subprocess.run(["git", "-C", clone_dir, "update-index", "--add", "-z", "--index-info"], input=b"\0".join(ents) + b"\0", env=env, check=True)
+            tree = run(["git", "-C", clone_dir, "write-tree"], env=env)
+            raw = obj(c)
+            head, _, msg = raw.partition(b"\n\n")
+            who = {}
+            for h in head.split(b"\n"):
+                k, _, v = h.partition(b" ")
+                if k in (b"author", b"committer"):
+                    name, _, rest = v.decode("utf-8", "surrogateescape").partition(" <")
+                    mail, _, date = rest.partition("> ")
+                    who[k.decode()] = (name, checked_email(mail, "the %s of %s" % (k.decode(), c[:8])), date)
+            new_msg, rules = scrub_message(msg.decode("utf-8", "surrogateescape"))
+            msgs_changed += bool(rules)
+            cenv = dict(os.environ, GIT_AUTHOR_NAME=who["author"][0], GIT_AUTHOR_EMAIL=who["author"][1], GIT_AUTHOR_DATE=who["author"][2],
+                        GIT_COMMITTER_NAME=who["committer"][0], GIT_COMMITTER_EMAIL=who["committer"][1], GIT_COMMITTER_DATE=who["committer"][2])
+            r = subprocess.run(["git", "-C", clone_dir, "commit-tree", tree, "-p", made, "-F", "-"], input=new_msg, env=cenv, text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if r.returncode != 0:
+                raise Fail("commit-tree for %s failed: %s" % (c[:8], r.stderr.strip()))
+            made = r.stdout.strip()
+    finally:
+        cat.stdin.close(); cat.wait()
+        os.path.exists(index) and os.remove(index)
+    git("branch", "-f", branch + "-before-rewrite", old_head)
+    git("update-ref", "refs/heads/" + branch, made, old_head)
+    git("reset", "-q", "--hard", made)
+    files, wins = cpt.load_private(private)
+    bad, n, nb = cpt.check_commits(["%s..%s" % (parent, made)], files, wins, clone_dir)
+    bad += cpt.check_messages(["%s..%s" % (parent, made)], True, clone_dir)[0]
+    print("rewrote %d commits on %s (%d files and %d messages changed); the old head %s stays as %s-before-rewrite"
+          % (len(lines), base, files_changed, msgs_changed, old_head[:8], branch))
+    if bad:
+        raise Fail("the public-tree check still finds, over the rewritten commits:\n  " + "\n  ".join(bad[:60]))
+    print("public-tree check over the %d rewritten commits (%d files): clean; nothing is pushed" % (n, nb))
+    return made
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the GitHub export (docs/todo/T68.md).")
     ap.add_argument("--ref", default="HEAD", help="the commit to export (default HEAD)")
@@ -492,11 +645,18 @@ def main():
     ap.add_argument("--replay", metavar="SINCE",
                     help="one export commit per host commit of SINCE..REF (first parent), committed in the "
                          "clone, never pushed")
+    ap.add_argument("--rewrite", metavar="BASE",
+                    help="U20 D15: rewrite the clone's commits BASE..HEAD once through the public-tree scrub, never pushed")
     ap.add_argument("--onto", default="origin/main",
                     help="with --replay: the export commit to build on (default origin/main)")
     args = ap.parse_args()
 
     clone_dir = os.path.abspath(os.path.expanduser(args.clone_dir))
+    if args.rewrite:
+        if args.replay or args.check or args.message or args.push or args.keep_stage:
+            ap.error("--rewrite takes none of --replay, --check, -m, --push, --keep-stage")
+        rewrite(args.rewrite, clone_dir)
+        return 0
     if args.replay:
         if args.check or args.message or args.push or args.keep_stage:
             ap.error("--replay takes none of --check, -m, --push, --keep-stage")
@@ -537,7 +697,7 @@ def main():
             return 0
         print("\n" + status)
         run(["git", "-C", clone_dir, "add", "-A"])
-        body = "%s\n\nExport of TRX64 Ultimate %s.\n" % (args.message, host_rev)
+        body = scrub_message("%s\n\nExport of TRX64 Ultimate %s.\n" % (args.message, host_rev))[0]
         run(["git", "-C", clone_dir, "commit", "-q", "-m", body], env=public_env())
         print("\ncommitted in %s: %s" % (clone_dir,
                                          run(["git", "-C", clone_dir, "log", "--oneline", "-1"])))

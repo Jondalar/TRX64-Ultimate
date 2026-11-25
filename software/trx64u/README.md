@@ -93,7 +93,8 @@ commit (`online_*`: 6e280710, the build of SDK 0.4.6's commit: 0.4.6's base take
    <online.u2a>` takes local files (MultiCore's `.ci/sdk/` holds both). A new pin: build or fetch the SDK and `online.u2a` at a
    `t239.3` commit (MultiCore's `tools/sdk_pack.sh`, `ci/trxapps.sh`), upload them, put their sha256 and hashes into `sdk.pin`.
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
-   `curl -o c64_basic.bit http://gitea.example/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit`.
+   `curl -o c64_basic.bit $GITEA_URL/api/packages/TREX/generic/trx64-ultimate/<branch>-<commit8>/c64_basic.bit` (`GITEA_URL`: our
+   Gitea server, the `url:` of the tea login).
    It must have the RISC-V caches (U19, from `main` 23d25554 on); without them every menu step takes seconds.
 3. `./pack_cor.sh --bit c64_basic.bit --bit-commit <commit8> --version <version> [--emu <ue2emu>]` builds the three libraries
    and the sub-app, links the app in `build/app/` (record 6 compiled against the TOML B's sizes, then the SDK's

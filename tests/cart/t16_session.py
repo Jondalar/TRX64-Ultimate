@@ -1811,14 +1811,17 @@ MINUTES = {"pre": 1, "boot": 2, "port": 1, "gate": 1, "dump": 12, "app_up": 1, "
 # ---------------------------------------------------------------------------
 
 def fetch_app(dest: Path, version: str = "main-latest") -> Path:
+    # Gitea's token and server: GITEA_TOKEN and GITEA_URL, else the token: and url: of the tea login (U20 A8: the tree names no host)
     cfg = Path.home() / "Library/Application Support/tea/config.yml"
-    token = os.environ.get("GITEA_TOKEN", "")
-    if not token and cfg.exists():
-        for line in cfg.read_text().splitlines():
-            if "token:" in line:
-                token = line.split("token:")[1].strip()
-                break
-    url = os.environ.get("GITEA_URL", "http://gitea.example") + "/api/packages/TREX/generic/trx64-ultimate/" + version + "/ultimate.app"
+    tea = {}
+    for line in cfg.read_text().splitlines() if cfg.exists() else []:
+        k, _, v = line.strip().partition(":")
+        tea.setdefault(k, v.strip())
+    token = os.environ.get("GITEA_TOKEN", "") or tea.get("token", "")
+    server = os.environ.get("GITEA_URL", "") or tea.get("url", "")
+    if not server:
+        raise SystemExit("no Gitea server: set GITEA_URL (or log in with tea)")
+    url = server.rstrip("/") + "/api/packages/TREX/generic/trx64-ultimate/" + version + "/ultimate.app"
     r = urllib.request.Request(url, headers={"Authorization": f"token {token}"})
     with urllib.request.urlopen(r, timeout=60) as f:
         dest.write_bytes(f.read())

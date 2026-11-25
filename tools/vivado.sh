@@ -7,11 +7,13 @@
 # The design directory is copied to the NAS work area, Vivado 2024.1 runs in
 # the vivado-env:2024.1 container there (tools baked into the image, see
 # vivado/), and build/ comes back next to the sources.
+# The NAS from the environment (U20 A8: the public tree names no host or NAS path): TRX_NAS (login@host), TRX_NAS_DATA (the
+# data volume that holds trx64-build/), TRX_NAS_DOCKER (the docker binary there); the defaults are placeholders.
 set -euo pipefail
 
 NAS="${TRX_NAS:-admin@192.0.2.2}"
-BASE=/srv/trx64-build
-DOCKER=/srv/.qpkg/container-station/bin/docker
+BASE="${TRX_NAS_DATA:-/srv}/trx64-build"
+DOCKER="${TRX_NAS_DOCKER:-docker}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 design="${1:?design directory, e.g. designs/hdmi_test}"

@@ -57,7 +57,6 @@ APP_AT = 0x3C0000                   # app slot of the 100T (boot ROM type 3, T15
 APP_LIMIT = 0x580000                # 0x3C0000 + 0x1C0000; the FAT flash drive starts here
 FORBIDDEN = {"--unprotect-flash", "--protect-flash", "--bulk-erase", "--enable-quad", "--disable-quad",
              "--target-flash", "--external-flash", "--flash-sector", "--misc-device"}
-GITEA_URLS = [os.environ.get("GITEA_URL", "http://gitea.example"), "http://192.0.2.50"]
 PKG_PATH = "/api/packages/TREX/generic/trx64-ultimate"
 PKG_FILES = ["c64_basic_100t.bit", "ultimate.app", "manifest.json", "manifest_100t.json", "SHA256SUMS"]
 NICE = ["nice", "-n", "15"]
@@ -658,15 +657,25 @@ def cmd_restore(args):
     return 0
 
 
-def gitea_token():
-    t = os.environ.get("GITEA_TOKEN", "")
+def tea_value(key):
+    """The first `key:` of the tea login's config ("" without one)."""
     cfg = Path.home() / "Library/Application Support/tea/config.yml"
-    if not t and cfg.exists():
+    if cfg.exists():
         for line in cfg.read_text().splitlines():
-            if "token:" in line:
-                t = line.split("token:")[1].strip()
-                break
-    return t
+            if line.strip().startswith(key + ":"):
+                return line.split(key + ":", 1)[1].strip()
+    return ""
+
+
+def gitea_token():
+    return os.environ.get("GITEA_TOKEN", "") or tea_value("token")
+
+
+def gitea_urls():
+    """The Gitea servers to try in order: GITEA_URL (one or more, space-separated, e.g. the name and the address for a VPN without DNS),
+    then the url: of the tea login. The public tree names no host (U20 A8)."""
+    urls = os.environ.get("GITEA_URL", "").split() + [tea_value("url")]
+    return [u.rstrip("/") for i, u in enumerate(urls) if u and u not in urls[:i]]
 
 
 def cmd_fetch(args):
@@ -675,7 +684,8 @@ def cmd_fetch(args):
     dest = HOME / (f"pkg-{ver}")
     dest.mkdir(parents=True, exist_ok=True)
     base = None
-    for u in GITEA_URLS:
+    last = Fail("no Gitea server: set GITEA_URL (or log in with tea)")
+    for u in gitea_urls():
         try:
             req = urllib.request.Request(f"{u}{PKG_PATH}/{ver}/SHA256SUMS", headers={"Authorization": f"token {tok}"})
             with urllib.request.urlopen(req, timeout=15) as r:

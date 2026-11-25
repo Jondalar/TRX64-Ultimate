@@ -15,6 +15,7 @@
 #  - ci/vivado.env against the Gitea bitstream stage (tools/check_vivado_env.py); ci/keys.sh against gateware_key of ci/lib.sh
 #  - the scripts that read and write the builds repository, against a fake API on 127.0.0.1 (ci/test_builds.py)
 #  - ci/roms.py: its unit test (no network) and the pins of ci/roms.txt
+#  - the public tree (tools/check_public_tree.py, U20 A8): its selftest, the tree, its unit tests (ci/private.txt against ci/roms.txt, the hook)
 # bits:c64_basic:
 #  - the RTL (designs/*/*.v): syntax only (yosys -defer), no elaboration; the VHDL and the benches are analysed by the benches of stage sims
 #  - ci/sims.txt: every bench's script exists
@@ -92,6 +93,9 @@ check "vivado env (U20 A7)" bash -c 'python3 tools/check_vivado_env.py --selftes
 check "keys (U20 A7)" keys_agree
 check "builds repository scripts (U20 B)" python3 -I ci/test_builds.py
 check "bench ROMs fetch test (U20 A6)" python3 -I ci/test_roms.py
+# The same check runs in .github/workflows/public-tree.yml on every push and in .githooks/pre-push before a push to GitHub (U20 A8)
+check "public tree (U20 A8)" bash -c 'python3 -I tools/check_public_tree.py --selftest >/dev/null && python3 -I tools/check_public_tree.py'
+check "public-tree check unit tests (U20 A8)" python3 -I -W ignore tools/test_check_public_tree.py
 fi
 
 if group_has bits:c64_basic; then
@@ -129,7 +133,7 @@ if group_has core:trx64u; then
 check "reverse lint (software/trx64u)" bash -c '
   T="$PWD/software/trx64u"
   [ -f "$T/sdk.pin" ] || exit 0
-  GITEA_URL="${GITHUB_SERVER_URL:-http://gitea.example}" sh "$T/fetch_sdk.sh" "${SDK_FETCH:---download}" >/tmp/lint-sdk.log 2>&1 || { cat /tmp/lint-sdk.log; exit 1; }
+  GITEA_URL="${GITEA_URL:-${GITHUB_SERVER_URL:-}}" sh "$T/fetch_sdk.sh" "${SDK_FETCH:---download}" >/tmp/lint-sdk.log 2>&1 || { cat /tmp/lint-sdk.log; exit 1; }
   S="$T/.sdk/trx64-sdk-$(sed -n "s/^sdk_version=//p" "$T/sdk.pin")"
   cd "$T" && python3 -I "$S/tools/rtl_check.py" lint-src base ring monitor uci --toml-a gateware/c64_basic.toml --maps "$S/maps" \
       --allow trx_sha256.c:0x106aa070u'

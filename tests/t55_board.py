@@ -43,7 +43,7 @@ sys.path.insert(0, HERE)
 from trxmon_client import Client, TrxmonError  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
-HOST = "192.0.2.189"
+HOST = os.environ.get("TRX64_HOST", "192.0.2.189")
 USB_APP = "/Usb1/trxmon_t55.u2a"
 REU_PATH = "/v1/configs/C64%20and%20Cartridge%20Settings/RAM%20Expansion%20Unit"
 
@@ -113,19 +113,29 @@ def port_open(port=4312, timeout=2.0):
         return False
 
 
-def tea_token():
+def tea_value(key):
+    """The first `key:` of the tea login's config ("" without one)."""
     cfg = os.path.expanduser("~/Library/Application Support/tea/config.yml")
-    for line in open(cfg):
-        m = re.match(r"\s*token:\s*(\S+)", line)
+    for line in open(cfg) if os.path.exists(cfg) else []:
+        m = re.match(r"\s*%s:\s*(\S+)" % key, line)
         if m:
             return m.group(1)
     return ""
 
 
+def tea_token():
+    return tea_value("token")
+
+
 def load_package(version):
     """Bitstream into SRAM, then the package's firmware staged in DDR2 (the boot ROM starts it)."""
     tmp = "/tmp/t55_board_%s.app" % version
-    url = "http://gitea.example/api/packages/TREX/generic/trx64-ultimate/%s/ultimate.app" % version
+    # the Gitea server: GITEA_URL, else the url: of the tea login (U20 A8: the tree names no host)
+    server = os.environ.get("GITEA_URL", "") or tea_value("url")
+    if not server:
+        check("package load: Gitea server", False, "set GITEA_URL (or log in with tea)")
+        return False
+    url = "%s/api/packages/TREX/generic/trx64-ultimate/%s/ultimate.app" % (server.rstrip("/"), version)
     req = urllib.request.Request(url, headers={"Authorization": "token " + tea_token()})
     open(tmp, "wb").write(urllib.request.urlopen(req, timeout=120).read())
     for cmd in (["tools/load.sh", "c64_basic", version], ["tools/trxdbg.sh", "boot", "staged", tmp]):

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# PROVENANCE: TRX64U-MultiCore .githooks/pre-push (t239.3 72e770261, last changed in d20da02a3; Alex Damhuis' code in both repositories), U20 A8.
+# Changed here: only a push to GitHub is checked (Gitea stays the archive, its pushes are not public); the address rule (--authors) instead of
+# --trailers (this repository's commits carry the Claude-Session trailer); no side-repository path rule (no side repository; the ROM paths are path
+# rules of the check).
+# The public-tree check before every push to GitHub (U20 A8; MultiCore T239.1 D24). Enable once per clone: git config core.hooksPath .githooks
+# Git gives this script the remote's name and URL as $1 $2 and "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin. For each pushed
+# ref the tree of the pushed commit, every file each new commit adds or changes (so a file removed again by a later commit is still found) and the
+# messages, authors and committers of the commits the remote does not have are checked (tools/check_public_tree.py). Seconds, no build, no lint.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+case "${2:-}" in
+  *github.com[:/]*) ;;
+  *) echo "pre-push: ${1:-?} is no GitHub remote, the public-tree check is skipped"; exit 0 ;;
+esac
+zero=0000000000000000000000000000000000000000
+rc=0
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  echo "pre-push: $lref -> $rref"
+  python3 -I tools/check_public_tree.py --rev "$lsha" || rc=1
+  if [ "$rsha" = "$zero" ] || ! git cat-file -e "$rsha^{commit}" 2>/dev/null; then range="$lsha --not --remotes"; else range="$rsha..$lsha"; fi
+  python3 -I tools/check_public_tree.py --commits "$range" || rc=1
+  python3 -I tools/check_public_tree.py --messages "$range" --authors || rc=1
+done
+[ "$rc" = 0 ] || echo "pre-push: refused, nothing was pushed (U20 A8)" >&2
+exit "$rc"

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for tools/gh_export.py: the exclusions, the placeholders, the rewrite
-rules and the three checks that stop an export. Runs without git and without
-touching either repository."""
+rules, the checks that stop an export, the public-tree scrub of files, messages
+and addresses (U20 A8) and the one rewrite of a clone (U20 D15). Touches neither
+repository; only the rewrite tests run git, in a scratch repository."""
 
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -274,6 +276,100 @@ class PublicAddress(unittest.TestCase):
     def test_a_commit_in_a_clone_carries_the_public_address(self):
         env = gx.public_env()
         self.assertEqual((env["GIT_AUTHOR_EMAIL"], env["GIT_COMMITTER_EMAIL"]), (gx.PUBLIC_EMAIL,) * 2)
+
+    def test_a_personal_address_stops_the_export(self):
+        # U20 A8: an address the replay does not map (no git config user.email, a contributor's) must not go out as a personal one
+        with self.assertRaises(gx.Fail):
+            gx.checked_email("jdoe@gmail.com", "the author of x")
+        self.assertEqual(gx.checked_email(gx.PUBLIC_EMAIL, "x"), gx.PUBLIC_EMAIL)
+        self.assertEqual(gx.checked_email("pr@example.net", "x"), "pr@example.net")
+
+
+class Scrub(unittest.TestCase):
+    """U20 A8 / D15: what the public-tree check refuses, the export rewrites into placeholders; what it cannot rewrite stops it."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-export-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_hits_become_placeholders(self):
+        write(self.d, "tests/t.py", 'HOST = "10.1.2.189"\nsys.path.insert(0, "/Users/jdoe/tools")\n')
+        write(self.d, "docs/a.md", "see http://ci.corp.lan/x and https://claude.ai/artifact/abc\n")
+        write(self.d, "software/trx64u/base/menu.toml", 'default = "192.168.2.64"\n')
+        write(self.d, ".gitea/workflows/lint.yml", "      volumes:\n        - /share/CACHEDEV2_DATA/trx64-build/cache:/cache\n")
+        done = dict(gx.scrub_stage(self.d))
+        with open(os.path.join(self.d, "tests/t.py")) as fh:
+            self.assertEqual(fh.read(), 'HOST = "192.0.2.189"\nsys.path.insert(0, "~/tools")\n')
+        with open(os.path.join(self.d, "docs/a.md")) as fh:
+            self.assertEqual(fh.read(), "see http://ci.example/x and (a private page)\n")
+        # the vendor default stays (an allowed pair); the cache volume the Gitea runners need goes out as the placeholder
+        self.assertNotIn("software/trx64u/base/menu.toml", done)
+        with open(os.path.join(self.d, ".gitea/workflows/lint.yml")) as fh:
+            self.assertIn("/srv/trx64-build/cache:/cache", fh.read())
+        self.assertEqual(gx.check_stage(self.d), [])
+
+    def test_what_no_placeholder_fixes_stops_the_export(self):
+        write(self.d, "tests/media/game.crt", "x")
+        self.assertTrue(any("game.crt" in h for h in gx.check_stage(self.d)))
+
+    def test_the_message_is_scrubbed_and_keeps_the_session_line(self):
+        m = gx.export_message(["U9: on devhost.lan\n\nfrom /home/jdoe/x\n\nClaude-Session: https://claude.ai/code/session_01Ab\n"], ["b2506f6"])
+        self.assertEqual(m, "U9: on devhost.example\n\nExport of TRX64 Ultimate b2506f6.\n\nfrom ~/x\n\n"
+                            "Claude-Session: https://claude.ai/code/session_01Ab\n")
+
+
+class Rewrite(unittest.TestCase):
+    """U20 D15: the one rewrite of a clone's commits, in a scratch repository."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-rewrite-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def git(self, *a, mail=gx.PUBLIC_EMAIL, date="1700000000 +0100"):
+        env = dict(os.environ, GIT_AUTHOR_NAME="A", GIT_AUTHOR_EMAIL=mail, GIT_AUTHOR_DATE=date, GIT_COMMITTER_NAME="C",
+                   GIT_COMMITTER_EMAIL=mail, GIT_COMMITTER_DATE=date)
+        return subprocess.run(["git", "-C", self.d] + list(a), env=env, check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+    def commit(self, files, msg, **kw):
+        for rel, text in files.items():
+            write(self.d, rel, text)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", msg, **kw)
+        return self.git("rev-parse", "HEAD")
+
+    def test_files_and_messages_are_rewritten_once(self):
+        self.git("init", "-q", "-b", "main")
+        # a blob of base's history is public already and stays as it is (the export's base, MultiCore D36)
+        base = self.commit({"README.md": "public\n", "docs/old.md": "at /Users/jdoe/old\n"}, "base")
+        write(self.d, "tools/x.sh", "#!/bin/sh\nssh admin@10.0.0.2 ls /share/CACHEDEV1_DATA\n")
+        os.chmod(os.path.join(self.d, "tools/x.sh"), 0o755)
+        self.commit({"docs/n.md": "clean\n"}, "first on devhost.lan\n\nClaude-Session: https://claude.ai/code/session_01x\n")
+        old = self.commit({"docs/n.md": "at /Users/jdoe/x\n"}, "second", date="1700000100 +0100")
+        new = gx.rewrite(base, self.d, private=os.path.join(self.d, "none.txt"))
+        self.assertNotEqual(new, old)
+        self.assertEqual(self.git("rev-parse", "main-before-rewrite"), old)
+        self.assertEqual(self.git("rev-parse", "main~2"), base)
+        self.assertEqual(self.git("show", "main:tools/x.sh"), "#!/bin/sh\nssh admin@192.0.2.2 ls /srv")
+        self.assertEqual(self.git("show", "main:docs/n.md"), "at ~/x")
+        self.assertEqual(self.git("show", "main~1:docs/n.md"), "clean")
+        self.assertEqual(self.git("show", "main:docs/old.md"), "at /Users/jdoe/old")
+        self.assertEqual(self.git("log", "-1", "--format=%B", "main~1"), "first on devhost.example\n\nClaude-Session: https://claude.ai/code/session_01x")
+        self.assertEqual(self.git("log", "-1", "--format=%an %ae %ad %cn %cd", "--date=raw", "main"),
+                         "A %s 1700000100 +0100 C 1700000100 +0100" % gx.PUBLIC_EMAIL)
+        self.assertIn("100755", self.git("ls-tree", "main", "tools/x.sh"))
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_a_personal_address_stops_the_rewrite(self):
+        self.git("init", "-q", "-b", "main")
+        base = self.commit({"README.md": "public\n"}, "base")
+        self.commit({"a.md": "x\n"}, "by hand", mail="jdoe@gmail.com")
+        with self.assertRaises(gx.Fail):
+            gx.rewrite(base, self.d, private=os.path.join(self.d, "none.txt"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

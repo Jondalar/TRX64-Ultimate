@@ -5,7 +5,8 @@ green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb020
 svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
 the Gitea key unchanged and no job from `.github/workflows` started on Gitea; they run on
 GitHub after C (MultiCore's builder table, the SDK release) and D (Alex's setup); the names they use are proposals to MultiCore (§6 "B, A7").
-F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25).
+F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25). A8 built (2026-11-25, branch `u20-a8`, not merged):
+the public-tree check (tool, pre-push hook, workflow, lint), the one cleanup of the tree, the replay's scrub and `--rewrite` (§6 "A8").
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -313,7 +314,7 @@ Built:
   `steps.*` references (actionlint could not be run here).
 - **5, release tool.** `tools/release_trx64u.sh <fw-…tag> [--publish --notes FILE]` (MultiCore's `release_mc.sh` form): every asset against
   GitHub's digest and `SHA256SUMS`, `manifest.json` against the tag and the `.cor`, the `.cor`'s record 1 (id `trx64u`, version) against the
-  manifest; `--publish` also wants a plain x.y.z, `tools/check_public_tree.py` (A8: until it exists `--publish` stops) and the tag `v<x.y.z>` on
+  manifest; `--publish` also wants a plain x.y.z, `tools/check_public_tree.py --files` clean on every asset (A8) and the tag `v<x.y.z>` on
   the manifest's commit, then `gh release create --verify-tag` as a draft, asset count, publish.
 
 **Proposals to MultiCore** (part C decides; until then nothing of B can run on GitHub):
@@ -360,14 +361,99 @@ release; the pre-release upload.
 Open points:
 1. Part C: the builder learns the row above (its entry pattern, keys code list, tag prefix, build command per source); MultiCore's SDK lane publishes
    `sdk-0.4.6-6e280710` or our pin moves to a release it does publish; their import of `trx64u.cor` from `fw-…` pre-releases; the contract (D12).
-2. A8: `tools/check_public_tree.py`; until then `tools/release_trx64u.sh --publish` stops before publishing.
+2. ~~A8: `tools/check_public_tree.py`; until then `tools/release_trx64u.sh --publish` stops before publishing.~~ Closed by A8 (2026-11-25).
 3. MultiCore's sims run one leg per bench owner; ours is one leg (`bits:c64_basic`) capped at 350 minutes. A full tier-2 round (slot 2942 s, turbo
    2043 s, ddr2_test 1671 s alone, 2026-11-01) fits only with the markers of earlier runs; a split by bench groups is open.
 4. The `.github` workflows run nothing on GitHub until E: a push of `u20-b` to GitHub is part E's replay, not this step.
 
 ### A8 (public-tree check)
 
-Not started.
+2026-11-25, branch `u20-a8` from `u18` 23eefe24 (Alex: "lass uns bis F alles machen jetzt"). MultiCore's form from `t239.3` 72e770261 (read only):
+`tools/check_public_tree.py` (6e2807103), `tools/test_check_public_tree.py` (02ddd12b7), `.githooks/pre-push` (d20da02a3),
+`.github/workflows/public-tree.yml` (537a10acd), T239.1 D6, D24, D36 and its step-4/13/15 notes. Each copied file names its source and what changed.
+
+Built:
+- **The check.** Modes as MultiCore's: tree (working tree or `--rev`), `--commits RANGE` (every path and blob a commit adds or changes), `--messages
+  RANGE`, `--files` (folders, `.cor`, `.zip`, `.tar.gz`; `tools/release_trx64u.sh --publish` runs it on every asset), `--selftest`, `--gen-private DIR`.
+  Text rules, generic forms with no value of ours, not even hashed (MultiCore removed its hashed list after a reviewer guessed it): private addresses,
+  home paths, internal host names (`.box`, `.lan`, `.local`, `.home.arpa`), a login on a host without a dot, a NAS share path (`/share/<name>` at the
+  root), a personal mail address (an address at a consumer mail provider: so the maintainer's own address is found without being named), claude.ai
+  links. Path rules: `roms/*.bin` (D14), ROM and disk image types, `.claude/` outside `agents/` and `skills/`, `CLAUDE.local.md`. `ci/private.txt`: size,
+  SHA-256 and four 64-byte windows (hashes only) of each ROM of `ci/roms.txt`, made by `--gen-private` from `ci/roms.py fetch`; the unit test keeps it
+  equal to the pins. No side repository here, so no side lines and no `trx.side` rule in the hook. The builder repository's name is refused under
+  `.github/` only (`tools/check_workflows.py` rule 7), as MultiCore does: MultiCore's public tree names it, so it is no secret.
+- **Exceptions** (exact paths, a reason each): the ESP32 vendor default 192.168.2.x (`menu.toml`, `ultimate-app-hw-spec.md`, the two settings mock-ups);
+  the emulator's SLIRP gateway in a bench comment; the Ultimate's cartridge-at-computer path form in T71; the authors' addresses in the headers of 31
+  third-party files (`vendor/gideon`, `cores/icepi`); the planted examples of the selftests (`check_public_tree.py`, its test, `test_gh_export.py`,
+  `check_workflows.py`). `GITEA_KEPT`: the cache volume `/share/.../trx64-build/cache` of the five Gitea stages, see "Gitea" below.
+- **Deviations from MultiCore:** a message passes this repository's attribution line `Claude-Session:` with the session's address (exact form,
+  `SESSION_TRAILER`; GitHub main has carried 81 of them since 0.2.0), any other claude.ai link is a hit; `--trailers` is gone; `--authors` (the hook only) also
+  checks each commit's author and committer address, CI does not (a contributor's address is theirs); the hook checks only a push to a GitHub URL
+  (Gitea stays the archive). `scrub()` turns every hit into a placeholder (192.0.2.<last octet>, `~/`, `<name>.example`, `<user>@<host>`, `/srv`,
+  `<mail>`, `(a private page)`) for the export; it leaves the third-party trees (`vendor/`, `cores/icepi/`, the flattened `software/ultimate-app/` of the
+  history) alone and the check reports what it finds there.
+- **Hook, workflow, lint.** `.githooks/pre-push` (tree of the pushed commit, `--commits`, `--messages --authors` over what the remote lacks; enable with
+  `git config core.hooksPath .githooks`); `.github/workflows/public-tree.yml` (every push and pull request, pinned checkout, `contents: read`; Gitea
+  ignores `.github/workflows`); `ci/lint.sh` group `tree`: the check with its selftest and its unit tests. `tools/check_workflows.py` rule 7 now runs the
+  check's text rules over `.github/` (one source) beside the builder's name.
+
+The cleanup (rule hits of the `u18` tree, 1506 files, per file and rule): 56 fixed, 38 exceptions above, 5 kept for Gitea.
+- 28 private addresses: the board's address in 19 board tests and 4 docs became the documentation address 192.0.2.189 (MultiCore's form), the override
+  `TRX64_HOST` (or the script's own `TM_IP`, `TRX_HOST`, `--host`) stays and is added where a script had none; the NAS login in four NAS tools
+  (`TRX_NAS`, default `admin@192.0.2.2`); the Mac's address as multicast interface in `lr_mc.py` (`TRX_MCAST_IF`, default any); the Gitea address
+  fallback of `ue2_session.py` (gone: `GITEA_URL` takes several servers).
+- 12 home paths (10 specs and notes, 2 bench scripts: `~/`, `os.path.expanduser`), 6 NAS share paths (four NAS tools: `TRX_NAS_DATA`, default `/srv`, and
+  `TRX_NAS_DOCKER`, default `docker`; `vivado/README.md`; T31), 8 internal hosts (the Gitea server: `GITEA_URL`, else the `url:` of the tea login,
+  in `fetch_sdk.sh`, `load.sh`, `ue2_session.py`, `t16_session.py`, `t55_board.py`; `ci/lint.sh` passes `GITHUB_SERVER_URL`; T95's link points to
+  MultiCore on GitHub; the README says `$GITEA_URL`), 2 claude.ai artifact links (the text says a private page).
+- `docs/` history files (dated notes, old specs): rewritten with the placeholders, MultiCore's D6 rule (one commit, placeholders; moving them away was
+  asked and not chosen there). They are the same text the export's scrub writes.
+
+**Gitea keeps working** (D13; nothing under `.gitea/` changed):
+- The five stages mount `/share/.../trx64-build/cache` by host path and the runners mount only the volumes their configuration lists, so a variable
+  there would need a runner change: the lines stay, `GITEA_KEPT` lets them pass on `u18`, and the export writes `/srv` into the public copy
+  (MultiCore kept `.gitea/` public the same way: its snapshot export wrote `/srv`, its Gitea tree kept the host path). Part E deletes `GITEA_KEPT`.
+- `ci/lint.sh` (stage lint): the SDK download takes `GITEA_URL`, else `GITHUB_SERVER_URL`, which Gitea's runner sets (the stage's own clone step uses
+  it); before, `GITHUB_SERVER_URL` came first too and the host was only the fallback for a run on the Mac. `ci/cor.sh` passes `GITHUB_SERVER_URL` as
+  before; `fetch_sdk.sh` without either reads the tea login (the Mac).
+- The two new lint checks need `python3`, `bash` and `git` in the lint image (the stage clones with git); numpy is optional.
+
+**Messages and the replay** (D15). Before A8 the replay took each host message as it was (the export line added after the subject) and only the
+maintainer's address became `PUBLIC_EMAIL`. Now `tools/gh_export.py` puts every staged file and every message through `scrub()` (the session line
+stays) and then through the check (a hit that no placeholder fixes, a private path, a ROM copy or window, stops it), and an author or committer
+with a personal mail address stops it (`git config user.email` unset would have let the maintainer's address out). `--rewrite BASE` makes the
+clone's commits BASE..HEAD once more the same way, author, committer and dates kept, blobs of BASE's history untouched, the old head kept as
+`<branch>-before-rewrite`, then checks commits and messages: for the commits the tool of 92645aeb replays (A5 notes). The 134 `u18` messages since the
+last export (27984422) hit only on the session line, which passes.
+
+Checked on the Mac: `ci/lint.sh` rc 0 and `ci/lint.sh tree` rc 0; `check_public_tree.py --selftest` (each rule and each scrub taken out in turn makes it
+fail, the session-line exception too); the tree: clean, 5 kept; `test_check_public_tree.py` 5 tests (the hook by hand: a planted path, a file added and
+removed again, a session line passes, a host in a message, a personal author, a Gitea URL skipped); `test_gh_export.py` 33 tests (scrub, placeholders,
+the message, the address stop, `--rewrite` in a scratch repository); `check_workflows.py --selftest` and over `.github`; shellcheck of the hook and
+`fetch_sdk.sh`; the reverse lint fetched the SDK through the tea login. Dry runs in scratch clones of the GitHub export clone, nothing pushed:
+`--replay 9b3cdf6b --ref <A8>` onto GitHub main, 6 export commits, then the clone's own hook as for a push of `main` to GitHub: tree, 6 commits
+(472 files) and 6 messages clean, every author and committer `PUBLIC_EMAIL`, `.gitea` volumes `/srv`; `--rewrite origin/main~80` over GitHub main's
+own last 80 export commits: 31 of our files rewritten, 5 hits reported in 4 files of the flattened fork (an OpenAPI example address, a device-at-computer
+token of a test script, Gideon's home path in a Makefile comment, a Python thread-local member), none rewritten.
+
+Not run: the new lint checks in Gitea's lint image (the next Gitea run shows them); `public-tree.yml` on GitHub (after E); the hook on a real push;
+the tool of 92645aeb (part a of E needs the submodule); a `--files` run on a current `trx64u.cor` (none built here: the main checkout's older one,
+whose record 7 is an `online.u2a` before the pin, holds 15 of the 64 aligned 64-byte blocks of the character ROM; the pinned `online.u2a`
+061c7394 and the SDK 0.4.6 tarball hold no window of the four ROMs).
+
+For part E:
+1. Replay part a with the tool of 92645aeb, part b with this one, then `--rewrite <GitHub main>` over the work branch and read its report. Hits in the
+   flattened fork (third party) are reported, not rewritten: an exact `TEXT_ALLOW` path each, or Alex decides.
+2. This tool's `--replay` refuses a SINCE with a gitlink, so part b starts at the A5 merge 9b3cdf6b, whose export becomes the replay's base commit
+   with `BASE_MESSAGE` (the 0.2.0 text): that commit needs its own message (open).
+3. After the first push: delete `GITEA_KEPT`; the pushing checkout sets `core.hooksPath .githooks` and `user.email` to the public address (the hook
+   refuses a personal one on a GitHub push).
+4. Already public, untouched by any rewrite of the work branch: commits mode over GitHub main's 83 commits finds 320 hits (110 upstream authors'
+   addresses in the flattened fork, none the maintainer's; 79 home paths, 75 private addresses, 17 NAS paths, 15 logins, 13 hosts, the two claude.ai
+   links fixed here; 8 windows of the BASIC and character ROMs in the fork's `recovery/u64ii/ultimate.bin`; the fork's `tcpimage.crt`). Only a
+   rewrite of GitHub main removes them: Alex's decision (MultiCore's D8, D32).
+5. Board tests and NAS tools now need their addresses from the environment (`TRX64_HOST`, `TM_IP`, `TRX_HOST`, `--host`; `TRX_NAS`, `TRX_NAS_DATA`,
+   `TRX_NAS_DOCKER`; `GITEA_URL` or the tea login): `CLAUDE.md` and the skills say so when E rewrites them.
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 

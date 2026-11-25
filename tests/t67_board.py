@@ -126,7 +126,7 @@ def alive(host):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="192.0.2.189")
+    ap.add_argument("--host", default=os.environ.get("TRX64_HOST", "192.0.2.189"))
     ap.add_argument("--app", default="/tmp/b/ultimate.app")
     ap.add_argument("--backup", default=os.path.expanduser("~/.claude/jobs/259f244b/tmp/t67-backup"))
     ap.add_argument("--bit", default=BITSTREAM)

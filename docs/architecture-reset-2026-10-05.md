@@ -165,4 +165,4 @@ Alle fertigen Branches sind in `integ-m1` (Entscheidung 10) zusammengeführt; CI
 | opt-frz | entfällt: SLIM D1/D3 nimmt Commit-Liste und Zähler ganz raus | – | – |
 | integ-m1 gesamt | CI-Build und Board-Test 2026-10-06 abends | offen | offen |
 
-Seite mit Iterationen: (a private page) (privat).
+Seite mit Iterationen: eine private Claude-Seite (nicht öffentlich).

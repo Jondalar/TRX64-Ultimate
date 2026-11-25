@@ -19,7 +19,8 @@
 #   2. manifest.json: its commit starts with the tag's <sha8>, its trx64u.cor has the downloaded file's SHA-256, its source repository is this one;
 #   3. the .cor's own manifest (record 1, read by software/trx64u/tools/emu_ops.py's reader): id trx64u and the version manifest.json names;
 #   4. with --publish: the version is a plain x.y.z (a release is made from the pre-release of its tag build), the public-tree check passes on every file
-#      (tools/check_public_tree.py, U20 A8: until it exists, --publish stops here), and the tag v<x.y.z> exists in this repository and names the commit
+#      (tools/check_public_tree.py --files, U20 A8: no ROM of ci/private.txt whole or in part, no text rule hit), and the tag v<x.y.z> exists in this
+#      repository and names the commit
 #      (Alex makes the tag; gh release create --verify-tag never makes one);
 #   5. without --publish: prints what would be published; with it: gh release create v<x.y.z> as a draft with every file of the pre-release, then
 #      published once the draft holds them all.
@@ -97,7 +98,6 @@ if [ "$PUBLISH" != 1 ]; then
     exit 0
 fi
 [[ "$REL" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die "pre-release $VER is a dev build ($REL): a release is made from the pre-release of a tag build"
-[ -f "$ROOT/tools/check_public_tree.py" ] || die "no tools/check_public_tree.py (U20 A8): a release is not published unchecked"
 python3 -I "$ROOT/tools/check_public_tree.py" --files "${assets[@]}" || die "pre-release $VER holds private content: release stopped"
 gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login): the tag is read and the release made with gh"
 TAGSHA="$(gh api "repos/$MC_SRC_REPO/commits/v$REL" --jq .sha 2>/dev/null || true)"
