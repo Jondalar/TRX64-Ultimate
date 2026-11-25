@@ -1,8 +1,8 @@
 # U21 — The online search of trx64u: a form, a results tab, and Beyond64 as a third source
 
 **Status:** BUILT 2026-11-25 on SDK 0.5.0 (branch `u21-online`) and run in ue2emu against the real servers (§7): the form and the results tab of D9, the
-three sources, Beyond64's filter and paging, Run from a result. Open: the board test, two questions for Alex (§6: Beyond64's page size, the size of a
-Beyond64 file), and the base's part of the findings (§3, for MultiCore). The UX review of the 0.4.6 screens (FAIL) and what became of each finding are in §3.
+three sources, Beyond64's filter and paging, Run from a result. Open: the board test; the base's part of the findings (§3) and the "size unknown" of D11, both for
+MultiCore's SDK 0.5.1. The UX review of the 0.4.6 screens (FAIL) and what became of each finding are in §3.
 **Repo:** TRX64-Ultimate, the sub-app `software/trx64u/apps/online/` (`app.toml`, `online_search.cc`, `online_http.cc`, `online_json.cc`).
 **Origin:** Alex, 2026-11-25 (translated): "The 'online' u2a app in the LVGL UI looks terrible. 1. Search should not be a tab of its own: in a
 form I say what I am looking for and from which source, and I start the search in the form; the result may then become a tab of its own.
@@ -45,6 +45,10 @@ form I say what I am looking for and from which source, and I start the search i
   form and own results tab per D1, where it is today, F3 "3 Online"; only so do the choice lists and the filter work, and the local search stays
   untouched.) So the base's search providers (D3.5, P5, api.md 6.20) are not used: the sub-app registers no search source, and F3 "2 Search"
   stays the base's local search.
+- **D10, Beyond64's page size: 20** (§6). Alex: "20". As many as Assembly64 and CommoServe give; 1.9-2.5 s a page in ue2emu (§7).
+- **D11, the size of a Beyond64 file: the base shows it as unknown** (§6). Alex chose "a": MultiCore adds an "unknown size" to the base's
+  file list (netfs) in SDK 0.5.1, which then shows "-" instead of "0 KB"; the proposal that Beyond64's API gives the size stays in §5. No HEAD
+  request per file. Until 0.5.1 the list shows "0 KB".
 
 ## 2. The target (from the UX review's proposal, to be fixed in detail on 0.5.0)
 
@@ -140,11 +144,9 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
 
 - ~~The default of the filter of D4~~: loadable only (D8). ~~Assembly64 and CommoServe stop at 20 results~~: they stay (D7).
 - ~~The time the per-result details (D5) take for a page~~: measured (§7): 20 releases a page 1.9-2.5 s, 50 (the API's most) 3.5-3.9 s.
-- **Beyond64's page size (for Alex).** Built: 20 a page, as many as Assembly64 and CommoServe give, under the 3 s of D8. 50 a page is over it
-  (3.5-3.9 s); 10 (the API's default) would be about 1 s.
-- **The size of a Beyond64 file (for Alex).** The API gives none (§5), and the base's file list has no "unknown size", so it shows "0 KB".
-  Options: a HEAD per file when a release's folder opens (about 0.5 s each, and one more fetch at the origin per file); leave it until Beyond64
-  adds the size (§5); a base change that shows no size (MultiCore).
+- ~~Beyond64's page size~~: 20 (D10). 50 a page is over D8's 3 s (3.5-3.9 s); 10 would be about 1 s.
+- ~~The size of a Beyond64 file~~: the base shows it as unknown, MultiCore's SDK 0.5.1 (D11). Not chosen: a HEAD per file (about 0.5 s each,
+  one more fetch at the origin per file); "0 KB" until Beyond64 adds the size.
 - ~~Where the online search lives~~: the sub-app's own form and results tab at F3 "3 Online", no P5 source (D9).
 
 ## 7. Status and history
