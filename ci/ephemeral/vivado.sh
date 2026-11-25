@@ -11,6 +11,8 @@
 #          the builder's cache held when the snapshot was made; an entry whose key moved since is built again
 #   cold   TRX_CACHE empty: nothing kept anywhere (no builder, no cache)
 # TRX_VIVADO_THREADS = THREADS (general.maxThreads, tools/vivado_lib.tcl).
+# The output of ci/bitstream.sh (its filtered Vivado lines: ERROR, CRITICAL WARNING, ===, the steps, WNS) goes to the job's live
+# log and to log.txt; Vivado's whole log is the stage's *.vivado.log.gz.
 # OUT_DIR/<warm|cold>/ holds the stage's files (bitstreams, reports, *.steps.txt, wns.txt, key) and log.txt;
 # OUT_DIR/times.txt "<name> <epoch seconds>" (warm_start, warm_end, cold_start, cold_end); OUT_DIR/info.txt the image
 # record and THREADS. A failed build does not stop the other; the exit code is 1 when either failed.
@@ -40,14 +42,13 @@ for b in warm cold; do
   if docker run --rm --user "$(id -u):$(id -g)" -v "$ROOT:/w" -w /w \
        -e TRX_VIVADO_THREADS="$threads" -e TRX_CACHE="/w/.eph/$b/cache" -e CI_BIT_CACHE="/w/.eph/$b/bits" \
        -e CI_HANDOFF="/w/.eph/$b/handoff" -e CI_RUN_ID=eph \
-       "$image" ci/bitstream.sh c64u > "$out/$b/log.txt" 2>&1; then
+       "$image" ci/bitstream.sh c64u 2>&1 | tee "$out/$b/log.txt"; then
     echo "${b}_end $(date -u +%s)" >> "$out/times.txt"
   else
     echo "${b}_end $(date -u +%s)" >> "$out/times.txt"
     echo "${b}_failed 1" >> "$out/times.txt"
     rc=1
   fi
-  tail -5 "$out/$b/log.txt"
   if [ -d "$w/$b/handoff/bit-c64u" ]; then cp -a "$w/$b/handoff/bit-c64u/." "$out/$b/"; fi
 done
 rm -rf "$w"
