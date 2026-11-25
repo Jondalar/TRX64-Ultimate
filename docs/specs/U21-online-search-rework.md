@@ -1,7 +1,7 @@
 # U21 — The online search of trx64u: a form, a results tab, and Beyond64 as a third source
 
-**Status:** BUILDING since 2026-11-25 (branch `u21-online`): SDK 0.5.0 is pinned (§7). The form waits for Alex's answer where the online search lives
-(§6, the placement and P5). The UX review of the 0.4.6 screens (FAIL) is in §3.
+**Status:** BUILDING since 2026-11-25 (branch `u21-online`): SDK 0.5.0 is pinned (§7). Where the online search lives is decided (D9: the sub-app's own
+form and results tab at F3 "3 Online", no P5 source); the form is built next. The UX review of the 0.4.6 screens (FAIL) is in §3.
 **Repo:** TRX64-Ultimate, the sub-app `software/trx64u/apps/online/` (`app.toml`, `online_search.cc`, `online_http.cc`, `online_json.cc`).
 **Origin:** Alex, 2026-11-25 (translated): "The 'online' u2a app in the LVGL UI looks terrible. 1. Search should not be a tab of its own: in a
 form I say what I am looking for and from which source, and I start the search in the form; the result may then become a tab of its own.
@@ -39,10 +39,16 @@ form I say what I am looking for and from which source, and I start the search i
 - **D8, the filter of D4 defaults to "loadable only"** (§6 point 1). Alex: "nur ladbare ja". Before it is built, the time the per-result details
   of D5 take for a full page of Beyond64 results is measured in ue2emu (real network through slirp); noticeably slow (over about 3 s a page) is
   reported to Alex with the numbers, not worked around (§6).
+- **D9, the place: the sub-app's own form and results tab, no P5 source** (§6 point 3). Alex: "Eigenes Formular und eigener Ergebnis-Tab nach
+  D1, an der heutigen Stelle F3 „3 Online“. Nur so gehen Auswahllisten und der Filter, und die lokale Suche bleibt unberührt." (Translated: own
+  form and own results tab per D1, where it is today, F3 "3 Online"; only so do the choice lists and the filter work, and the local search stays
+  untouched.) So the base's search providers (D3.5, P5, api.md 6.20) are not used: the sub-app registers no search source, and F3 "2 Search"
+  stays the base's local search.
 
 ## 2. The target (from the UX review's proposal, to be fixed in detail on 0.5.0)
 
-- F3 strip: 1 Browse · 2 Search · 3 Online (the sub-app's tab; with `show` only while there are results, D3.3).
+- F3 strip (D9): 1 Browse · 2 Search (the base's local search, untouched) · 3 Online (the sub-app's form) · 4 Results (the sub-app's results;
+  with `show` only while there are results, D3.3).
 - The form (a page of the sub-app, opened from the results tab's "New search" and from the empty tab): first row Source (Assembly64,
   CommoServe, Beyond64; "This device" when the base offers providers, D3.5); the rows below change with the source; choices open a `pick`
   list; Search at the foot; the side panel says the source and the last search.
@@ -104,8 +110,7 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
 
 - ~~The default of the filter of D4~~: loadable only (D8). ~~Assembly64 and CommoServe stop at 20 results~~: they stay (D7).
 - The time the per-result details (D5) take for a page of Beyond64 results, measured in ue2emu before D4/D8 is built (D8).
-- Where the online search lives (Alex, 2026-11-25, asked before the form is built): today it is the F3 tab "3 Online" of the sub-app; SDK 0.5.0
-  also offers P5, a source of the base's F3 search (api.md 6.20). What each can do is in §7, 2026-11-25.
+- ~~Where the online search lives~~: the sub-app's own form and results tab at F3 "3 Online", no P5 source (D9).
 
 ## 7. Status and history
 
