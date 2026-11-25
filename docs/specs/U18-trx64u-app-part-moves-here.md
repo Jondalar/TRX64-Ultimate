@@ -116,6 +116,11 @@ sub-apps load on demand), D2, D5.
   the library in the same change; new ring features go only into the library. Asked against "one source with the
   firmware, as trxmon (D4)": that refactors code with an end date (D2, U3) and needs a firmware build plus a board
   check of Timewarp.
+- **D7 (Alex, 2026-11-25): the base's group Look leaves trx64u's menu.** "die sind nur für das Gideon-App-UI": the four rows the
+  SDK base adds to every core under Look (api.md 4.13.19.3: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation
+  Style) are hidden in `base/menu.toml` (`hide`; Color Scheme was already, T228 R7). Checked in ue2emu 0.7.4 with SDK 0.4.6: `settings.get`
+  answers 404 "This core has no setting" for all four, REU Size and Mouse Sensitivity answer 200; the build without the change answers 200
+  for the three (negative control). The ops list stays 388 lines, equal to the golden.
 
 ### Decided: the trx64u tests leave MultiCore's pipeline (Alex, 2026-11-20 and 2026-11-23)
 

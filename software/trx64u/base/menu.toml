@@ -11,9 +11,9 @@
 # three rows open the pages Network settings, Streams and FTP hosts. R7: the Ultimate's device settings (power, wake on Wi-Fi, LEDs) are in no tab
 # (group "hidden": the stored values still apply); R8: no diagnostics rows (the generic Bug report).
 # Drive A and the cartridge port are media slots whose rows open the drive list (T212 D5); the generic items (Persist mounts, Enter home, Menu opens at, Home
-# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the base's rows and not declared here, and so are the menu's look, name squeeze and
-# navigation style and the USB mouse (U18: Overlay Transparency, Color Scheme, Filename overflow squeeze, Navigation Style and the five Mouse settings are the
-# base's, svc_settings.h; their stored values carry over under the same keys; "Joystick Input" is not offered: the core names no "kbd_joystick" cap). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
+# directory, hotkeys, Picture, Scale; no Tone: the core sets no_tone) are the base's rows and not declared here, and so is the USB mouse (U18: the five
+# Mouse settings are the base's, svc_settings.h; "Joystick Input" is not offered: the core names no "kbd_joystick" cap). The base's four rows of the
+# group "look" are hidden (below). A settings tab with `ui = { sections = true }` shows each of its groups under a heading made of the
 # group's id ('_' is a space; not drawn when it repeats the tab's title). Nothing is saved to flash: every setting is written to the core's .cfg at once (D9-D11).
 # The base's rows take their tab, heading and order from the SDK's base UI TOML (MultiCore T239.3 P2-4, D32; api.md 6.15): its seven routes name F5 "video",
 # F5 "audio" and F7 "settings", tabs this file has, so every base row lands where this menu wants it and the file places none. A `[[place]]` (or a
@@ -22,10 +22,11 @@
 # the machine line of F1 (T212 D13/D15): the values of these settings
 machine_info = "System Mode,REU Size"
 
-# The rows of the generic application this core does not show (T228 R7, Alex 2026-11-17: the Ultimate's colour scheme is not a setting of this machine; the menu
-# keeps the default scheme). The keys are the base's (svc_settings.h); the base adds no row named here. The joystick and mouse rows come and go by the
-# capabilities the core's descriptor names (desc.toml [core] caps), not by this list. As MultiCore's coreapp/cores/trx64u/menu.toml (t239.3-33).
-hide = ["Color Scheme"]
+# The rows of the generic application this core does not show: the four of the base's group "look" (api.md 4.13.19.3; T228 R7, Alex 2026-11-17: the
+# Ultimate's colour scheme is not a setting of this machine; Alex 2026-11-25: the whole group goes, its rows are only for the UI of Gideon's app, not
+# for this core's LVGL menu). The keys are the base's (svc_settings.h); the base adds no row named here (api.md 4.13.19.3).
+# The joystick and mouse rows come and go by the capabilities the core's descriptor names (desc.toml [core] caps), not by this list.
+hide = ["Overlay Transparency", "Color Scheme", "Filename overflow squeeze", "Navigation Style"]
 
 [[area]]
 key = "F1"
