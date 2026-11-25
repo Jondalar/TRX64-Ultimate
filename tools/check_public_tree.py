@@ -445,12 +445,23 @@ def members(path):
         yield path, open(path, "rb").read()
 
 
+# Which .cor may hold windows (never the whole file) of which private file: the character ROM in trx64u.cor (U20 D23, Alex 2026-11-25: the Timewarp
+# bar's font in ring.u2a, ring/twfont.py from Gideon's character generator, holds 64 bytes equal to it), as MultiCore's T239.1 D44 for trx64g.cor.
+COR_ALLOWED = (("characters.901225-01.bin", ("trx64u.cor",)),)
+
+
+def cor_allowed(path, hit):
+    """Whether a window hit (\"<private name> at offset N\") in the file path (or a member of it) is one COR_ALLOWED lets through."""
+    base = os.path.basename(path.split("!", 1)[0])
+    return any(hit.split(" at offset ")[0].endswith(rom) and base in cors for rom, cors in COR_ALLOWED)
+
+
 def check_files(paths, files, wins):
     bad = []
     for p in paths:
         for name, d in members(p):
             bad += ["%s: is a copy of the private file %s" % (name, n) for n in known_file(d, files)]
-            bad += ["%s: holds %s" % (name, h) for h in window_hits(d, wins)]
+            bad += ["%s: holds %s" % (name, h) for h in window_hits(d, wins) if not cor_allowed(name, h)]
             bad += ["%s: %s" % (name, h) for h in text_hits(d, name)]
     return bad
 
@@ -569,6 +580,15 @@ def selftest():
         want("a text rule in a package file", check_files([mf], files, wins) != [])
         fp = os.path.join(td, "trx64u.cor"); open(fp, "wb").write(rom)
         want("a whole private file in a .cor", check_files([fp], files, wins) != [])
+        cwins = {}
+        for _, w in win:
+            cwins.setdefault(roll_of(w), []).append((hashlib.sha256(w).hexdigest(), "roms/characters.901225-01.bin"))
+        part = os.urandom(300) + win[0][1] + os.urandom(99)
+        open(fp, "wb").write(part)
+        want("COR_ALLOWED: a character ROM window in trx64u.cor passes", check_files([fp], files, cwins) == [])
+        want("COR_ALLOWED: another ROM's window in trx64u.cor is red", check_files([fp], files, wins) != [])
+        fg = os.path.join(td, "trx64g.cor"); open(fg, "wb").write(part)
+        want("COR_ALLOWED: a character ROM window in another .cor is red", check_files([fg], files, cwins) != [])
     with tempfile.TemporaryDirectory() as td:        # gen-private from a folder of pinned files, against a scratch tree
         gt = lambda d, *a: subprocess.run(("git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.org") + a, capture_output=True, check=True)
         tree, rd = os.path.join(td, "tree"), os.path.join(td, "roms")

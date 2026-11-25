@@ -102,6 +102,10 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   MultiCore's package takes the three files from our pre-release by SHA-256 and size, unchanged. Softboot is not ours to ship (a function of
   the Gideon-based app; "MultiCore makes it obsolete"). `trx64g` stays a Gitea on-demand build; MultiCore pins its Gitea package (§6
   "fw- assets").
+- **D23 (Alex, 2026-11-25): `trx64u.cor` may hold windows of the C64 character ROM.** "Erlaubt für trx64u.cor". The Timewarp bar's font in
+  `ring.u2a` (`ring/twfont.py` from `designs/c64_basic/mem/ovl_font8.mem`, the font of Gideon's character generator, GPL-3) holds 64 bytes
+  equal to `characters.901225-01.bin`. `tools/check_public_tree.py` `COR_ALLOWED` lets a window (never the whole file) of that ROM through in a
+  file named `trx64u.cor` only; every other ROM and every other file still fails. As MultiCore's T239.1 D44 for `trx64g.cor`.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
