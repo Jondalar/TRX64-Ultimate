@@ -49,6 +49,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 
 HOST_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HOST_REPO, "tools"))
@@ -430,36 +431,26 @@ def checked_email(email, what):
 # instead of one commit for the whole tree. The host repository's own history still never goes out: it
 # carries what EXCLUDE keeps back. So every host commit is exported through the same rules and committed
 # with its own message, author and dates (the maintainer's address replaced by PUBLIC_EMAIL):
-#   - first the export of SINCE itself, when it differs from the commit the replay builds on (the files
-#     the export kept back before the rules changed);
+#   - first the export of SINCE itself, when it differs from the commit the replay builds on, with
+#     SINCE's own message (U20 E: SINCE is the A5 merge, the commit the tool of 92645aeb left off at);
+#     a note in it counts the files whose only change there is the scrub (scrub_only), against ONTO as it
+#     is: replay onto commits that --rewrite has already made, or the count is not what goes out;
 #   - a commit whose export changes nothing (one that touches only what EXCLUDE keeps back) makes no
 #     export commit;
 #   - a commit whose tree fails the checks is folded into the next one that passes (its change goes out
 #     there, with both messages). A dead link does not fail a commit before the last: the host commit
 #     had it too (a link ahead to a file the next commit adds), and the last state must be clean.
 
-BASE_MESSAGE = """Specs, ADRs, the task list and the notes, as of {host}
 
-Export of TRX64 Ultimate {host}.
-
-Until 0.2.0 the export kept the working documents back (docs/specs,
-docs/adr, docs/todo, TODO.md, the maintainer's notes) and anything that
-named the other project. Alex, 2026-11-13: from now on they go out as
-well; only Commodore's ROMs and the third-party test files stay back.
-This commit adds what was kept back, at the state of {host}; the
-commits after it are the host commits one by one.
-"""
-
-
-def export_message(parts, hosts):
+def export_message(parts, hosts, note=None):
     """The message of one export commit: the messages of the host commits it carries (oldest first),
-    with the line that names them after the first subject."""
+    with the line that names them after the first subject, and `note` as a paragraph after that line."""
     msgs = [m.strip() for m in parts if m.strip()]
     if not msgs:
         raise Fail("no message for the export of %s" % ", ".join(hosts))
     first = msgs[0].split("\n", 1)
     line = "Export of TRX64 Ultimate %s." % ", ".join(hosts)
-    head = first[0] + "\n\n" + line
+    head = first[0] + "\n\n" + line + ("\n\n" + note.strip() if note and note.strip() else "")
     rest = [first[1].strip()] if len(first) > 1 and first[1].strip() else []
     return scrub_message("\n\n".join([head] + rest + msgs[1:]) + "\n")[0]
 
@@ -478,6 +469,30 @@ def commit_export(clone_dir, body, sha):
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if r.returncode != 0:
         raise Fail("commit of the export of %s failed: %s" % (sha[:8], r.stderr.strip()))
+
+
+def scrub_only(clone_dir, since):
+    """The files of the synced clone that differ from its HEAD although the host file at `since` is HEAD's blob: their change is the
+    export's scrub alone (a file that went out before the scrub with a hit of the public-tree check)."""
+    out = []
+    for p in run(["git", "-C", clone_dir, "diff", "--name-only", "-z", "HEAD"]).split("\0"):
+        if not p:
+            continue
+        host = subprocess.run(["git", "-C", HOST_REPO, "rev-parse", "-q", "--verify", "%s:%s" % (since, p)],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False).stdout.strip()
+        if host and host == run(["git", "-C", clone_dir, "rev-parse", "HEAD:%s" % p]):
+            out.append(p)
+    return out
+
+
+def base_note(host, scrubbed):
+    """The paragraph of the replay's first commit that names what it carries besides the host commit's change."""
+    if not scrubbed:
+        return None
+    n = len(scrubbed)
+    return textwrap.fill("The replay's first commit: besides %s's change it writes the placeholders of the public-tree scrub "
+                         "(U20 A8, tools/check_public_tree.py) into %d %s that went out before with a hit of the check and %s "
+                         "otherwise unchanged." % (host, n, "file" if n == 1 else "files", "is" if n == 1 else "are"), 72)
 
 
 def replay(since, ref, onto, clone_dir, allow_new_binaries):
@@ -500,7 +515,8 @@ def replay(since, ref, onto, clone_dir, allow_new_binaries):
         shutil.rmtree(stage_dir, ignore_errors=True)
     if run(["git", "-C", clone_dir, "status", "--short"]):
         host = run(["git", "-C", HOST_REPO, "rev-parse", "--short=7", since])
-        commit_export(clone_dir, BASE_MESSAGE.format(host=host), since)
+        msg = run(["git", "-C", HOST_REPO, "log", "-1", "--format=%B", since])
+        commit_export(clone_dir, export_message([msg], [host], base_note(host, scrub_only(clone_dir, since))), since)
         made.append(run(["git", "-C", clone_dir, "log", "--oneline", "-1"]))
         print("  %s  -> %s" % (host, made[-1]))
     pending, skipped, folded = [], [], []

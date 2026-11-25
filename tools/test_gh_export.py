@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for tools/gh_export.py: the exclusions, the placeholders, the rewrite
 rules, the checks that stop an export, the public-tree scrub of files, messages
-and addresses (U20 A8) and the one rewrite of a clone (U20 D15). Touches neither
-repository; only the rewrite tests run git, in a scratch repository."""
+and addresses (U20 A8), the replay's first commit (U20 E) and the one rewrite of a
+clone (U20 D15). Touches neither repository; only the replay and rewrite tests run
+git, in scratch repositories."""
 
 import os
 import shutil
@@ -261,6 +262,59 @@ class Replay(unittest.TestCase):
     def test_no_message_at_all_is_an_error(self):
         with self.assertRaises(gx.Fail):
             gx.export_message(["", "  "], ["8f4761e"])
+
+    def test_a_note_follows_the_export_line_and_the_trailers_stay_last(self):
+        m = gx.export_message(["U20 A5: out\n\nwhy\n\nCo-Authored-By: C <c@example.org>\n"], ["9b3cdf6"], "A note.")
+        self.assertEqual(m, "U20 A5: out\n\nExport of TRX64 Ultimate 9b3cdf6.\n\nA note.\n\nwhy\n\nCo-Authored-By: C <c@example.org>\n")
+        self.assertIsNone(gx.base_note("9b3cdf6", []))
+        self.assertIn("into 2 files that", gx.base_note("9b3cdf6", ["a", "b"]))
+
+
+class ReplayBase(unittest.TestCase):
+    """U20 E: the replay's first commit carries the message of SINCE itself, in scratch repositories (host, GitHub, its clone)."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gh-replay-test-")
+        self.real_host = gx.HOST_REPO
+
+    def tearDown(self):
+        gx.HOST_REPO = self.real_host
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def git(self, repo, *a):
+        env = dict(os.environ, GIT_AUTHOR_NAME="A", GIT_AUTHOR_EMAIL="pr@example.net", GIT_AUTHOR_DATE="1700000000 +0100",
+                   GIT_COMMITTER_NAME="A", GIT_COMMITTER_EMAIL="pr@example.net", GIT_COMMITTER_DATE="1700000000 +0100")
+        return subprocess.run(["git", "-C", repo] + list(a), env=env, check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+    def commit(self, repo, files, msg):
+        for rel, text in files.items():
+            write(repo, rel, text)
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-q", "-m", msg)
+        return self.git(repo, "rev-parse", "HEAD")
+
+    def test_the_first_commit_carries_the_message_of_since(self):
+        host, gh, clone = (os.path.join(self.d, n) for n in ("host", "gh", "clone"))
+        for r in (host, gh):
+            os.makedirs(r)
+            self.git(r, "init", "-q", "-b", "main")
+        # GitHub's last export: a file that went out with a home path (before the scrub) and one that SINCE changes
+        last = self.commit(gh, {"docs/old.md": "at /Users/jdoe/old\n", "a.md": "one\n"}, "export")
+        self.git(self.d, "clone", "-q", gh, clone)
+        self.commit(host, {"docs/old.md": "at /Users/jdoe/old\n", "a.md": "one\n"}, "before")
+        since = self.commit(host, {"a.md": "two\n"}, "U20 A5: out\n\nwhy\n\nClaude-Session: https://claude.ai/code/session_01x\n")
+        self.commit(host, {"b.md": "three\n"}, "U20: next")
+        gx.HOST_REPO = host
+        gx.replay(since, "HEAD", "origin/main", clone, False)
+        self.assertEqual(self.git(clone, "rev-parse", "main~2"), last)
+        first = self.git(clone, "log", "-1", "--format=%B", "main~1")
+        self.assertTrue(first.startswith("U20 A5: out\n\nExport of TRX64 Ultimate %s.\n\nThe replay's first commit: besides %s's change"
+                                         % (since[:7], since[:7])), first)
+        self.assertIn(" 1 file that went out before", first.replace("\n", " "))
+        self.assertTrue(first.endswith("\n\nwhy\n\nClaude-Session: https://claude.ai/code/session_01x"), first)
+        self.assertEqual(self.git(clone, "show", "main~1:docs/old.md"), "at ~/old")
+        self.assertEqual(self.git(clone, "show", "main~1:a.md"), "two")
+        self.assertTrue(self.git(clone, "log", "-1", "--format=%B", "main").startswith("U20: next\n\nExport of TRX64 Ultimate "))
 
 
 class PublicAddress(unittest.TestCase):

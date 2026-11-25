@@ -470,8 +470,12 @@ whose record 7 is an `online.u2a` before the pin, holds 15 of the 64 aligned 64-
 For part E:
 1. Replay part a with the tool of 92645aeb, part b with this one, then `--rewrite <GitHub main>` over the work branch and read its report. Hits in the
    flattened fork (third party) are reported, not rewritten: an exact `TEXT_ALLOW` path each, or Alex decides.
-2. This tool's `--replay` refuses a SINCE with a gitlink, so part b starts at the A5 merge 9b3cdf6b, whose export becomes the replay's base commit
-   with `BASE_MESSAGE` (the 0.2.0 text): that commit needs its own message (open).
+2. This tool's `--replay` refuses a SINCE with a gitlink, so part b starts at the A5 merge 9b3cdf6b, whose export becomes the replay's base commit.
+   Done in E (branch `u20-e`): `BASE_MESSAGE` (the 0.2.0 text) is gone, the base commit carries SINCE's own message like every export commit, and a
+   paragraph after the export line counts the files whose only change there is the scrub (files that went out before A8 with a hit; the rewrite
+   leaves blobs of GitHub main's history alone, so the first export of this tool scrubs them); `test_gh_export.py` 35 tests. The count is against
+   the commit the replay builds on, so part a is rewritten before part b is replayed onto it (39 files; onto the unrewritten part a it was 44), and
+   the `--rewrite` over the whole work branch afterwards changes nothing.
 3. After the first push: delete `GITEA_KEPT`; the pushing checkout sets `core.hooksPath .githooks` and `user.email` to the public address (the hook
    refuses a personal one on a GitHub push).
 4. Already public, untouched by any rewrite of the work branch: commits mode over GitHub main's 83 commits finds 320 hits (110 upstream authors'
