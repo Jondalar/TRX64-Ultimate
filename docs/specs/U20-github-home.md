@@ -1,6 +1,6 @@
 # U20 — GitHub becomes TRX64-Ultimate's development home; GitHub's runners build everything but Vivado, our builder builds the bitstream
 
-**Status:** DONE 2026-11-25 except F (D17's experiment): F-a ran green on 2026-11-25 (D24 lifts D19); F-b built and its snapshot made (D25), its runs pending (§6 "F-b"). GitHub is the home since the merge of PR #3 (d72ab54a); first `fw-main-d72ab54a`
+**Status:** DONE 2026-11-25 except F (D17's experiment): F-a ran green on 2026-11-25 (D24 lifts D19); F-b built and run: Vivado on a Hetzner server works, 1.3-1.5 times the builder's time, EUR 0.14-0.22 a build (D25, §6 "F-b"); the pipeline's Vivado stays on the builder (D27). GitHub is the home since the merge of PR #3 (d72ab54a); first `fw-main-d72ab54a`
 pre-release published; `integration` cut from `main`. History (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
 green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb0206e3, CI run 483 green: lint, bitstream, package, sims, cor; the ROM store on the builder filled from VICE's
 svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
@@ -116,6 +116,16 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   bitstream is not compared byte for byte (the `.bit` header carries date and time; placement on another machine may differ). Criteria:
   the image ID on the snapshot is the builder's, timing met and DRC clean, utilization near the builder's build of the same key, and the
   board, when Alex tests a Hetzner bitstream.
+- **D26 (Alex, 2026-11-25): one server per build.** Hetzner bills every server by the started hour (billing FAQ: "If you create a server just
+  for a few minutes, we will still bill you for one whole hour"), so a server kept for several builds would be cheaper. For this repository
+  a server per build with its just-in-time runner stays (one job, a clean snapshot every time). Keeping a server for several jobs (delete
+  it at the end of its paid hour, not after a few idle minutes) is a matter for MultiCore, with its two costs: no clean state between
+  builds, and a runner for several jobs in a public repository (fork pull requests can aim a workflow at its label; the approval rule for
+  fork pull requests is the guard).
+- **D27 (Alex, 2026-11-25): the pipeline's Vivado stays on the builder.** "machen wir erstmal den Test und danach mit dem Builder unter dem
+  Tisch weiter"; "stell die Pipeline für den Vivado Schritt fest auf den Builder erstmal". `matrix.yml` keeps the builder; F-b runs only on a
+  push of `scratch/vivado-*`. A switch builder/Hetzner (a repository variable; a publishing job with its own token; the runner token as a
+  GitHub App instead of a 7-day token; the Vivado cache through `actions/cache`; MultiCore's empty work order) is a spec of its own, later.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
@@ -714,7 +724,7 @@ the project showed 0 resources after the run). One run costs one started hour: E
 
 ### F-b (D25: Vivado from a private snapshot)
 
-**Built 2026-11-25; the snapshot made; runs pending.**
+**Built and run 2026-11-25** (results below). The pipeline's Vivado stays on the builder (D27).
 
 Built:
 - `ci/ephemeral/snapshot.sh` (by hand, on the Mac: it reaches the Hetzner API and the builder): a one-time SSH key, a CPX22 server from
@@ -746,3 +756,33 @@ failed, below): EUR 0.0624.
 The first attempt stopped at the ID check, as it should: Ubuntu's `docker.io` is Docker 29.1.3, whose fresh install takes the containerd
 image store; there the image ID is the manifest's digest (`sha256:d0d7767e...`), not the config's as on the builder's Docker 26.1.5, and
 every layer is kept twice. `snapshot.sh` now writes `"containerd-snapshotter": false` before the load and checks for `overlay2`.
+
+F-b's runs (2026-11-25, branch `scratch/vivado-<type>-t<threads>` at `1a45dd0`/`94dc08c`, key `c64u-0dce5fff4ef99009`, compared with the
+builder's release of that key; Vivado's own elapsed time per command, summed over the three designs c64_basic, ddr2_test, hdmi_test):
+
+| | builder (3 threads) | CCX23, 3 threads (run 45629761710) | CCX33, 8 threads (run 45630520133) |
+|---|---|---|---|
+| cores, price (net, the API's, nbg1) | 16 | 4 dedicated, EUR 0.1378/h | 8 dedicated, EUR 0.2219/h |
+| server running / runner online (s after the create request) | - | 23 / 74 | 28 / 76 |
+| all three designs, warm (the snapshot's cache) | 8:16 | 12:34 | 10:41 |
+| all three designs, cold (no cache) | - | 18:52 | 16:50 |
+| c64_basic synth / place / route (warm) | 1:39 / 2:02 / 1:42 | 2:36 / 3:06 / 2:45 | 2:05 / 2:49 / 2:14 |
+| create request to the end of both builds | - | 34:43 | 30:50 |
+| cost of the run (one started hour) | - | EUR 0.1378 | EUR 0.2219 |
+
+- Timing and utilization are the builder's in every build: WNS c64_basic 0.070 ns, ddr2_test 2.995 ns; 27,608 LUTs, 29,861 registers,
+  61 BRAM tiles, 24 DSPs. The configuration data after the sync word is byte for byte the builder's for ddr2_test and hdmi_test, and for
+  c64_basic but 8 bytes: the USR_ACCESS timestamp (`BITSTREAM.CONFIG.USR_ACCESS TIMESTAMP`, `designs/c64_basic/pins.xdc`) and the CRC after
+  it. So on another CPU and with 3 or 8 threads, this Vivado placed and routed the same design the same way.
+- The builder's cores are faster: CCX23 takes 1.5 times the builder's time per command, CCX33 with 8 threads 1.3 times. Synthesis is
+  single-threaded; more threads help place and route a little.
+- Cold costs about 6 minutes more: the out-of-context synthesis of the C64 core and the IP (gt_hdmi, MIG). The snapshot's cache ages with
+  every change of the core; `actions/cache` would keep it current (D27's later spec).
+- Starting from the snapshot: the runner is online 74-76 s after the create request (F-a from plain Ubuntu: 95 s).
+- The first F-b run (45629283114) failed at once: `ci/ephemeral/vivado.sh` was committed without its executable bit (exit 126). One
+  started hour of CCX23 (EUR 0.1378). Fixed in the commit itself before it reached a pull request.
+- The first report paired the steps files line by line; the Hetzner builds have commands the builder's file does not list
+  (create_project, a second write_checkpoint, report_design_analysis), so the rows slipped. The report now pairs each command's n-th run and
+  compares the bitstreams after the sync word.
+- Total spent on F (net): F-a EUR 0.0096, the snapshot's two servers EUR 0.0624, F-b EUR 0.1378 + 0.1378 + 0.2219; the snapshot EUR 0.14 a
+  month while it is kept.
