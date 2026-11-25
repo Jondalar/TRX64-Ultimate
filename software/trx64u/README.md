@@ -14,7 +14,7 @@ library linked into trx64u's app, built here against the TRX64 SDK (docs/specs/U
 | `gateware/` | - | `c64_basic.toml`: the TOML A of the bitstream (record version 7), the registers as the app's I/O bus sees them |
 | `app/` | - | `toml_b.toml`: the TOML B of trx64u's app, the libraries it is linked with: the SDK's shared ones and `uci/` (MultiCore T239.3 D31) |
 | `apps/trex_crt/` | sub-app `trex_crt` | TREX CRT, the cartridge tools (Dump, Inspect, Flash; Write to Cartridge on `.crt`), loaded on demand (D5) |
-| `apps/online/` | sub-app `online` | the Assembly64 / CommoServe search: the F3 tab Online, `online.*` and the folder `/Online` (resident, record 7); MultiCore's `t239.3` `6e280710` `apps/online`, ours since U20 D22 (its README) |
+| `apps/online/` | sub-app `online` | the online search of Assembly64, CommoServe and Beyond64: the F3 tabs Online (the form) and Results, `online.*` and the folder `/Online` (resident, record 7); began as MultiCore's `t239.3` `6e280710` `apps/online`, ours since U20 D22, reworked on SDK 0.5.0 in U21 (its README) |
 | `tools/` | - | `emu_ops.py`: runs `trx64u.cor` in ue2emu and exports what the running app registers; `boundary.py` |
 
 TREX CRT is MultiCore's port onto ABI 3 (TRX64U-MultiCore `t239.3` `8ff28ba9`, `apps/trex_crt`) of our firmware's
@@ -22,8 +22,9 @@ tool at fork commit `aa2ef5dc` (its README lists what the port changed), moved h
 against LibApi 3.3 with the SDK's `mk/app.mk`; the function table comes with MultiCore's P2-6. Softboot is not part of
 trx64u (Alex, 2026-11-24): it starts the firmware application inside a `.cfw` on the running bitstream, and c64_basic
 under this app is not the bitstream that application needs. It stays in the firmware build (`TREX/1541ultimate:apps/softboot`); it is not
-ours to ship (U20 D22). The online search is a copy of MultiCore's `apps/online` at `t239.3` `6e280710` (U20 D22, MultiCore T261 D6: their
-SDK lane no longer builds it), built here and carried in record 7; its build equals the `online.u2a` that `sdk.pin` pinned before, byte for byte.
+ours to ship (U20 D22). The online search began as a copy of MultiCore's `apps/online` at `t239.3` `6e280710` (U20 D22, MultiCore T261 D6: their
+SDK lane no longer builds it), is built here and carried in record 7; U21 reworked it on SDK 0.5.0 (a form, a results tab, Beyond64 as a third source,
+`docs/specs/U21-online-search-rework.md`), so it is no longer the `online.u2a` that `sdk.pin` pinned before.
 Both sub-apps are assets of the `fw-<branch>-<sha8>` pre-release beside `trx64u.cor` (MultiCore's package takes them from there).
 
 ## State
@@ -42,7 +43,8 @@ the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b; on 
 U18 §5). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5). With the submodule empty and the SID player gone (U20 A2, A3, 2026-11-24) the
 build, the pack and `--emu` pass the same way: 388 lines, none missing either way. On 0.5.0 (2026-11-25, U21 §7) the list is 384 lines: the base has
-no group "look" any more (MultiCore T239.3 D56), so `base.overlay`, `base.scheme`, `base.squeeze` and `base.nav` are gone.
+no group "look" any more (MultiCore T239.3 D56), so `base.overlay`, `base.scheme`, `base.squeeze` and `base.nav` are gone. With the reworked online
+search (U21, 2026-11-25: 8 operations and 75 states of `online.*`) it is 412 lines (198 operations, 214 states), none missing either way.
 
 The SID and music player is gone (Alex, U20 D6, A3): no `.sid`, `.mus` or `.str` file types, no operations `c64.sid_play`,
 `c64.sid_songs`, `c64.sid_valid`, `c64.sid_info` and `dma.sidcrt`, no settings group "SID player behavior" (its two settings were read
@@ -119,7 +121,7 @@ What goes in:
 | the app (record 3) | linked by `pack_cor.sh` from the SDK's base archive (`sdk.pin`) with `gateware/c64_basic.toml` and `app/toml_b.toml` |
 | `cor_pack.py`, `app_build.py`, the symbol check | the SDK (`sdk.pin`) |
 | record 7: libraries `trx64u`, `ring`, `monitor` | `build.sh` |
-| record 7: the online sub-app `online.u2a` | `build.sh` (`apps/online`, U20 D22): the F3 tab Online and `online.*` |
+| record 7: the online sub-app `online.u2a` | `build.sh` (`apps/online`, U20 D22, U21): the F3 tabs Online and Results and `online.*` |
 | record 6 (menu and API) | `base/menu.toml`, `base/desc.toml` |
 | the registers | `gateware/c64_basic.toml`: the app's and the libraries' driver table (`drvtab.h`) and the app's I/O addresses; no TOML A record in the `.cor` (record 6 holds a description or a TOML A, not both; the record type that carries it beside the description comes with a later MultiCore package: U18 §5) |
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |

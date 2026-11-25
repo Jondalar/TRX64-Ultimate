@@ -1,7 +1,11 @@
-# The menu record of the online search (T239.3 D12, P3-1, L-3): the tab "Online" of F3 and its rows, as the sub-app contributes them. The operations and state values are the ones
-# online_search.cc registers (online.*); the tab was a tab of the menu of the TRX64U core (TRX64-Ultimate's now) until the search became a sub-app. A core that carries online.u2a in its
-# .cor gets the tab; one that does not has none. Nothing here is code. The two operations that ask the server (online.presets, online.search) are nodes with `job`: the menu steps them while
-# the sub-app's job waits for the server (api.md 1.3.9). A node with `goto` would skip the job (menuctl run_node), so the search has none: when its job has ended with results the operation calls lib.show (the Library opens on the results) and api->overlay->goto_screen("F3") (T239.3 D41), which brings the menu to the Library.
+# The menu record of the online search (U21; MultiCore T239.3 D12, L-3: the sub-app brings its own tabs). Nothing here is code: the operations and state values are the ones
+# online_search.cc registers (online.*). A core that carries online.u2a in its .cor gets both tabs; one that does not has neither.
+#  - F3 "Online" (U21 D9: where the search was before): the form. Source first; then the fields of that source (a row of another source is hidden: `hide`); a choice opens
+#    a list of its values (`pick = "@state"`, api.md 6.19.3); Search at the foot (`mainfoot`), a job with its busy words (`busy`), greyed without a network (`when_state`);
+#    the side panel: the source and the last search.
+#  - F3 "Results" (U21 D1): on the strip only while there are results (`show`, api.md 6.11.7). Its list (kind `list`, api.md 6.19) opens the result rows; RETURN on a row
+#    calls online.open, the last row of Beyond64 asks online.more for the next page.
+# The keys of both tabs in the foot legend are rows of the core's key table (base/menu.toml): a library's menu record has none (the SDK's u2a_pack.py refuses one).
 
 [[tab]]
 area = "F3"
@@ -10,181 +14,342 @@ name = "Online"
 widget = "nodes"
 layout = "split"
 n = 3
-ui = { title = "Assembly64 and CommoServe", side = "Search" }
+ui = { title = "@online.ftitle", side = "Search" }
 
+[[tab]]
+area = "F3"
+id = "results"
+name = "Results"
+widget = "nodes"
+layout = "split"
+n = 4
+show = "@online.shown"
+ui = { title = "@online.title", side = "Search" }
+
+# ---- the form -------------------------------------------------------------------------------------------------------------------------------------------------------
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Library"
-op = "online.library"
+label = "Source"
+id = "online.source"
+op = "online.set"
+bind = [ { arg = "field", str = "source" }, { arg = "text", text = true } ]
 order = 10
-ui = { chip = "@online.library", sub = "RETURN switches the library", tone = "violet" }
+ui = { pick = "@online.l.source", chip = "@online.src", tone = "violet" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
 label = "Name"
+id = "online.name"
 op = "online.set"
 bind = [ { arg = "field", str = "name" }, { arg = "text", text = true } ]
 order = 20
-ui = { ask = "Part of the title", ask_state = "online.v.name", chip = "@online.name", tone = "cyan" }
+ui = { label = "@online.lbl.name", ask = "The text to look for", ask_state = "online.p.name", chip = "@online.v.name", tone = "cyan" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Look in"
+id = "online.b.look"
+op = "online.set"
+bind = [ { arg = "field", str = "b.look" }, { arg = "text", text = true } ]
+order = 21
+ui = { pick = "@online.l.b.look", chip = "@online.v.b.look", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
 label = "Group"
+id = "online.group"
 op = "online.set"
 bind = [ { arg = "field", str = "group" }, { arg = "text", text = true } ]
-order = 21
-ui = { ask = "The group or the publisher", ask_state = "online.v.group", chip = "@online.group", tone = "cyan" }
+order = 22
+ui = { ask = "The group or the publisher", ask_state = "online.p.group", chip = "@online.v.group", tone = "cyan", hide = "@online.h.ac" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
 label = "Handle"
+id = "online.handle"
 op = "online.set"
 bind = [ { arg = "field", str = "handle" }, { arg = "text", text = true } ]
-order = 22
-ui = { ask = "The scener's handle", ask_state = "online.v.handle", chip = "@online.handle", tone = "cyan" }
+order = 23
+ui = { ask = "The scener's handle", ask_state = "online.p.handle", chip = "@online.v.handle", tone = "cyan", hide = "@online.h.ac" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
 label = "Event"
+id = "online.event"
 op = "online.set"
 bind = [ { arg = "field", str = "event" }, { arg = "text", text = true } ]
-order = 23
-ui = { ask = "The party or the event", ask_state = "online.v.event", chip = "@online.event", tone = "cyan" }
+order = 24
+ui = { ask = "The party or the event", ask_state = "online.p.event", chip = "@online.v.event", tone = "cyan", hide = "@online.h.ac" }
 
+# Assembly64 and CommoServe: the server's presets (online_search.cc k_ach)
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choices"
-op = "online.presets"
+label = "Category"
+id = "online.a.category"
+op = "online.set"
+bind = [ { arg = "field", str = "a.category" }, { arg = "text", text = true } ]
 order = 30
-ui = { job = true, sub = "Fetch the choices from the server", chip = "Load", tone = "amber", hide = "@online.loaded" }
+ui = { pick = "@online.l.a.category", chip = "@online.v.a.category", tone = "cyan", hide = "@online.h.a.category" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 1"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 0 } ]
+label = "Subcategory"
+id = "online.a.subcat"
+op = "online.set"
+bind = [ { arg = "field", str = "a.subcat" }, { arg = "text", text = true } ]
+order = 31
+ui = { pick = "@online.l.a.subcat", chip = "@online.v.a.subcat", tone = "cyan", hide = "@online.h.a.subcat" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Archive"
+id = "online.a.repo"
+op = "online.set"
+bind = [ { arg = "field", str = "a.repo" }, { arg = "text", text = true } ]
+order = 32
+ui = { pick = "@online.l.a.repo", chip = "@online.v.a.repo", tone = "cyan", hide = "@online.h.a.repo" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Year"
+id = "online.a.date"
+op = "online.set"
+bind = [ { arg = "field", str = "a.date" }, { arg = "text", text = true } ]
+order = 33
+ui = { pick = "@online.l.a.date", chip = "@online.v.a.date", tone = "cyan", hide = "@online.h.a.date" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Added within"
+id = "online.a.latest"
+op = "online.set"
+bind = [ { arg = "field", str = "a.latest" }, { arg = "text", text = true } ]
+order = 34
+ui = { pick = "@online.l.a.latest", chip = "@online.v.a.latest", tone = "cyan", hide = "@online.h.a.latest" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Rating"
+id = "online.a.rating"
+op = "online.set"
+bind = [ { arg = "field", str = "a.rating" }, { arg = "text", text = true } ]
+order = 35
+ui = { pick = "@online.l.a.rating", chip = "@online.v.a.rating", tone = "cyan", hide = "@online.h.a.rating" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "File type"
+id = "online.a.type"
+op = "online.set"
+bind = [ { arg = "field", str = "a.type" }, { arg = "text", text = true } ]
+order = 36
+ui = { pick = "@online.l.a.type", chip = "@online.v.a.type", tone = "cyan", hide = "@online.h.a.type" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Sort by"
+id = "online.a.sort"
+op = "online.set"
+bind = [ { arg = "field", str = "a.sort" }, { arg = "text", text = true } ]
+order = 37
+ui = { pick = "@online.l.a.sort", chip = "@online.v.a.sort", tone = "cyan", hide = "@online.h.a.sort" }
+
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Order"
+id = "online.a.order"
+op = "online.set"
+bind = [ { arg = "field", str = "a.order" }, { arg = "text", text = true } ]
+order = 38
+ui = { pick = "@online.l.a.order", chip = "@online.v.a.order", tone = "cyan", hide = "@online.h.a.order" }
+
+# Beyond64: the values of /api/c64/filters (online_search.cc k_bf); Look in stands under the text (order 21)
+[[node]]
+anchor = "F3/online"
+kind = "op"
+label = "Category"
+id = "online.b.cat"
+op = "online.set"
+bind = [ { arg = "field", str = "b.cat" }, { arg = "text", text = true } ]
 order = 40
-ui = { label = "@online.p0.title", chip = "@online.p0.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p0.hide" }
+ui = { pick = "@online.l.b.cat", chip = "@online.v.b.cat", sub = "A choice adds or takes away one", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 2"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 1 } ]
+label = "Category match"
+id = "online.b.catm"
+op = "online.set"
+bind = [ { arg = "field", str = "b.catm" }, { arg = "text", text = true } ]
 order = 41
-ui = { label = "@online.p1.title", chip = "@online.p1.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p1.hide" }
+ui = { pick = "@online.l.b.catm", chip = "@online.v.b.catm", tone = "cyan", hide = "@online.h.b.catm" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 3"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 2 } ]
+label = "Platform"
+id = "online.b.plat"
+op = "online.set"
+bind = [ { arg = "field", str = "b.plat" }, { arg = "text", text = true } ]
 order = 42
-ui = { label = "@online.p2.title", chip = "@online.p2.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p2.hide" }
+ui = { pick = "@online.l.b.plat", chip = "@online.v.b.plat", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 4"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 3 } ]
+label = "Environment"
+id = "online.b.env"
+op = "online.set"
+bind = [ { arg = "field", str = "b.env" }, { arg = "text", text = true } ]
 order = 43
-ui = { label = "@online.p3.title", chip = "@online.p3.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p3.hide" }
+ui = { pick = "@online.l.b.env", chip = "@online.v.b.env", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 5"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 4 } ]
+label = "Hardware"
+id = "online.b.hw"
+op = "online.set"
+bind = [ { arg = "field", str = "b.hw" }, { arg = "text", text = true } ]
 order = 44
-ui = { label = "@online.p4.title", chip = "@online.p4.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p4.hide" }
+ui = { pick = "@online.l.b.hw", chip = "@online.v.b.hw", sub = "A choice adds or takes away one", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 6"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 5 } ]
+label = "Hardware match"
+id = "online.b.hwm"
+op = "online.set"
+bind = [ { arg = "field", str = "b.hwm" }, { arg = "text", text = true } ]
 order = 45
-ui = { label = "@online.p5.title", chip = "@online.p5.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p5.hide" }
+ui = { pick = "@online.l.b.hwm", chip = "@online.v.b.hwm", tone = "cyan", hide = "@online.h.b.hwm" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 7"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 6 } ]
+label = "AI"
+id = "online.b.ai"
+op = "online.set"
+bind = [ { arg = "field", str = "b.ai" }, { arg = "text", text = true } ]
 order = 46
-ui = { label = "@online.p6.title", chip = "@online.p6.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p6.hide" }
+ui = { pick = "@online.l.b.ai", chip = "@online.v.b.ai", tone = "cyan", hide = "@online.h.b" }
 
 [[node]]
 anchor = "F3/online"
 kind = "op"
-label = "Choice 8"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 7 } ]
+label = "Show"
+id = "online.b.show"
+op = "online.set"
+bind = [ { arg = "field", str = "b.show" }, { arg = "text", text = true } ]
 order = 47
-ui = { label = "@online.p7.title", chip = "@online.p7.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p7.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 9"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 8 } ]
-order = 48
-ui = { label = "@online.p8.title", chip = "@online.p8.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p8.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 10"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 9 } ]
-order = 49
-ui = { label = "@online.p9.title", chip = "@online.p9.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p9.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 11"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 10 } ]
-order = 50
-ui = { label = "@online.p10.title", chip = "@online.p10.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p10.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Choice 12"
-op = "online.cycle"
-bind = [ { arg = "slot", int = 11 } ]
-order = 51
-ui = { label = "@online.p11.title", chip = "@online.p11.value", sub = "RETURN: the next value", tone = "cyan", hide = "@online.p11.hide" }
-
-[[node]]
-anchor = "F3/online"
-kind = "op"
-label = "Search"
-op = "online.search"
-order = 5
-closes_menu = false
-ui = { primary = true, job = true, chip = "@online.results", sub = "Results are in the Library, folder Online", tone = "violet" }
-
+ui = { pick = "@online.l.b.show", chip = "@online.v.b.show", tone = "cyan", hide = "@online.h.b" }
 [[node]]
 anchor = "F3/online"
 kind = "op"
 label = "Clear the form"
 op = "online.clear"
-order = 110
+order = 90
 ui = { confirm = "Empty every field of the form?", tone = "muted" }
+
+[[node]]
+anchor = "F3/online/mainfoot"
+kind = "op"
+label = "Search"
+op = "online.search"
+order = 100
+when_state = "online.net"
+closes_menu = false
+ui = { primary = true, job = true, busy = "@online.busy", why = "No network: set it up in F8 System > Network", tone = "violet" }
+
+[[node]]
+anchor = "F3/online/side"
+kind = "state"
+label = "Source"
+id = "online.side.source"
+state = "online.src"
+order = 110
+
+[[node]]
+anchor = "F3/online/side"
+kind = "state"
+label = "Last search"
+state = "online.s.last"
+order = 111
+
+[[node]]
+anchor = "F3/online/side"
+kind = "state"
+label = "Result"
+state = "online.s.result"
+order = 112
+ui = { hide = "@online.s.never" }
+
+# ---- the results ----------------------------------------------------------------------------------------------------------------------------------------------------
+[[node]]
+anchor = "F3/results"
+kind = "list"
+label = "Results"
+state = "online.rows"
+op = "online.open"
+order = 10
+ui = { more = "online.more", sub = "RETURN lists them, RETURN on one opens its files", tone = "violet" }
+
+[[node]]
+anchor = "F3/results"
+kind = "op"
+label = "New search"
+op = "online.new"
+order = 20
+ui = { sub = "Back to the form", tone = "cyan" }
+
+[[node]]
+anchor = "F3/results"
+kind = "op"
+label = "Clear the results"
+op = "online.forget"
+order = 30
+ui = { tone = "muted" }
+
+[[node]]
+anchor = "F3/results/side"
+kind = "state"
+label = "Source"
+state = "online.r.source"
+order = 40
+
+[[node]]
+anchor = "F3/results/side"
+kind = "state"
+label = "Searched for"
+state = "online.r.query"
+order = 41
+
+[[node]]
+anchor = "F3/results/side"
+kind = "state"
+label = "Found"
+state = "online.r.found"
+order = 42
+
+[[node]]
+anchor = "F3/results/side"
+kind = "state"
+label = "Not loadable"
+state = "online.r.hidden"
+order = 43
+ui = { hide = "@online.r.nohidden" }

@@ -43,7 +43,8 @@ int hexv(char c)
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
 }
 
-// A string at the opening quote: the decoded text is written over the source (it is never longer), NUL terminated; *out is where it starts. \uXXXX below 256 is one byte, above it a '?'.
+// A string at the opening quote: the decoded text is written over the source (it is never longer), NUL terminated; *out is where it starts. \uXXXX is written as
+// UTF-8, as the servers write the text itself (at most 3 bytes for the 6 of the escape); \u0000 and a half of a surrogate pair are a '?' each.
 bool string(Rd &r, const char **out)
 {
     if (r.p >= r.end || *r.p != '"') {
@@ -69,16 +70,31 @@ bool string(Rd &r, const char **out)
                 if (r.end - r.p < 4) {
                     return false;
                 }
-                int v = 0;
+                unsigned v = 0;
                 for (int i = 0; i < 4; i++) {
                     int h = hexv(r.p[i]);
                     if (h < 0) {
                         return false;
                     }
-                    v = v * 16 + h;
+                    v = v * 16 + (unsigned)h;
                 }
                 r.p += 4;
-                c = v < 256 && v ? (char)v : '?';
+                if (v == 0 || (v >= 0xD800 && v <= 0xDFFF)) {
+                    c = '?';
+                } else if (v >= 0x80) {
+                    if (r.build) {
+                        if (v >= 0x800) {
+                            *w++ = (char)(0xE0 | (v >> 12));
+                            *w++ = (char)(0x80 | ((v >> 6) & 0x3F));
+                        } else {
+                            *w++ = (char)(0xC0 | (v >> 6));
+                        }
+                        *w++ = (char)(0x80 | (v & 0x3F));
+                    }
+                    continue;
+                } else {
+                    c = (char)v;
+                }
                 break;
             }
             default: break;                                   // \" \\ \/ : the character itself
@@ -281,4 +297,10 @@ int json_int(const JNode *obj, const char *key, int def)
 {
     const JNode *m = json_member(obj, key);
     return m && m->type == J_INT ? (int)m->num : def;
+}
+
+bool json_bool(const JNode *obj, const char *key, bool def)
+{
+    const JNode *m = json_member(obj, key);
+    return m && m->type == J_BOOL ? m->num != 0 : def;
 }

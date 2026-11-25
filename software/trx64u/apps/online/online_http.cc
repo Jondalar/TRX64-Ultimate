@@ -103,30 +103,40 @@ bool chunk_end(const uint8_t *d, uint32_t n)
 
 }   // namespace
 
-int http_get(const HttpEnv &env, const char *host, const char *path, const char *client_id, uint32_t max_body, HttpOut *out)
+int http_get(const HttpEnv &env, const HttpReq &q, HttpOut *out)
 {
     out->body = 0;
     out->len = 0;
     out->status = 0;
+    out->conn = 0;
+    const uint32_t max_body = q.max_body;
     if (!env.net || !env.mem || !env.net->connect || !env.net->recv || !env.net->send || !env.net->close || !env.net->wait) {
         return HTTP_NO_NET;
     }
     char req[REQ_MAX];
     req[0] = 0;
     ot_cat(req, sizeof(req), "GET ");
-    ot_cat(req, sizeof(req), path);
+    ot_cat(req, sizeof(req), q.path);
     ot_cat(req, sizeof(req), " HTTP/1.1\r\nAccept-encoding: identity\r\nHost: ");
-    ot_cat(req, sizeof(req), host);
-    ot_cat(req, sizeof(req), "\r\nUser-Agent: Assembly Query\r\nClient-Id: ");
-    ot_cat(req, sizeof(req), client_id);
+    ot_cat(req, sizeof(req), q.host);
+    ot_cat(req, sizeof(req), "\r\nUser-Agent: ");
+    ot_cat(req, sizeof(req), q.agent);
+    if (q.client_id) {
+        ot_cat(req, sizeof(req), "\r\nClient-Id: ");
+        ot_cat(req, sizeof(req), q.client_id);
+    }
     ot_cat(req, sizeof(req), "\r\nConnection: close\r\n\r\n");
     int rl = ot_len(req);
+    if (rl >= REQ_MAX - 1) {
+        return HTTP_NO_ROOM;                                  // a request cut short is no request
+    }
 
     if (env.cancelled && env.cancelled(env.user)) {
         return HTTP_BROKEN;
     }
-    int h = env.net->connect(host, 80, HTTP_CONNECT_MS);
+    int h = env.net->connect(q.addr && q.addr[0] ? q.addr : q.host, 80, HTTP_CONNECT_MS);
     if (h < 0) {
+        out->conn = h;
         return HTTP_NO_NET;
     }
     int rc = HTTP_BROKEN;

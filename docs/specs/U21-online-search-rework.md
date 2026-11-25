@@ -1,7 +1,8 @@
 # U21 — The online search of trx64u: a form, a results tab, and Beyond64 as a third source
 
-**Status:** BUILDING since 2026-11-25 (branch `u21-online`): SDK 0.5.0 is pinned (§7). Where the online search lives is decided (D9: the sub-app's own
-form and results tab at F3 "3 Online", no P5 source); the form is built next. The UX review of the 0.4.6 screens (FAIL) is in §3.
+**Status:** BUILT 2026-11-25 on SDK 0.5.0 (branch `u21-online`) and run in ue2emu against the real servers (§7): the form and the results tab of D9, the
+three sources, Beyond64's filter and paging, Run from a result. Open: the board test, two questions for Alex (§6: Beyond64's page size, the size of a
+Beyond64 file), and the base's part of the findings (§3, for MultiCore). The UX review of the 0.4.6 screens (FAIL) and what became of each finding are in §3.
 **Repo:** TRX64-Ultimate, the sub-app `software/trx64u/apps/online/` (`app.toml`, `online_search.cc`, `online_http.cc`, `online_json.cc`).
 **Origin:** Alex, 2026-11-25 (translated): "The 'online' u2a app in the LVGL UI looks terrible. 1. Search should not be a tab of its own: in a
 form I say what I am looking for and from which source, and I start the search in the form; the result may then become a tab of its own.
@@ -67,6 +68,11 @@ form I say what I am looking for and from which source, and I start the search i
   category (Beyond64); the side panel shows the focused result (group/creator, handle, date, category, rating, platform; Beyond64's
   description). RETURN opens its files (name, size); RETURN on a file opens the Library's action sheet; Run downloads and closes the menu
   (D3.7). Paging where the source has it (Beyond64 `more`).
+- As built (§7): the form is the tab "3 Online" itself (D9), so "New search" of the results tab goes there; the results tab is "4 Results". The
+  separator of the title is the bullet (U+2022), the one sign beyond ASCII and the degree sign the menu's fonts have. RETURN on a result opens
+  its folder `/Online/<result>/` in Browse (the base's file list, the cursor on ".."); Beyond64's files show "0 KB" (§6). The text of Name /
+  Text takes at most 24 characters through the menu (the base's `ask`, finding 17; a REST client may give 120). A source change keeps a choice
+  the new source has under the same name (Category "Games" from Assembly64 to CommoServe), the others are dropped.
 
 ## 3. Today's screens (UX review, 2026-11-25, verdict FAIL)
 
@@ -84,6 +90,28 @@ Pictures from the real app in ue2emu (trx64u, SDK 0.4.6, real searches through s
    query or count, no paging (20 is the servers' cap). 12. Names cut by a 56-byte buffer without ellipsis; duplicates get "#5". 13. Server
    keys as labels ("Repo", "Subcat", "Latest") and in the status line. 14. Empty side panel. 15-17. base foot words, the `ask` prompt hides
    the form, `ask_state` prefills 24 of 47 characters.
+
+What became of them on SDK 0.5.0 (U21, 2026-11-25; "base" = the base's part, MultiCore's; pictures of the ue2emu session, not in git):
+
+| # | Finding | Now |
+|---|---|---|
+| 1 | Everything in one list, Search first, source named "Library", choices by hand, Search scrolled away, results in Browse | Fixed: Source first (a `pick`), the rows of that source only, Clear the form, Search in the foot slot (`F3/online/mainfoot`, always in view); the choices load by themselves when the form shows with a network; results in their own tab (D9) |
+| 2 | "Building the image 0%" on every request | Base P4 (0.5.0): `busy` "Searching <source>", status "Searching <source> ... (<- cancels)", no percentage. New (base): the busy view replaces the whole form with a page "Search" of one row |
+| 3 | The old error in red over the new list | Fixed: an error belongs to its request and goes with the next one; an op answer sets the status |
+| 4 | A source change keeps Assembly64's choices | Fixed: the choices the new source lacks are dropped (`set_source`, `prune_choices`) |
+| 5 | Run leaves the menu open; the text asks to retry | Base P7 (0.5.0): Run downloads, the menu closes, the program runs (measured: menu closed, `$0801-$080C, RUN`). Texts fixed: "Loading the files from <source> ...", "Downloading <name> ..." |
+| 6 | No focus after the choices load | Not applicable: choices are `pick` lists, no rows appear when they load; base P8 keeps the focus when a row hides (the source change moves no focus off Search) |
+| 7 | Rating, Type and Date blank | Fixed: a value with only `aqlKey` is named from it ("8 or more", "D64", the year) |
+| 8 | RETURN blanks the content (~250 ms) | Base P9 (0.5.0) for rows; the list page still blanks on RETURN and is rebuilt about 1.5 s later (known, sent to MultiCore) |
+| 9 | No network: misleading error, Search enabled | Fixed: Search greyed (`when_state`), the hint "No network: set it up in F8 System > Network"; a choice list says "No network: F8 System > Network" |
+| 10 | "Nothing found" red | Fixed: "Nothing found in <source> for '<text>'" as a plain status, the form stays, Search keeps the focus |
+| 11 | Result list: focus on "..", no source, query, count, paging | Fixed: the results tab (title, side panel Source / Searched for / Found / Not loadable), the list page with the SELECTED panel, Beyond64's pages ('+' row); Assembly64 and CommoServe stay at 20 (D7, "20 (the most)"). The cursor on ".." when a result's folder opens: base (no call places it) |
+| 12 | Names cut by a 56-byte buffer without ellipsis; duplicates "#5" | Fixed: titles to 61 characters, cut with "..."; a folder name that is taken gets " (2)", " (3)" |
+| 13 | Server keys as labels and in the status | Fixed: Archive, Subcategory, Year, Added within, File type, Sort by; the status says "Category: Games" |
+| 14 | Empty side panel | Fixed: form (Source, Last search, Result), results (above), list page (the result's side lines; Beyond64's description) |
+| 15 | Base foot words | Base: the legend shows the key rows (`[[key]]` `legend`, 0.5.0): "S SOURCE X CLEAR", "N NEW SEARCH X CLEAR" |
+| 16 | The `ask` prompt hides the form | Base: `ask` is a page of its own |
+| 17 | `ask_state` prefills 24 of 47 characters | Base: the entry holds 24 characters (`entry_load(sug, 24)`) and refuses `/ \ : * ? " < > |` (a file name's rule) for any text |
 
 ## 4. Beyond64's API (read 2026-11-25 on https://beyond64.org/#help/json-api)
 
@@ -105,14 +133,43 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
 - A list filter "has a file the download bridge serves" (e.g. `dl=1`), or the count of such files per list item, so the filter of D4 needs
   one request instead of one per result.
 - The year (`d`) in the list items, for the results' right column.
+- The size of each file in `f[]` (as `"s"`): the Library lists a Beyond64 file as "0 KB" (§6). A HEAD to the download bridge answers the
+  Content-Length, but in about 0.5 s (measured 2026-11-25, `Cache-Control: no-store`: the bridge fetches the file from its origin each time).
 
 ## 6. Open (one at a time)
 
 - ~~The default of the filter of D4~~: loadable only (D8). ~~Assembly64 and CommoServe stop at 20 results~~: they stay (D7).
-- The time the per-result details (D5) take for a page of Beyond64 results, measured in ue2emu before D4/D8 is built (D8).
+- ~~The time the per-result details (D5) take for a page~~: measured (§7): 20 releases a page 1.9-2.5 s, 50 (the API's most) 3.5-3.9 s.
+- **Beyond64's page size (for Alex).** Built: 20 a page, as many as Assembly64 and CommoServe give, under the 3 s of D8. 50 a page is over it
+  (3.5-3.9 s); 10 (the API's default) would be about 1 s.
+- **The size of a Beyond64 file (for Alex).** The API gives none (§5), and the base's file list has no "unknown size", so it shows "0 KB".
+  Options: a HEAD per file when a release's folder opens (about 0.5 s each, and one more fetch at the origin per file); leave it until Beyond64
+  adds the size (§5); a base change that shows no size (MultiCore).
 - ~~Where the online search lives~~: the sub-app's own form and results tab at F3 "3 Online", no P5 source (D9).
 
 ## 7. Status and history
+
+- **2026-11-25, built on SDK 0.5.0 (D1-D9).** `online.u2a` 2.0 (`APP_NEEDS base>=3.5`): image 46,812 bytes; the golden `base/ops_trx64u.txt` is
+  412 lines (198 operations, 214 states; `online.*` 8 operations, 75 states), `emu_ops.py --check` none missing either way; the menu record has
+  the tabs `F3/online` (form, split: rows, foot slot, side) and `F3/results` (`show`), 35 nodes; the four keys are rows of `base/menu.toml`
+  (a library's menu record has no key table). Run in ue2emu 0.7.4 with slirp against the real servers: a search of each source, the results
+  tab and its list page, a result's files in Browse, Run of a Beyond64 `.prg` (download, menu closed, the program ran), Show loadable only and
+  all, Beyond64's second page, an empty result (CommoServe "pac" in Games), no network (`--net none`), the keys S and N.
+  - **D8 measured** (the console line "online: Beyond64 page N: X releases, the list A ms, their details B ms, all C ms"): 20 releases a page,
+    15 pages: the list 95-180 ms, the details 1,750-2,380 ms, all 1,925-2,520 ms; 50 releases (a build with the limit at 50, 5 pages): the
+    details 3,445-3,750 ms, all 3,545-3,905 ms. Of a page of the newest, 5 of 20 were loadable. In ue2emu the network is the Mac's through
+    slirp; the board was not measured.
+  - **Beyond64 over HTTP/1.1.** Its API is written for HTTP/1.0 clients too, but its HTTP/1.0 answers have no length and end with the close,
+    and in ue2emu 4 of 6 pages of 20 failed that way, each on one detail read that broke after the header ("failed -2, status 200"); to
+    HTTP/1.1 it answers chunked, and the 550 detail reads after the change (20 pages) all came.
+  - New base findings (for MultiCore, with the pictures): `goto_screen` from an operation the menu runs (a row, a key, a list row) moves the
+    menu but draws nothing until the next key, which then acts on the new screen (from the list page, `<-` went up a folder in Browse); the
+    `busy` view replaces the whole form; the list node's count includes the '+' row ("6" for 5 results); a list row has no whole-row grey (only
+    the right column takes the tone); the scroll of a form stays where it was when rows hide, so the first row leaves the view with room to
+    spare; a library's menu record cannot hold `[[key]]` rows (u2a_pack: "a menu record has no key table and no windows"); no call opens the
+    action sheet of a path or puts Browse's cursor on a file; the `ask` entry holds 24 characters and refuses a file name's signs for any text.
+  - Found on the way and fixed: `otext.h` claimed a host test compiled it (none does here); the fonts carry the bullet, so `ot_fold` keeps it and
+    the degree sign; the side panels' values are short, because a value longer than about 30 characters less its label is drawn over the label.
 
 - **2026-11-25, SDK 0.5.0 pinned.** `sdk.pin` names the GitHub release `sdk-0.5.0-199705ec` (MultiCore t239.3 `199705ec`, base 3.5; no Gitea
   copy, `fetch_sdk.sh --download` refuses with a sentence). `build.sh` builds all five (trx64u 77,096, ring 136,232, monitor 209,004 bytes of

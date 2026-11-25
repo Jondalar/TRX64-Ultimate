@@ -1,4 +1,5 @@
-// The JSON reader of the online sub-app: what the search server answers (a list of presets, a list of results, an object of entries) is read into a tree of nodes in one block.
+// The JSON reader of the online sub-app: what the servers answer (Assembly64 / CommoServe: presets, results, entries; Beyond64: filters, a page of releases, a release) is
+// read into a tree of nodes in one block.
 // Ours (the firmware's json.h is a C++ class tree with new and delete, which an application image does not have). A text is read in place: the strings of the tree are
 // decoded into the text's own bytes, so the text is the tree's memory too and must outlive it.
 #ifndef APPS_ONLINE_JSON_H
@@ -29,5 +30,6 @@ JTree json_parse(char *text, int len, void *(*alloc)(uint32_t n, void *ctx), voi
 const JNode *json_member(const JNode *obj, const char *key);                   // the member of an object, null when none or not an object
 const char *json_text(const JNode *obj, const char *key);                      // the member as text; "" when absent or not a string
 int json_int(const JNode *obj, const char *key, int def);                      // the member as integer; def when absent or not a number
+bool json_bool(const JNode *obj, const char *key, bool def);                   // the member as true or false; def when absent or not a boolean
 
 #endif
