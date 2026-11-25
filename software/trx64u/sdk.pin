@@ -1,31 +1,22 @@
 # The TRX64 SDK that software/trx64u builds against (U18). fetch_sdk.sh checks the tarball against this file and
-# unpacks it into software/trx64u/.sdk/ (not in git). The SDK comes from TRX64U-MultiCore's branch t239.3 (their D26: we take
-# it from there); their builds are in that repository's .ci/sdk/ and in their pipeline's artifacts, which expire.
-# A copy of the pinned tarball is in our registry under sdk_package (TREX, generic); fetch_sdk.sh --download takes it there.
-# DEV BUILD: 0.4.6 (base 3.4) from MultiCore's branch t239.3, commit 6e280710 (on their remote), not a release: what 0.4.5 had (D11's frame()
-# and still_palette, D37's icap and partition, D36's audio_master, T256's canvas()), and T239.3 D48-D50: the UCI server left the base (its sources
-# came over once in handover/uci/, now our uci/), the shared c64cart driver drops the cartridge's cached lines after each ram_write and image_write,
-# and a library gets only read macros for the base's blocks (lib.mk DRV_BASE_READ_ONLY); D51's write-back service for libraries (api->wb, the
-# operation writeback.flush); T256 D13's exit_to_machine and goto_screen; D41 L-3c (the Library waits for a folder a job fetches); and the VIC-20
-# line (gateware/host.toml, the host's TOML A). The tarball's name does not carry the commit (trx64-sdk-0.4.6.tar.gz); it unpacks to
-# trx64-sdk-0.4.6/, the name a 0.4.6 release unpacks to as well.
-# build.sh checks the unpacked VERSION against source_commit and the hashes below, so a release unpacked over it is not
-# taken for this build. The SDK ships no app image (since 0.4.0): the app is linked here from the base archive
-# (pack_cor.sh), and base_archive_sha256 is the hash of its lib/libtrxbase.a as VERSION names it.
-sdk_version=0.4.6
-sdk_tarball=trx64-sdk-0.4.6.tar.gz
-sdk_package=trx64-sdk/0.4.6-6e280710
-sdk_tarball_sha256=fd3175debee74d545865e35b60f2071ee5f57e84b23bad03bdd4e8daf5701356
+# unpacks it into software/trx64u/.sdk/ (not in git).
+# RELEASE: 0.5.0 (base 3.5), the GitHub release sdk_release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO), published
+# from their branch t239.3, commit 199705ec (their pipeline run 45628574736, T262): the node kind `list`, ctx.ask_list and the node key
+# `pick = "@state"`, a tab's `show`, a job node's `busy` (no percentage before the operation reports one), the sources of the F3 search, a key row's
+# `legend`, and the base defects P7-P9 (api.md 1.2, README "What is new in 0.5.0"). A library built against 0.4.x loads unchanged.
+# fetch_sdk.sh --release takes the tarball there and checks it against the SHA-256 GitHub lists and the release's SHA256SUMS. There is no copy in
+# our Gitea registry (U20: Gitea is the archive; a registry upload is Alex's), so the pin names no sdk_package and --download refuses.
+# build.sh checks the unpacked VERSION against source_commit and the hashes below. The SDK ships no app image (since 0.4.0): the app is linked
+# here from the base archive (pack_cor.sh), and base_archive_sha256 is the hash of its lib/libtrxbase.a as VERSION names it.
+sdk_version=0.5.0
+sdk_tarball=trx64-sdk-0.5.0.tar.gz
+sdk_tarball_sha256=738118b7121fb37e6c1dd14c5e1bccac62c0756835dcd75647b7c2de121632a1
 source_branch=t239.3
-source_commit=6e280710
-base_api=3.4
+source_commit=199705ec
+base_api=3.5
 abi_major=3
-api_headers_sha256=22fd021dcfb654a4a933010080ddc33b5c88a7ebee5cd18f4712ec76992e30b3
-base_archive_sha256=65dc7f11d1bfc04204bb46278e942cee3e847a132078741cf96de289ec4f8080
-# The online sub-app is not pinned here since U20 D22 (MultiCore T261 D6, D7): apps/online is our copy of MultiCore's t239.3 6e280710 apps/online,
-# built by build.sh against this SDK (its OnlineApi has loading and loading_for, D41 L-3c, and the base takes the table only when it has that size,
-# netfs.cc online_api); its online.u2a equals the file pinned here before (061c7394..., MultiCore's .ci/sdk/online-6e280710.u2a) byte for byte.
-# U20 B (D11): the release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO) that holds sdk_tarball with a SHA256SUMS;
-# fetch_sdk.sh --release takes the tarball there (GitHub's runners reach no Gitea registry). Published by MultiCore's T261 (U20 part C); the
-# .u2a files it also holds are not taken.
-sdk_release=sdk-0.4.6-6e280710
+api_headers_sha256=5f20315f650767193d099ba57a370eb97aac873c7e1fa67ac9bc550674764e7a
+base_archive_sha256=8fa9b73c165ed3aa3442fce3f0102a5b1499159de43b1f60fe09d6a7ec8d1a75
+# The online sub-app is not pinned here (U20 D22): apps/online is built by build.sh against this SDK (online_api.h; the base takes the table only
+# when it is at least its own OnlineApi's size, netfs.cc online_api). The release's .u2a files (miniz, unzip, testlib) are not taken.
+sdk_release=sdk-0.5.0-199705ec

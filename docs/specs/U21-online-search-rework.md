@@ -1,6 +1,7 @@
 # U21 — The online search of trx64u: a form, a results tab, and Beyond64 as a third source
 
-**Status:** SPECIFIED 2026-11-25, waiting for MultiCore's SDK 0.5.0 (D6). Nothing built. The UX review of today's screens (FAIL) is in §3.
+**Status:** BUILDING since 2026-11-25 (branch `u21-online`): SDK 0.5.0 is pinned (§7). The form waits for Alex's answer where the online search lives
+(§6, the placement and P5). The UX review of the 0.4.6 screens (FAIL) is in §3.
 **Repo:** TRX64-Ultimate, the sub-app `software/trx64u/apps/online/` (`app.toml`, `online_search.cc`, `online_http.cc`, `online_json.cc`).
 **Origin:** Alex, 2026-11-25 (translated): "The 'online' u2a app in the LVGL UI looks terrible. 1. Search should not be a tab of its own: in a
 form I say what I am looking for and from which source, and I start the search in the form; the result may then become a tab of its own.
@@ -33,6 +34,11 @@ form I say what I am looking for and from which source, and I start the search i
 - **D6, the order.** "We wait for 0.5.0." The rework is built on SDK 0.5.0 when MultiCore publishes it; until then the sub-app stays as it is
   (0.4.6). Read as: nothing of U21 is built before 0.5.0, also not the parts that do not need it (Beyond64 client, fields per source, the
   app's own defects of §3).
+- **D7, Assembly64 and CommoServe stay at 20 results** (§6 point 2). No request to their operators. Alex: "Assembly und CommoServe ist die selbe
+  Server infrastructur und das ist halt 10-15 Jahre alter Java mist, das wird nie mehr anders bis die einen Rewrite machen".
+- **D8, the filter of D4 defaults to "loadable only"** (§6 point 1). Alex: "nur ladbare ja". Before it is built, the time the per-result details
+  of D5 take for a full page of Beyond64 results is measured in ue2emu (real network through slirp); noticeably slow (over about 3 s a page) is
+  reported to Alex with the numbers, not worked around (§6).
 
 ## 2. The target (from the UX review's proposal, to be fixed in detail on 0.5.0)
 
@@ -94,8 +100,24 @@ Ultimate software"; plain HTTP to beyond64.org answers 200 (measured by the UX r
   one request instead of one per result.
 - The year (`d`) in the list items, for the results' right column.
 
-## 6. Open (one at a time, when 0.5.0 is there)
+## 6. Open (one at a time)
 
-- The default of the filter of D4 (loadable only, or all).
-- Assembly64 and CommoServe stop at 20 results: acceptable, or ask them for paging.
-- The time the per-result details (D5) take on the board, measured before the filter's default is fixed.
+- ~~The default of the filter of D4~~: loadable only (D8). ~~Assembly64 and CommoServe stop at 20 results~~: they stay (D7).
+- The time the per-result details (D5) take for a page of Beyond64 results, measured in ue2emu before D4/D8 is built (D8).
+- Where the online search lives (Alex, 2026-11-25, asked before the form is built): today it is the F3 tab "3 Online" of the sub-app; SDK 0.5.0
+  also offers P5, a source of the base's F3 search (api.md 6.20). What each can do is in §7, 2026-11-25.
+
+## 7. Status and history
+
+- **2026-11-25, SDK 0.5.0 pinned.** `sdk.pin` names the GitHub release `sdk-0.5.0-199705ec` (MultiCore t239.3 `199705ec`, base 3.5; no Gitea
+  copy, `fetch_sdk.sh --download` refuses with a sentence). `build.sh` builds all five (trx64u 77,096, ring 136,232, monitor 209,004 bytes of
+  image, trex_crt, online), `pack_cor.sh --emu` packs `trx64u.cor` and runs it in ue2emu 0.7.4: READY., the monitor's ping, and the app registers
+  exactly `base/ops_trx64u.txt` (384 lines both ways); `rtl_check.py lint-src` clean. Two changes the SDK made necessary: the base has no group
+  "look" any more (api.md 4.13.19.6, MultiCore T239.3 D56), so its four operations `base.overlay`, `base.scheme`, `base.squeeze` and `base.nav`
+  left the golden and `base/menu.toml` dropped its `hide` of the four settings. Known: `SVC_HAS` of `base/`, `ring/` and `monitor/` (three
+  arguments) redefines the SDK's new two-argument `SVC_HAS` of `libapi.h` (a compiler warning, no change of the code).
+- **2026-11-25, placement and P5, looked at in ue2emu for Alex's answer (§6).** The sub-app is the F3 tab "3 Online" (a library's `[[tab]]` is
+  appended to an area the core's route has, `contrib.cc` `merge_tabs`; its rows come after the core's own, `sort_nodes`); the rows at the foot of
+  F7 under HOTKEYS are TREX CRT's (`F7/settings` without a group). A throwaway P5 source (not in git) showed the base's form: Source (This device,
+  then the sources), "Name contains", up to four text fields, Search; a job "Searching <name>"; the results as the list page of 6.19 with the
+  SELECTED panel. Registering a source changes the local "2 Search": RETURN opens that form instead of the name prompt.

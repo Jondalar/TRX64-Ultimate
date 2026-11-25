@@ -28,7 +28,7 @@ Both sub-apps are assets of the `fw-<branch>-<sha8>` pre-release beside `trx64u.
 
 ## State
 
-The three libraries and the two sub-apps build on MultiCore's dev SDK 0.4.6 (base 3.4, not released yet): every link
+The three libraries and the two sub-apps build on MultiCore's SDK 0.5.0 (base 3.5, the release `sdk-0.5.0-199705ec`, U21): every link
 closes, the constructor check passes, and each library packs into a `.u2a` within its declared budget (TREX CRT declares
 none, the online search heap_keep 0 and heap_peak 16 MiB). The core's description (`base/menu.toml`, the UI
 TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships no app image (since 0.4.0):
@@ -36,12 +36,13 @@ TOML, and `base/desc.toml`, the API TOML) compiles into record 6. The SDK ships 
 `app/toml_b.toml` (TOML B), runs the SDK's symbol check over it and packs `trx64u.cor` with the heap of word 0 (U18 §5
 has the figures and what is open). The ring library's Timewarp picture (U18 T-3) needs SDK 0.4.3 or later
 (`api->overlay->frame`, `still_palette`), and 0.4.5 for its bar on the smaller canvases (`canvas()`) and as the only
-bar (the base draws none since 0.4.5); the pin is 0.4.6 (U18 §5).
+bar (the base draws none since 0.4.5); the pin is 0.5.0 (U21 §7; 0.4.6 until then, U18 §5).
 `pack_cor.sh --emu` runs the packed `trx64u.cor` in ue2emu 0.7.4 on the Mac: BASIC READY from the started core, and what
 the app registers equals `base/ops_trx64u.txt` (2026-11-24, U18 §5 step 2b; on 0.4.6 too, and the UCI answers the DOS target from our own server,
 U18 §5). Earlier runs: ue2emu on MultiCore's shared
 3.3 image and the board (2026-11-23, U18 §5). With the submodule empty and the SID player gone (U20 A2, A3, 2026-11-24) the
-build, the pack and `--emu` pass the same way: 388 lines, none missing either way.
+build, the pack and `--emu` pass the same way: 388 lines, none missing either way. On 0.5.0 (2026-11-25, U21 §7) the list is 384 lines: the base has
+no group "look" any more (MultiCore T239.3 D56), so `base.overlay`, `base.scheme`, `base.squeeze` and `base.nav` are gone.
 
 The SID and music player is gone (Alex, U20 D6, A3): no `.sid`, `.mus` or `.str` file types, no operations `c64.sid_play`,
 `c64.sid_songs`, `c64.sid_valid`, `c64.sid_info` and `dma.sidcrt`, no settings group "SID player behavior" (its two settings were read
@@ -85,15 +86,15 @@ the firmware's trxmon and `monitor/lib_monitor.cc` / `monitor/monsrv.cc` give th
 ## SDK
 
 `sdk.pin` names the SDK version and the sha256 of its tarball. `./fetch_sdk.sh <tarball>` checks it and unpacks it into `.sdk/` (not in git);
-the online sub-app is no longer pinned (U20 D22: `apps/online`, built against this SDK's `online_api.h`: 0.4.6's base takes no smaller table,
+the online sub-app is no longer pinned (U20 D22: `apps/online`, built against this SDK's `online_api.h`: the base takes no smaller table since 0.4.6,
 U18 §5). The compiler is the build image's `riscv32-unknown-elf-` (`u64-build-env`); a Mac's
 `riscv64-elf-` has no newlib headers.
 
 ## Packing trx64u.cor
 
 1. The SDK: `./fetch_sdk.sh --release` takes the pinned tarball from MultiCore's SDK release (`sdk.pin` `sdk_release`, U20 D11),
-   `./fetch_sdk.sh --download` from our Gitea registry (`sdk.pin` `sdk_package`, TREX generic `trx64-sdk/<version>-<commit8>`: a copy of
-   MultiCore's `t239.3` build; their D26: we take the SDK from `t239.3` and keep it), `./fetch_sdk.sh <tarball>` a local file
+   `./fetch_sdk.sh --download` from our Gitea registry when `sdk.pin` names an `sdk_package` (TREX generic `trx64-sdk/<version>-<commit8>`; the
+   0.5.0 pin names none: there is no registry copy of it, and the script says so), `./fetch_sdk.sh <tarball>` a local file
    (MultiCore's `.ci/sdk/` holds them). A new pin: fetch the SDK of a MultiCore release, put its sha256 and hashes into `sdk.pin`, and check
    that `apps/online` still builds against it (the base takes the table "online" only when it is at least its own `OnlineApi`'s size).
 2. The bitstream: `c64_basic.bit` of our CI package `<branch>-<commit8>`:
