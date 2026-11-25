@@ -213,7 +213,7 @@ jobs:
           . ci/pkg.env
           entry=$(ci/keys.sh)
           mkdir -p builder
-          if gh release download "${BUILDS_TAG_PREFIX}bit-$entry" -R "$MC_BUILDS_REPO" -D builder -p reports.tar.gz -p wns.txt -p key; then
+          if gh release download "${BUILDS_TAG_PREFIX}bit-$entry" -R "$MC_BUILDS_REPO" -D builder -p reports.tar.gz -p wns.txt -p key -p '*.bit'; then
             tar -xzf builder/reports.tar.gz -C builder
           else
             echo "the builder has no release ${BUILDS_TAG_PREFIX}bit-$entry: only the Hetzner builds are shown"

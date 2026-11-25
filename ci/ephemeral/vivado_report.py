@@ -5,7 +5,7 @@
     ci/ephemeral/vivado_report.py ART_DIR [BUILDER_DIR]
 
 ART_DIR      the artifact of job `work` (ci/ephemeral/vivado.sh): info.txt, times.txt, warm/, cold/
-BUILDER_DIR  the builder's release fw-bit-c64u-<key> of the same key, its reports.tar.gz unpacked beside wns.txt and key;
+BUILDER_DIR  the builder's release fw-bit-c64u-<key> of the same key: its bitstreams, wns.txt, key, and reports.tar.gz unpacked;
              missing when the builder has not built this key (then only the two Hetzner builds are shown)
 Environment (job `start`): T_CREATE, T_RUNNING, T_ONLINE (epoch seconds), T_JOB (job `work`'s first step), SERVER_TYPE,
 SERVER_LOCATION, PRICE_HOURLY (EUR net, the API's price).
@@ -13,7 +13,8 @@ SERVER_LOCATION, PRICE_HOURLY (EUR net, the API's price).
 Compared per design: Vivado's own elapsed time per command (*.steps.txt, the lines ci/bitstream.sh keeps), their sum, WNS
 (wns.txt), and for c64_basic the utilization (Slice LUTs, Slice Registers, Block RAM Tile, DSPs of *.utilization.rpt).
 The bitstreams are not compared byte for byte: the .bit header carries the build's date and time, and placement may
-differ between machines; equal criteria are timing met and the board.
+differ between machines; equal criteria are timing met and the board. The configuration data after the sync word is
+compared byte for byte all the same, and the differing offsets are listed.
 """
 import math
 import os
@@ -62,6 +63,17 @@ def util(d, design):
         m = re.search(r"^\| " + re.escape(name) + r"\s*\|\s*([0-9.]+)", t or "", re.M)
         res[name] = m.group(1) if m else "-"
     return res
+
+
+def bitbody(path):
+    """The .bit file from its sync word 0xAA995566 on; None if the file is missing."""
+    try:
+        with open(path, "rb") as f:
+            b = f.read()
+    except OSError:
+        return None
+    i = b.find(bytes.fromhex("aa995566"))
+    return b[i:] if i >= 0 else b
 
 
 def kv(path):
@@ -142,16 +154,49 @@ def main():
     p("| **all** | %s |" % " | ".join(total))
     p()
 
-    p("### c64_basic per command (elapsed)")
+    p("### c64_basic per command (elapsed; the n-th run of a command against the n-th)")
     p()
     p("| command | " + " | ".join(n for n, _ in cols) + " |")
     p("|---|" + "---|" * len(cols))
-    per = {n: steps(d, "c64_basic") or [] for n, d in cols}
-    rows = max((len(v) for v in per.values()), default=0)
-    for i in range(rows):
-        name = next((per[n][i][0] for n, _ in cols if i < len(per[n])), "?")
-        p("| %s | %s |" % (name, " | ".join(mmss(per[n][i][1]) if i < len(per[n]) else "-" for n, _ in cols)))
+    per = {}
+    order = []
+    for n, d in cols:
+        seen = {}
+        per[n] = {}
+        for c, t in steps(d, "c64_basic") or []:
+            seen[c] = seen.get(c, 0) + 1
+            per[n][(c, seen[c])] = t
+            if (c, seen[c]) not in order:
+                order.append((c, seen[c]))
+    for c, i in order:
+        p("| %s%s | %s |" % (c, " (%d)" % i if i > 1 else "", " | ".join(mmss(per[n].get((c, i))) for n, _ in cols)))
     p()
+
+    if bld:
+        p("### Bitstreams: the configuration data after the sync word, against the builder's")
+        p()
+        p("| design | " + " | ".join(n for n, _ in cols if n != "builder") + " |")
+        p("|---|" + "---|" * (len(cols) - 1))
+        for design in DESIGNS:
+            ref = bitbody(os.path.join(bld, design + ".bit"))
+            cells = []
+            for n, d in cols:
+                if n == "builder":
+                    continue
+                b = bitbody(os.path.join(d, design + ".bit"))
+                if ref is None or b is None:
+                    cells.append("-")
+                elif len(ref) != len(b):
+                    cells.append("length %d against %d" % (len(b), len(ref)))
+                else:
+                    diff = [i for i in range(len(b)) if b[i] != ref[i]]
+                    cells.append("equal" if not diff else "%d bytes differ (offsets %s)" % (
+                        len(diff), ", ".join(str(i) for i in diff[:8]) + (", ..." if len(diff) > 8 else "")))
+            p("| %s | %s |" % (design, " | ".join(cells)))
+        p()
+        p("The header before the sync word (name, part, date, time) always differs. c64_basic sets"
+          " BITSTREAM.CONFIG.USR_ACCESS TIMESTAMP (designs/c64_basic/pins.xdc): its word and the CRC after it differ in every build.")
+        p()
 
     p("### c64_basic utilization")
     p()
