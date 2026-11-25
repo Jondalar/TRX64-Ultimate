@@ -1,6 +1,7 @@
 # U20 — GitHub becomes TRX64-Ultimate's development home; GitHub's runners build everything but Vivado, our builder builds the bitstream
 
-**Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
+**Status:** DONE 2026-11-25 except F, which Alex deferred (D19). GitHub is the home since the merge of PR #3 (d72ab54a); first `fw-main-d72ab54a`
+pre-release published; `integration` cut from `main`. History (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
 green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb0206e3, CI run 483 green: lint, bitstream, package, sims, cor; the ROM store on the builder filled from VICE's
 svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
 the Gitea key unchanged and no job from `.github/workflows` started on Gitea; they run on
@@ -549,6 +550,19 @@ For part E:
   `online.u2a`; it is the ring's font). The two `.u2a` are clean.
 - Only GitHub shows: the build in MultiCore's `trx64u-build` image (same xPack 11.3.0; `online.u2a` expected byte-equal), the artifact with the two
   `.u2a` through the emulator job, the upload of the five files, MultiCore's import by `U2A`.
+
+### E, done (2026-11-25)
+
+- On `u20` after the push: runs green in every job on `cfad980` (emulator on MultiCore's `net` image) and `415af47` (the two `.u2a` built
+  here; GitHub's `online.u2a` = 061c7394, the pinned bytes). A run superseded on `u20` waited in `bitstreams` because the builder refused an
+  empty work order; MultiCore's builder 545a5b6 approves an empty order and rejects bad or superseded runs.
+- Alex merged PR #3 (`u20` -> `main`) as a merge commit, d72ab54a (127 commits on 2b545a8). Run #6 on `main` (45590388098): every job green;
+  the pre-release `fw-main-d72ab54a` in `trx64mc-builds` holds trx64u.cor (3,948,590 B, afc97e6a), trex_crt.u2a (88,909 B, 4bc89def),
+  online.u2a (26,147 B, 061c7394), manifest.json, SHA256SUMS; tag and hashes sent to MultiCore for their pin.
+- `integration` cut from `main` (d72ab54a). The builder's key code ref back to `main` (asked of MultiCore). Gitea `u18`'s pipeline runs only by
+  hand (f2df567f, as MultiCore's T239.1 D45); this tree's `.gitea/workflows/pipeline.yml` follows.
+- Session rules: sessions push feature branches to GitHub; only Alex merges `integration` and `main`; Gitea is the archive (the gideon-app line
+  builds there on demand). The repository has no CLAUDE.md of its own; the rules live in the sessions' memory.
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 
