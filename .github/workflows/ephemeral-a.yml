@@ -5,8 +5,8 @@ name: Ephemeral runner (U20 F-a)
 # its cloud-init user data (ci/ephemeral/user-data.sh); job work runs on that runner, which takes this one job and
 # deregisters; job stop deletes the server and the registration, whatever happened before.
 #
-# The documented exception to the workflow rule "no runs-on self-hosted" (MultiCore's tools/check_workflows.py rule 6,
-# copied by U20 §3): job work runs on a self-hosted runner. It may, because
+# The documented exception to the workflow rule "every runs-on is a GitHub-hosted image" (tools/check_workflows.py rule 6,
+# U20 B; its EXCEPTIONS list names this job and its label expression): job work runs on a self-hosted runner. It may, because
 #  - nothing but a push to scratch/ephemeral-* and workflow_dispatch starts this workflow: no pull_request,
 #    pull_request_target or other event that carries fork code, which must never reach a self-hosted machine
 #    (the repository is public). GitHub offers workflow_dispatch only for workflows on the default branch, so before the

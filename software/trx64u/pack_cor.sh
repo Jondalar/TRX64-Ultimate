@@ -21,10 +21,10 @@
 #    packed .cor in ue2emu and compares what the running app registers (REST /v1/ops and /v1/state) with the list, both ways (tools/emu_ops.py --check).
 #    The SDK's link step makes no operation table: app_build.py generates appsizes.h, the driver table, the library table (libtab_table.cc) and io.ld,
 #    and the operations are registered at run time by the code that table names and by the libraries of record 7, so the app's list is measured by
-#    running it. ue2emu runs on the Mac; CI has no emu stage, so CI runs only the first check (U18 §5).
+#    running it. The Gitea stage cor runs only the first check; the GitHub matrix runs the second in its emulator job (ci/lane.sh core:trx64u emu, U20 B).
 #   software/trx64u/pack_cor.sh --bit <c64_basic.bit> --bit-commit <commit8> --version <v> [--out <file>] [--no-build] [--emu <ue2emu>]
-# --bit is the c64_basic.bit of our CI package <branch>-<commit8> (.../api/packages/TREX/generic/trx64-ultimate/...);
-# --bit-commit names that commit. --no-build packs the libraries already in build/ (the app is always linked; make redoes only what changed).
+# --bit is the c64_basic.bit of a commit: the Gitea CI package <branch>-<commit8> (.../api/packages/TREX/generic/trx64-ultimate/...) or, on
+# GitHub, the builder's release fw-bit-c64u-<key> that ci/fetch_bits.sh restores (U20 B); --bit-commit names that commit. --no-build packs the libraries already in build/ (the app is always linked; make redoes only what changed).
 # Default --out: build/cor/trx64u.cor. Needs the SDK unpacked (fetch_sdk.sh). Where riscv32-unknown-elf-g++ is missing it runs itself in
 # u64-build-env, as build.sh does (the bitstream is copied into build/cor/in/ first so that the container sees it), and the emulator check runs here after it.
 set -eu

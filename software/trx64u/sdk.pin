@@ -32,3 +32,7 @@ online_u2a=online.u2a
 online_package=trx64-online/1.0-6e280710
 online_u2a_sha256=061c73943c4419233138714f52c5fc16b3c7f5e266a20c305189d8e0ab820968
 online_source_commit=6e280710
+# U20 B (D11): the release of MultiCore's SDK lane in the builds repository (ci/pkg.env MC_BUILDS_REPO) that holds sdk_tarball and online_u2a with a
+# SHA256SUMS; fetch_sdk.sh --release takes them there (GitHub's runners reach no Gitea registry). The tag is U20's proposal to MultiCore (part C):
+# until their SDK lane publishes it, this release does not exist and --release fails.
+sdk_release=sdk-0.4.6-6e280710

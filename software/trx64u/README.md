@@ -119,7 +119,7 @@ What goes in:
 | icon | `base/icon.rgb565`: TRX64's logo, a copy of MultiCore's `tools/core_logos/trx64/icon.rgb565` (sha256 `d521f548...`) |
 | record 8 (files the core installs) | `apps/trex_crt.u2a` (`build.sh`), which the base finds in the core's folder `apps/` from the first start: it installs record 8 before it scans the folder (MultiCore's `coreapp/src/run.cc` at SDK 0.4.6's source commit 6e280710, :778 and :786) |
 | bitstream | `--bit`, with `--bit-commit` |
-| the operations | `base/ops_trx64u.txt`: what the running app exports (REST `/v1/ops`, `/v1/state`), ours (U18 R6), written from `tools/emu_ops.py` (MultiCore's `tests/ui/export.py` format). `cor_pack.py --ops` checks record 6's names and bindings against it at every pack; `--emu` checks the running app against it both ways. The SDK's link step makes no operation table, so the list is measured; CI has no emu stage yet (U18 §5) |
+| the operations | `base/ops_trx64u.txt`: what the running app exports (REST `/v1/ops`, `/v1/state`), ours (U18 R6), written from `tools/emu_ops.py` (MultiCore's `tests/ui/export.py` format). `cor_pack.py --ops` checks record 6's names and bindings against it at every pack; `--emu` checks the running app against it both ways. The SDK's link step makes no operation table, so the list is measured; the Gitea pipeline runs no emulator, the GitHub matrix does (`ci/lane.sh core:trx64u emu`, U20 B) |
 
 The heap (MultiCore T239.3 P4-1): word 0, the region left after the linked app and the stack reserve. `pack_cor.sh` passes
 `--heap 0`, prints `cor_pack.py`'s figures and checks them against the image: heap = 0xE70000 - align16(E), E the linker's

@@ -4,7 +4,13 @@
 # the next: /cache/runs/<run id>/<stage>/ on the NAS runner (the volume the
 # Vivado cache already uses), .ci/runs/local/<stage>/ in a checkout. A stage
 # that finished writes its directory completely and a file DONE last.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Two trees (U20 A7, MultiCore's form): CI_CODE is the one this file sits in, and
+# every script below runs from it; ROOT is the one whose files are read (the git
+# index the keys hash, ci/bitstream.sh's part). They are the same tree unless
+# CI_DATA_ROOT names another checkout: ci/keys.sh --data sets it, so the builder
+# can run the key code of its trusted ref over an outside commit's tree.
+CI_CODE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${CI_DATA_ROOT:-$CI_CODE}"
 RUN_ID="${CI_RUN_ID:-${GITHUB_RUN_ID:-local}}"
 if [ -n "${CI_HANDOFF:-}" ]; then
   HANDOFF="$CI_HANDOFF"
@@ -34,7 +40,9 @@ need_stage() {
 _lap_t=$SECONDS
 lap() { local d=$((SECONDS - _lap_t)); _lap_t=$SECONDS; printf '%dm%02ds' $((d / 60)) $((d % 60)); }
 
-branch_slug() { printf '%s' "${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}" | tr '/' '_'; }
+# CI_BRANCH first: GitHub's workflows (U20 B) set it to pr-<number> on a pull request, where GITHUB_REF_NAME is <number>/merge;
+# the Gitea workflows do not set it.
+branch_slug() { printf '%s' "${CI_BRANCH:-${GITHUB_REF_NAME:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}}" | tr '/' '_'; }
 
 # tree_key <pathspec...>: 16 hex digits over the content of the tracked files
 # under the pathspecs and the free text in $KEY_EXTRA. Only the content counts,
@@ -97,11 +105,12 @@ tool_versions() {
 # entry, not what is under it, so ':(exclude)designs/*/sim' excluded nothing and
 # every bench edit rebuilt the bitstream (found 2026-10-30, U5). Check with
 #   git ls-files designs ':(exclude)designs/*/sim/**' | grep -c /sim/   -> 0
+# GATEWARE_SPECS: the pathspecs of the key (also ci/lane.sh core:trx64u changed, which asks git whether they changed since the base).
+GATEWARE_SPECS=(designs constraints cores vendor/gideon tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon
+  ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**'
+  ':(exclude)vendor/gideon/VENDOR.md' ':(exclude)vendor/gideon/software/io/audio/**')
 gateware_key() {
-  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key \
-    designs constraints cores vendor/gideon tools/vivado_lib.tcl tools/vendor_gideon.sh tools/patches/gideon \
-    ':(exclude)designs/*/sim/**' ':(exclude)designs/*/build/**' \
-    ':(exclude)vendor/gideon/VENDOR.md' ':(exclude)vendor/gideon/software/io/audio/**'
+  KEY_EXTRA="$1 vivado-env:2024.1 sid=${TRX_SID:-} slot=${T16_SLOT:-} features=${TRX_FEATURES:-}" tree_key "${GATEWARE_SPECS[@]}"
 }
 
 # cache_put <dir> <key-dir>: copy a finished stage directory into the cache

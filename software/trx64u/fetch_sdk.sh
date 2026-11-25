@@ -4,6 +4,8 @@
 #   software/trx64u/fetch_sdk.sh <path to the tarball sdk.pin names> [<path to online.u2a>]
 #   software/trx64u/fetch_sdk.sh --download      (our registry's copies, sdk.pin's sdk_package and online_package; GITEA_URL, default
 #                                                  http://gitea.example, CI passes its server)
+#   software/trx64u/fetch_sdk.sh --release       (the release sdk.pin's sdk_release of the builds repository, U20 D11: tools/builds.sh fetch checks
+#                                                  each asset against the SHA-256 GitHub lists and the release's SHA256SUMS; GitHub's runners)
 # Each file is checked against its sha256 in sdk.pin first; a different file is refused. The tarball unpacks to trx64-sdk-<sdk_version>/
 # whatever its own name (some dev builds carry their commit in it, 0.3.0 and the 0.4.x do not); its VERSION must match the pin (build.sh --check).
 # online.u2a (sdk.pin online_*: MultiCore's online sub-app of the same t239.3 commit, not part of the tarball) goes to .sdk/online.u2a, where
@@ -15,7 +17,7 @@ sha() { s="$(shasum -a 256 "$1" 2>/dev/null || sha256sum "$1")"; echo "${s%% *}"
 VER="$(pin sdk_version)"
 SUM="$(pin sdk_tarball_sha256)"
 DIR="trx64-sdk-$VER"
-TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)> [<path to $(pin online_u2a)>] | --download}"
+TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)> [<path to $(pin online_u2a)>] | --download | --release}"
 ONL="${2:-}"
 if [ "$TAR" = --download ]; then
     mkdir -p "$HERE/.sdk"
@@ -26,6 +28,19 @@ if [ "$TAR" = --download ]; then
     ONL="$HERE/.sdk/download-$(pin online_u2a)"
     curl -sfL -o "$ONL" "$REG/$(pin online_package)/$(pin online_u2a)" || {
         echo "fetch_sdk.sh: cannot download $(pin online_package)/$(pin online_u2a)" >&2; exit 1; }
+elif [ "$TAR" = --release ]; then
+    mkdir -p "$HERE/.sdk/release"
+    REL="$(pin sdk_release)"
+    [ -n "$REL" ] || { echo "fetch_sdk.sh: sdk.pin names no sdk_release" >&2; exit 1; }
+    for fs in "$(pin sdk_tarball) $(pin sdk_tarball_sha256)" "$(pin online_u2a) $(pin online_u2a_sha256)"; do
+        f="${fs% *}"
+        # a file the job's cache restored with the pinned hash is not fetched again (the checks below run on it as on a download)
+        [ -f "$HERE/.sdk/release/$f" ] && [ "$(sha "$HERE/.sdk/release/$f")" = "${fs#* }" ] && continue
+        bash "$HERE/../../tools/builds.sh" fetch "$REL" "$f" "$HERE/.sdk/release/$f" || {
+            echo "fetch_sdk.sh: cannot fetch $f of the release $REL" >&2; exit 1; }
+    done
+    TAR="$HERE/.sdk/release/$(pin sdk_tarball)"
+    ONL="$HERE/.sdk/release/$(pin online_u2a)"
 fi
 GOT="$(sha "$TAR")"
 if [ "$GOT" != "$SUM" ]; then

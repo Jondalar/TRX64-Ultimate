@@ -2,7 +2,9 @@
 
 **Status:** IN PROGRESS (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
 green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb0206e3, CI run 483 green: lint, bitstream, package, sims, cor; the ROM store on the builder filled from VICE's
-svn-mirror by the `dbgsess` bench). F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25).
+svn-mirror by the `dbgsess` bench). A7 and B built on branch `u20-b` (2026-11-25), checked on the Mac, the Gitea key unchanged; they run on
+GitHub after C (MultiCore's builder table, the SDK release) and D (Alex's setup); the names they use are proposals to MultiCore (§6 "B, A7").
+F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25).
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -257,7 +259,110 @@ In this order; each step is a commit with its docs. A, B and E are ours; C is Mu
   allows it; D12 changes the contract anyway). Board tests that boot `ultimate.app` from a package (`t55`/`t62`/`t67`
   `--package`, `t16_session` boot, `ue2_session`) need a package of the `gideon-app` line. `docs/` still names the submodule in
   44 files: specs, ADRs and dated notes (history, left), `gideon-menu-tree.md` (fork paths as text now).
-- A7 (keys) is left for later: it waits for MultiCore's builder table (D9).
+- A7 (keys): built with B, see "B, A7" below.
+
+### B, A7 (the GitHub workflows, the keys)
+
+2026-11-25, branch `u20-b` from `u18` c63f7854, MultiCore's form from their `t239.3` d9ddadeb1 (read only; their matrix went green in run 45481704917 on
+da3f0ee4f) and their builder's `pull/` (read only). Every copied file names its source in a PROVENANCE line and what changed.
+
+Built:
+- **A7, keys.** `ci/keys.sh [--env FILE] [--data DIR]` prints the one entry `c64u-<gateware_key>` (MultiCore's `vivado_env_load`: only `TRX_*`,
+  `T79_*`, `T16_*` names with plain values, the caller's own option variables dropped first). `ci/lib.sh` splits `CI_CODE` (the scripts) from `ROOT`
+  (the tree read; `CI_DATA_ROOT`), `GATEWARE_SPECS` holds the key's pathspecs (also read by the lane's step 3), `branch_slug` takes `CI_BRANCH` first.
+  `ci/vivado.env` names `TRX_SID`, `T16_SLOT`, `TRX_FEATURES`, all empty: the Gitea bitstream stage sets none, and an empty value builds
+  `build.tcl`'s default as an unset one does. `tools/check_vivado_env.py` (MultiCore's, with our rule: an empty option must be absent or empty in
+  `.gitea/workflows/bitstream.yml`, a set one equal, an option the workflow sets that the file does not name is red). The builder's key code is
+  `ci/keys.sh` and `ci/lib.sh` (lib.sh sources nothing else).
+- **Gitea keys: unchanged.** `gateware_key xc7a50tfgg484-1` before and after: `0dce5fff4ef99009`; `ci/keys.sh` with `TRX_FEATURES=jtag T16_SLOT=0` in
+  the caller's environment: `c64u-0dce5fff4ef99009`; the builder's way (a folder holding only `ci/keys.sh` and `ci/lib.sh`, `--data` a clone of
+  c63f7854, `env -i`): the same name, nothing written into the data tree; `ci/vivado.env` with `PATH=/x` or `TRX_SID=a;b`: exit 1; with
+  `TRX_FEATURES=jtag`: another key (`fa780545c06becf1`). No other key of `ci/lib.sh` changed (`files_key`, `tree_key` untouched). Lint checks it on
+  every run ("keys").
+- **1, the matrix.** `.github/workflows/pipeline.yml` (push of every branch but `scratch/**`, `v*` tags, a fork's pull request, dispatch with
+  `extra: sims`; jobs `matrix`, `prerelease`, `summary`) calls `.github/workflows/matrix.yml`: `dispatch` (plan, lanes, work order), `approve`
+  (environment `vivado`, MultiCore's rule: Alex's own push builds without it), `lint` (one leg per lane), `sims`, `bits` (environment `bitstreams`),
+  `core`, `emu`, `summary`. `ci/dispatch.py` writes `plan.json` itself (base = the push's `before` or the pull request's base; MultiCore's
+  `ci/plan.sh` decides per core, we have one of each) and prints `lint_groups`, `bits`, `cores`, `sims`, `sims_tier`, plus the matrix table in the job
+  summary. `ci/lane.sh`: `bits:c64_basic key|fetch|report`, `core:trx64u changed|build|package|deliver|emu`. `ci/lint.sh [GROUP]`: no group = every
+  check (the Gitea stage, unchanged), `tree` (shell, Python, workflows, `select.sh`, keys, vivado env, the builds scripts' test, ROMs test),
+  `bits:c64_basic` (Verilog syntax, `sims.txt`), `core:trx64u` (the reverse lint, SDK by `SDK_FETCH`).
+- **The steps the lanes leave empty, and why** (a lane leaves a step empty when it has none, T239.5): the core has no unit tests of its own (2) and the
+  SDK's coreapp test units name none of it (8-10); 4 is the reverse lint of step 1, `rtl_check.py check` waits for the SDK fix (U18 §5); 5 and 7 run
+  inside `pack_cor.sh` in step 11 (`app_build.py` against TOML A and B, `libtab.py symcheck`, `cor_pack.py --ops`, the heap check), not split out.
+- **2, release side.** `ci/order.py` (one entry; work order `{"version": 1, "sha", "lanes": ["bits:c64_basic"], "entries"}`), `ci/fetch_bits.py`
+  (digest and `SHA256SUMS` checks, `reports.tar.gz` members, manifest optional, MultiCore's D40 cache record), `ci/publish_release.py` (draft,
+  digests, publish; only `main` and `v*` tags, only our repository's push, and a tag must start with `fw-`), `ci/prerelease.sh` (stage
+  `trx64u.cor`, `manifest.json`, `SHA256SUMS`), `tools/builds.py`/`builds.sh` (MultiCore's reader; `latest` with our prefix), `ci/pkg.env`.
+  `software/trx64u/fetch_sdk.sh --release` fetches `sdk_tarball` and `online_u2a` of `sdk.pin`'s new `sdk_release` through `tools/builds.sh`
+  (a cached file with the pinned hash is kept); `--download` (Gitea) stays.
+- **3, images and caches.** MultiCore's digests of `t239.3`: `trx64u-build@sha256:706a976b…0c08` (dispatch, bits, core, prerelease),
+  `trx64u-sim@sha256:3e366a08…25e0` (lint, sims; the same OSS CAD Suite 2026-09-27 as our `trx64-sim-env:4`), `trx64u-emu@sha256:250f08bb…2281`
+  (emu: build image plus ue2emu v0.7.0); actions pinned at their SHAs (checkout v4.2.2, cache v4.2.3, upload v4.6.2, download v4.3.0). Caches:
+  the SDK release files (key: hash of `sdk.pin`), the restored bitstream entry (key: the entry name, D40), the bench markers and ROM store
+  (`ci-cache-sims-c64_basic-<sha>`, shared with the nightly), Gideon's ROM folder (key: its commit). Not taken: ccache (D41): the SDK's makefiles
+  call `$(RV_PREFIX)gcc`/`ld` with no launcher, and a launcher in `RV_PREFIX` would also front `ld`.
+- **4, sims, emulator, workflow lint.** `ci/select.sh sims-demand` (MultiCore's rule: 2 on `integration`, `integ-*`, `release/*`, tags,
+  `SIMS_INPUT=true` or `[sims]`, else 0; `sims-tier` stays for Gitea); the matrix's `sims` job runs `ci/sims.sh -t <tier>` before Vivado;
+  `.github/workflows/nightly.yml` runs tier 2 (schedule, dispatch, or a push to `scratch/nightly/**` with `[nightly]` until the switch). The emulator
+  step: `ci/emu_roms.sh` fetches `roms/` of GideonZ/1541ultimate 700c7f2f (MultiCore's pin; tree id e3085066 read from GitHub 2026-11-25) and checks
+  the tree id, then `emu_ops.py --check base/ops_trx64u.txt` runs the `.cor` with its own app; no work directory is kept (it holds the ROMs).
+  `tools/check_workflows.py`: MultiCore's rules 1-5, rule 2 with `main` and `v*`, rule 6 now "every `runs-on` is a GitHub-hosted image" with one listed
+  exception (`ephemeral-a.yml` job `work`: closes F open point 4), rule 7 adds internal hosts and paths, a new rule 8 checks `needs.*.outputs.*` and
+  `steps.*` references (actionlint could not be run here).
+- **5, release tool.** `tools/release_trx64u.sh <fw-…tag> [--publish --notes FILE]` (MultiCore's `release_mc.sh` form): every asset against
+  GitHub's digest and `SHA256SUMS`, `manifest.json` against the tag and the `.cor`, the `.cor`'s record 1 (id `trx64u`, version) against the
+  manifest; `--publish` also wants a plain x.y.z, `tools/check_public_tree.py` (A8: until it exists `--publish` stops) and the tag `v<x.y.z>` on
+  the manifest's commit, then `gh release create --verify-tag` as a draft, asset count, publish.
+
+**Proposals to MultiCore** (part C decides; until then nothing of B can run on GitHub):
+- D9, a row of the builder's table: source `Jondalar/TRX64-Ultimate`, builds `Jondalar/trx64mc-builds`, tag prefix `fw-`, workflow
+  `.github/workflows/pipeline.yml` (the matrix is called from it, so its artifacts `work-order` and `plan` are that run's), entries
+  `^c64u-[0-9a-f]{16}$` (one; lane `bits:c64_basic`), release tag `fw-bit-<entry>`, key code `ci/keys.sh`, `ci/lib.sh` from the trusted ref `main`,
+  `ci/vivado.env` read from the commit (`TRX_*`, `T79_*`, `T16_*`), trusted branches `main` (`integration` once it exists), environments `vivado` and
+  `bitstreams`, build command `ci/bitstream.sh c64u` with `CI_BIT_CACHE` = the source's own bit cache and `CI_HANDOFF` set; the entry it leaves
+  is `$CI_BIT_CACHE/c64u-<key>/` with `DONE`, `c64_basic.bit`, `ddr2_test.bit`, `hdmi_test.bit`, `key`, `from`, `wns.txt`, reports (`*.rpt`,
+  `*.vivado.log.gz`, `*.steps.txt`) and `SHA256SUMS` (the publisher drops it and writes its own). The shared slot-0 `/cache/heavy.lock` is taken by
+  `ci/bitstream.sh` (`heavy_lock`).
+- D11, the SDK release we expect: tag `sdk-<sdk_version>-<source_commit>` (now `sdk-0.4.6-6e280710`, `sdk.pin` `sdk_release`), assets
+  `trx64-sdk-0.4.6.tar.gz`, `online.u2a`, `SHA256SUMS` (their lane's `trx64-sdk-*.tar.gz` and `*.u2a`).
+- D12, our pre-release: tag `fw-<branch>-<sha8>` (`fw-main-<sha8>`, `fw-v<x.y.z>-<sha8>`), assets `trx64u.cor`, `manifest.json`
+  (`source_repo`, `commit`, `ref`, `tag`, `version`, `bitstream` {`entry`, `release`, `c64_basic.bit`}, `sdk` {`version`, `commit`, `release`,
+  `tarball_sha256`}, `files` {`trx64u.cor`: `sha256`, `size`}), `SHA256SUMS`. The contract's file name `trx64u_<sha8>.cor` becomes `trx64u.cor` (the
+  tag names the commit); the contract changes with D12 on both sides.
+
+**Gitea ignores `.github/workflows`:** Gitea's `modules/actions/workflows.go` (`ListWorkflows` → `listWorkflowsInDirs`) takes the first directory of
+`setting.Actions.WorkflowDirs` that the commit has and breaks there; the default is `[".gitea/workflows", ".github/workflows"]`
+(`modules/setting/actions.go`, read 2026-11-25 on Gitea's main branch). `u18` has `.gitea/workflows`, so the new files run on GitHub only. Not read:
+our Gitea's version and its `app.ini` (a changed `WORKFLOW_DIRS` would change this); the next Gitea run of `u18` after the merge shows it (no run of
+`Pipeline`/`Matrix` from `.github`).
+
+**Checked on the Mac:** `ci/lint.sh` rc 0, and each group alone rc 0; `tools/check_workflows.py --selftest` (23 planted faults red, the clean file and
+the exception green) and over `.github` ok; `tools/check_vivado_env.py --selftest` and the check ok; `ci/test_builds.py` 24 cases against a fake
+GitHub API on 127.0.0.1 (order: missing, draft, published, another prefix, a foreign name; fetch: good entry, cache record reused, a changed cached
+file refetched, wrong digest, `SHA256SUMS` listing a missing asset, a draft, nothing left behind; `tools/builds.py`: good asset, wrong digest; publish:
+feature branch, a tag without `fw-`, a pull request event, a fork's run, no token, main draft→published, the same files again, a changed
+`SHA256SUMS`, other files under a published tag, a `v*` tag); `ci/dispatch.py` and `ci/lane.sh` dry runs (`key`, `changed` against a real base,
+the refusals: unknown lane and step, no restored entry); `ci/prerelease.sh` with `PRERELEASE_NO_PUBLISH` (manifest written), without a token on
+`main` (red), on a feature branch (nothing published); `tools/release_trx64u.sh` dry runs against the fake API with a real `trx64u.cor` (good; the
+version, the commit, the repository or the prefix wrong: stopped; `--publish` without notes: stopped); `ci/emu_roms.sh` fetch (176 files, tree id
+right), from a copy, a planted extra file refused; the emulator step's own call (`emu_ops.py` with that ROM folder and ue2emu 0.7.4 on the Mac):
+READY., the monitor's ping, 205 ops and 188 states read (the `.cor` of the main checkout predates A3, so its five SID player operations are the
+whole difference to the golden); `bash -n` and `shellcheck` (infos only); `ruff`.
+
+**Only GitHub can show** (after C and D): the jobs in MultiCore's images (the build image's xpack GCC 11.3.0 against Gitea's `u64-build-env`: the
+`.cor` bytes may differ, its checks must pass); the emulator step with ue2emu v0.7.0 of the emu image (the flags `emu_ops.py` uses exist at v0.7.0;
+0.7.1-0.7.4 changed turbo timing, `.c64re`, video modes, a `--usb-dir` path fallback, the W25Q flash); hashFiles and actions/cache in container jobs;
+`concurrency.queue: max`; the environments' waits; the builder's work order and `fw-bit-` releases; `fetch_sdk.sh --release` against the real SDK
+release; the pre-release upload.
+
+Open points:
+1. Part C: the builder learns the row above (its entry pattern, keys code list, tag prefix, build command per source); MultiCore's SDK lane publishes
+   `sdk-0.4.6-6e280710` or our pin moves to a release it does publish; their import of `trx64u.cor` from `fw-…` pre-releases; the contract (D12).
+2. A8: `tools/check_public_tree.py`; until then `tools/release_trx64u.sh --publish` stops before publishing.
+3. MultiCore's sims run one leg per bench owner; ours is one leg (`bits:c64_basic`) capped at 350 minutes. A full tier-2 round (slot 2942 s, turbo
+   2043 s, ddr2_test 1671 s alone, 2026-11-01) fits only with the markers of earlier runs; a split by bench groups is open.
+4. The `.github` workflows run nothing on GitHub until E: a push of `u20-b` to GitHub is part E's replay, not this step.
 
 ### A8 (public-tree check)
 
@@ -288,8 +393,8 @@ Built:
   `pull_request_target`); top-level `permissions: contents: read`; `actions/checkout` pinned at
   `d23441a48e516b6c34aea4fa41551a30e30af803` (v6.1.0, node24); secrets only as env of the steps that need them, `work` gets
   none; the JIT config and the root password are masked and never printed. Job `work` is the documented exception to the rule
-  "no self-hosted runner" (workflow header). MultiCore's `tools/check_workflows.py` over `.github/` finds nothing: its rule 6
-  looks for the word `self-hosted` in `runs-on`, and `work` names only the random label (open point 4). Gitea runs
+  "no self-hosted runner" (workflow header). MultiCore's `tools/check_workflows.py` over `.github/` found nothing: its rule 6
+  looks for the word `self-hosted` in `runs-on`, and `work` names only the random label (open point 4, closed by B). Gitea runs
   `.gitea/workflows` only, so this file does nothing there.
 - The label rule (a security fix after review, not a choice): the runner carries only the run's random label. A fork pull
   request can bring its own workflow (GitHub runs a pull request's own workflow files), whose job waits up to 24 hours for any
@@ -390,5 +495,5 @@ Open points:
    say how a JIT runner behaves). The first runs' logs show whether 2.338.2 updates itself; `RUNNER_VERSION` and
    `RUNNER_SHA256` in `ci/ephemeral/user-data.sh` move together.
 3. F-b (Vivado from a private snapshot) needs its own cap and sweep limit: a Vivado run outlasts the 45 and 90 minutes here.
-4. When U20 copies MultiCore's workflow lint (§3, A8), its rule 6 does not see this workflow (no word `self-hosted` in
-   `runs-on`): the copy needs a rule that does, e.g. every `runs-on` names a GitHub-hosted image or is listed as an exception.
+4. Closed by B (2026-11-25): `tools/check_workflows.py` rule 6 wants a GitHub-hosted image in every `runs-on` and lists this workflow's job `work`
+   as the one exception, with its exact label expression.
