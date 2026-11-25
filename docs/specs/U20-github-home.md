@@ -5,8 +5,11 @@ green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb020
 svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
 the Gitea key unchanged and no job from `.github/workflows` started on Gitea; they run on
 GitHub after C (MultiCore's builder table, the SDK release) and D (Alex's setup); the names they use are proposals to MultiCore (§6 "B, A7").
-F-a (D17's experiment) built and dry-run tested, not yet run (Alex's accounts, 2026-11-25). A8 built (2026-11-25, branch `u20-a8`, not merged):
-the public-tree check (tool, pre-push hook, workflow, lint), the one cleanup of the tree, the replay's scrub and `--rewrite` (§6 "A8").
+F-a (D17's experiment) built and dry-run tested, not run: Alex defers F until MultiCore's T239.3 is through (D19). A8 built (2026-11-25, merged
+into `u18` ad96228c, CI run 485 green): the public-tree check (tool, pre-push hook, workflow, lint), the one cleanup of the tree, the replay's scrub
+and `--rewrite` (§6 "A8"); the check stays after the switch (D20). C: MultiCore's T261 published `sdk-0.4.6-6e280710` (our `fetch_sdk.sh --release`
+fetched and checked it), the contract (copied 50e49dec), the builder's `fw` row deployed (keycode ref `u20` until the switch PR is merged; its
+`SOURCES` switch waits for `u20` on GitHub). D done 2026-11-25 (§6 "D"). Next: E.
 **Repo:** TRX64-Ultimate (CI, tools, the firmware submodule's replacement); the builder (a private Gitea repo); GitHub settings (Alex).
 **Number:** U20 (registry: the TODO table in `TODO.md`).
 **Origin:** Alex, 2026-11-24, after reading MultiCore's pipeline: *"Stellen wir den Build um auf GitHub. Der builder baut nur noch den
@@ -82,6 +85,11 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   (SID Player Autoconfig, Allow Autoconfig uses UltiSid; read only by the player's autoconfig) stays out with the player. The UltiSID
   settings (`u64cfg.cc` UltiSID 1/2 address, filter, waveforms, digis, ...) stay, and with them a `.cfg` that sets them: `settings.load_file`
   (menu `.cfg` "Load settings") and the `.cfg`/`.usr` beside a PRG, D64, G64 or CRT (`trx64u_ops.cc:265-269`).
+- **D19 (Alex, 2026-11-25):** F (the Hetzner experiment) waits: "Hetzner machen wir später bitte .. ich will erst 239.3 durch haben" (until
+  MultiCore's T239.3 is through). F-a stays built, not run; no Hetzner or runner token exists yet.
+- **D20 (Alex, 2026-11-25, on A8):** the public-tree check stays after the switch, as at MultiCore, "minimal" in effort: the script
+  `tools/check_public_tree.py` (regex and hashes, no agent; the whole tree in 1.7 s on the Mac) in the pre-push hook, `public-tree.yml` and lint.
+  The export tooling (`tools/gh_export.py`, `--replay`, `--rewrite`) goes after the switch, as MultiCore's `github_snapshot.py` did.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
@@ -365,6 +373,20 @@ Open points:
 3. MultiCore's sims run one leg per bench owner; ours is one leg (`bits:c64_basic`) capped at 350 minutes. A full tier-2 round (slot 2942 s, turbo
    2043 s, ddr2_test 1671 s alone, 2026-11-01) fits only with the markers of earlier runs; a split by bench groups is open.
 4. The `.github` workflows run nothing on GitHub until E: a push of `u20-b` to GitHub is part E's replay, not this step.
+
+### D (Alex's setup on GitHub, 2026-11-25)
+
+Done with Alex: settings by `gh api` with his account (his choice), the rest by him in Safari; read back by API.
+- Environments: `vivado` (required reviewer Jondalar, admins cannot bypass), `bitstreams` (admins cannot bypass; custom protection rule:
+  the App `trx64-builder`, enabled), `builds` (branch `main`, tag `v*`; secret `BUILDS_TOKEN`: a new fine-grained token T4 for
+  `trx64mc-builds`, Contents read/write).
+- Rulesets as MultiCore's: `protected` (`main`, `integration`, the switch branch `u20`: create/update/delete by the admin role only),
+  `no-rewrite` (`main`, `integration`: no force push, no deletion, no bypass), `tags` (all tags, admin only). Immutable releases on.
+- Actions: selected actions only, SHA pinning required; allow-list checkout v4.2.2 and v6.1.0 (`ephemeral-a.yml`), cache (+ save, restore),
+  upload-artifact, download-artifact at the pinned SHAs; workflow token read-only, no pull-request approvals; fork pull requests of all
+  external contributors need approval (stricter than MultiCore's first-time rule: the ephemeral runner).
+- App `trx64-builder`: its installation now covers `Jondalar/TRX64-Ultimate` too (one installation, two repositories, MultiCore's choice);
+  the builder's `SRC_API_TOKEN` (T2) extended to our repository (edited, not regenerated).
 
 ### A8 (public-tree check)
 
