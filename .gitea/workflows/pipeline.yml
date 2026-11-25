@@ -1,13 +1,7 @@
 name: Pipeline
 
 on:
-  push:
-    branches: ['**']
-    tags: ['v*']
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'tests/**'  # board tests (Python), not part of the build
+  # U20 E (2026-11-25): GitHub is the home; this Gitea pipeline is the archive's and runs only by hand (as MultiCore's T239.1 D45).
   workflow_dispatch:
     # 100T stage off (Alex 2026-10-16) until we have a U64 Elite II at home; bit-ue2 below. To bring it back,
     # this input goes under `inputs:` again:
