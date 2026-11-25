@@ -1,6 +1,6 @@
 # U20 — GitHub becomes TRX64-Ultimate's development home; GitHub's runners build everything but Vivado, our builder builds the bitstream
 
-**Status:** DONE 2026-11-25 except F, which Alex deferred (D19). GitHub is the home since the merge of PR #3 (d72ab54a); first `fw-main-d72ab54a`
+**Status:** DONE 2026-11-25 except F (D17's experiment): F-a ran green on 2026-11-25 (D24 lifts D19); F-b built and its snapshot made (D25), its runs pending (§6 "F-b"). GitHub is the home since the merge of PR #3 (d72ab54a); first `fw-main-d72ab54a`
 pre-release published; `integration` cut from `main`. History (2026-11-24): Alex's decisions D1-D18; build plan §5. A1-A4 built (merged into `u18` 81cbb483, CI run 482
 green: lint, app, bitstream, package, sims, update, cor). A5-A6 built (u18 bb0206e3, CI run 483 green: lint, bitstream, package, sims, cor; the ROM store on the builder filled from VICE's
 svn-mirror by the `dbgsess` bench). A7 and B built (2026-11-25, merged into `u18` 5af48b49), checked on the Mac; CI run 484 green (lint, bitstream, package, sims, cor),
@@ -107,6 +107,15 @@ and steps; its D2: "this pipeline setup can then basically also be 'copied' by t
   `ring.u2a` (`ring/twfont.py` from `designs/c64_basic/mem/ovl_font8.mem`, the font of Gideon's character generator, GPL-3) holds 64 bytes
   equal to `characters.901225-01.bin`. `tools/check_public_tree.py` `COR_ALLOWED` lets a window (never the whole file) of that ROM through in a
   file named `trx64u.cor` only; every other ROM and every other file still fails. As MultiCore's T239.1 D44 for `trx64g.cor`.
+- **D24 (Alex, 2026-11-25): F runs now, beside MultiCore's T239.3.** "T239.3 läuft bei Multicore parallel .. wenn wir das hier gewuppt
+  bekommen super. Also mach mal einen Testlauf ob das überhaupt geht". D19 is lifted for F. Alex made the Hetzner project, its token and
+  the GitHub token (7 days, until 2026-12-02), both as repository secrets; F-a ran green (§6 "F-a, the run").
+- **D25 (Alex, 2026-11-25): F-b takes the builder's Vivado image, copied once.** "Also wenn dann Image einmalig vom Builder kopieren ... alles
+  andere ist doch doof" (not a new install from AMD). The image `vivado-env:2024.1` goes from the builder into a private Hetzner snapshot once;
+  after that F-b needs no builder. Alex, on the check: "du glaubst doch nicht das der bitstream 2 mal gleich berechnet wird von Vivado?" A
+  bitstream is not compared byte for byte (the `.bit` header carries date and time; placement on another machine may differ). Criteria:
+  the image ID on the snapshot is the builder's, timing met and DRC clean, utilization near the builder's build of the same key, and the
+  board, when Alex tests a Hetzner bitstream.
 
 What "exactly like MultiCore" brings with it (T239.1, read from its code; §3 lists the parts):
 - Branches `feature → integration → main`; rulesets let only Alex's account update `integration` and `main`; sessions push feature
@@ -566,7 +575,7 @@ For part E:
 
 ### F (D17: ephemeral runners on Hetzner, experiment)
 
-**F-a built 2026-11-24, not yet run** (it needs the accounts Alex brings on 2026-11-25). F-b (Vivado) not started.
+**F-a built 2026-11-24, ran green 2026-11-25** (D24; "F-a, the run" below). **F-b built 2026-11-25** (D25; "F-b" below).
 
 Built:
 - `.github/workflows/ephemeral-a.yml`, three jobs. `start` (ubuntu-latest, 20 min): sweeps this repository's experiment servers
@@ -682,7 +691,7 @@ Residual risk:
   Cancelling the run starts `stop` at once.
 
 Open points:
-1. The user data has not run on a real Ubuntu 24.04 yet; the first run shows its times. A boot failure is diagnosed through
+1. Answered by the run of 2026-11-25 ("F-a, the run"): the user data ran on Ubuntu 24.04, GitHub's answer listed only the run's label. Before it: the user data had not run on a real Ubuntu 24.04 yet; the first run shows its times. A boot failure is diagnosed through
    Hetzner's web console (root password reset there) or `hcloud.sh create --ssh-key NAME` by hand from the Mac. The first run
    also shows the label list GitHub's answer carries: if its server adds a default label, `start` fails at the JIT step by
    design, and the experiment stops there until that is understood.
@@ -690,6 +699,50 @@ Open points:
    by our SHA-256), and one not updated within 63 days of a newer release gets no job (GitHub's autoscaling page; it does not
    say how a JIT runner behaves). The first runs' logs show whether 2.338.2 updates itself; `RUNNER_VERSION` and
    `RUNNER_SHA256` in `ci/ephemeral/user-data.sh` move together.
-3. F-b (Vivado from a private snapshot) needs its own cap and sweep limit: a Vivado run outlasts the 45 and 90 minutes here.
+3. Closed by F-b (2026-11-25): `ephemeral-b.yml` has its own cap (90 minutes) and sweep limit (120).
 4. Closed by B (2026-11-25): `tools/check_workflows.py` rule 6 wants a GitHub-hosted image in every `runs-on` and lists this workflow's job `work`
    as the one exception, with its exact label expression.
+
+### F-a, the run (2026-11-25, D24)
+
+Run 45619756705 (branch `scratch/ephemeral-a` at `integration` 4543851), green: `start` 1:44 min, `work` 10 s, `stop` 9 s. CPX02 in nbg1,
+EUR 0.0096 per hour net (the API's price; CPX12 0.0184, CPX22 0.0312, CX23 not offered in nbg1 or fsn1 that day). Seconds after the create
+request: server running +18, runner online +95, the job's first step +103. The machine: 1 vCPU, 932 MiB, 19 GB disk (2.1 GB used),
+Ubuntu 24.04, kernel 6.8. GitHub's JIT answer listed only the run's label. `stop` deleted the server and the runner registration; it found
+the server's Primary IP still assigned and left it; Hetzner deleted that IP together with the server (the console's activity list;
+the project showed 0 resources after the run). One run costs one started hour: EUR 0.0096 net.
+
+### F-b (D25: Vivado from a private snapshot)
+
+**Built 2026-11-25; the snapshot made; runs pending.**
+
+Built:
+- `ci/ephemeral/snapshot.sh` (by hand, on the Mac: it reaches the Hetzner API and the builder): a one-time SSH key, a CPX22 server from
+  `ubuntu-24.04` with it, `docker.io` and `zstd`, Docker's classic `overlay2` store, the archive streamed builder -> Mac -> server into
+  `docker load`, the image ID compared with the builder's, `vivado -version` in the image, the builder's Vivado cache entries (`ip_*`,
+  `ooc_*` of TRX_CACHE) into `/opt/trx-cache`, then apt lists, cloud-init state, machine-id, SSH host keys and the key removed, `fstrim`,
+  power off, snapshot (labels `purpose=gh-ephemeral`, `role=vivado`), server and key deleted (also on failure). Token: `HCLOUD_TOKEN`, or
+  `--keychain SERVICE` (macOS keychain; a second project token, Read & Write, that Alex deletes when the snapshot is made).
+- `ci/ephemeral/hcloud.sh`: `snapshot`, `image`, `delete-image`, `ssh-key-add`, `ssh-key-delete`, `wait --status off`; `list` shows
+  snapshots and SSH keys as well. Everything it makes carries `purpose=gh-ephemeral`; a selector or label set without it is refused.
+  A sweep never deletes a snapshot.
+- `.github/workflows/ephemeral-b.yml`: F-a's shape (start, work, stop) plus `report`. A push of `scratch/vivado-<type>-t<threads>` (or a
+  dispatch once the file is on `main`) runs it; one run at a time (Hetzner's limit of 8 dedicated vCPUs). `start` takes the newest
+  `role=vivado` snapshot and creates the server from it (types `EPH_VIVADO_TYPES`, all with at least the snapshot's 80 GB disk); cap
+  90 minutes, sweep limit 120. `work` (60 min) runs `ci/ephemeral/vivado.sh`: `ci/bitstream.sh c64u` in the image twice, each with an
+  empty bitstream cache: warm (TRX_CACHE = a copy of `/opt/trx-cache`) and cold (empty TRX_CACHE). `report` (GitHub-hosted) fetches the
+  builder's release `fw-bit-c64u-<key>` of the same key and writes `ci/ephemeral/vivado_report.py`'s comparison into the summary: the
+  seconds after the create request, Vivado's time per design and per command, WNS, the utilization of `c64_basic`, the cost (every
+  started hour). The artifact keeps both builds' files 30 days. `tools/check_workflows.py` lists `work` as the second exception.
+- `ci/ephemeral/user-data.sh` puts the runner user into the group `docker` when the image has one (the snapshot does; plain Ubuntu does not).
+
+The snapshot (2026-11-25): id 460825305, 9.88 GB stored (Hetzner bills EUR 0.0143 per GB and month: about EUR 0.14), for disks from 80 GB;
+22 GB used on the disk. Image `vivado-env:2024.1` `sha256:49521e302a02...`, the builder's ID; Vivado 2024.1 starts. Cache: 105 entries,
+259 MB. The archive: `docker save | zstd -10 --long=27` on the builder, 8,037,506,177 bytes (20.3 GB unpacked), 3:33 min. Making the
+snapshot took 11 min: server and ssh 61 s, Docker 33 s, the stream and load 462 s (139 Mbit/s; the first attempt, which streamed into
+the containerd store, ran at 199 Mbit/s), cleaning and off 34 s, the snapshot 60 s. CPX22 at EUR 0.0312 an hour, twice (the first attempt
+failed, below): EUR 0.0624.
+
+The first attempt stopped at the ID check, as it should: Ubuntu's `docker.io` is Docker 29.1.3, whose fresh install takes the containerd
+image store; there the image ID is the manifest's digest (`sha256:d0d7767e...`), not the config's as on the builder's Docker 26.1.5, and
+every layer is kept twice. `snapshot.sh` now writes `"containerd-snapshotter": false` before the load and checks for `overlay2`.

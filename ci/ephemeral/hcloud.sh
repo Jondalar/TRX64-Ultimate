@@ -9,12 +9,31 @@
 #       creates the server there (IPv4 only: github.com has no IPv6). A pair the create refuses as unavailable (412,
 #       503, 422 placement_error) passes to the next. Prints server_id, server_name, server_type, location, ipv4,
 #       price_hourly (net EUR, the API's price for that location), t_create (epoch of the request).
-#   hcloud.sh wait --id ID [--timeout SEC]             until the status is running (default 300 s); prints t_running
+#   hcloud.sh wait --id ID [--timeout SEC] [--status running|off]
+#                                                      until the server has that status (default running, 300 s);
+#                                                      prints t_running (t_off)
 #   hcloud.sh delete --id ID | --selector SEL          deletes, waits until the API answers 404 for the server, then
 #                                                      deletes the Primary IPs it left unassigned; exit 1 if any remains
 #   hcloud.sh sweep --older-than MIN [--selector SEL]  deletes every server of SEL created more than MIN minutes ago;
-#                                                      SEL defaults to purpose=gh-ephemeral and must contain that term
-#   hcloud.sh list [--selector SEL]                    id, name, status, type, location, age in minutes, run label
+#                                                      SEL defaults to purpose=gh-ephemeral and must contain that term.
+#                                                      Snapshots and SSH keys are never swept.
+#   hcloud.sh list [--selector SEL]                    the servers (id, name, status, type, location, age in minutes,
+#                                                      run label), the snapshots and the SSH keys of SEL
+#
+# U20 F-b (D25): the private snapshot with Vivado, and the one-time SSH key of the machine that makes it
+# (ci/ephemeral/snapshot.sh):
+#   hcloud.sh snapshot --id ID --description TEXT --label k=v [--label k=v ...] [--timeout SEC]
+#       creates a snapshot of the server (it should be off) and waits until it is available (default 3600 s); prints
+#       image_id, image_size (GB as Hetzner stores and bills it), disk_size (GB: the smallest server disk it fits)
+#   hcloud.sh image --selector SEL                     the newest available snapshot of SEL: image_id, image_size,
+#                                                      disk_size, created; exit 1 if there is none
+#   hcloud.sh delete-image --id ID | --selector SEL [--keep-newest]
+#                                                      deletes snapshots (all of SEL, or all but the newest); SEL must
+#                                                      contain purpose=gh-ephemeral
+#   hcloud.sh ssh-key-add --name NAME --public-key FILE --label k=v [--label k=v ...]    prints ssh_key_id
+#   hcloud.sh ssh-key-delete --id ID
+#
+# Every snapshot and SSH key of this script carries purpose=gh-ephemeral, as its servers do.
 #
 #   Everywhere: --dry-run (print each request, answer it with canned data, send nothing; no token needed) and
 #   --outputs FILE (append the result lines to FILE as well). HCLOUD_API overrides the base URL.
@@ -192,28 +211,200 @@ cmd_create() {
 }
 
 cmd_wait() {
-  local id="" timeout=300 t0 st status out="$EPH_TMP/srv.json"
+  local id="" timeout=300 want=running t0 st status out="$EPH_TMP/srv.json"
   while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || die "$1 needs a value"
     case "$1" in
       --id) id=$2 ;;
       --timeout) timeout=$2 ;;
+      --status) want=$2 ;;
       *) die "wait: unknown option $1" ;;
     esac
     shift 2
   done
   int_arg --id "$id"; int_arg --timeout "$timeout"
+  case "$want" in running | off) ;; *) die "wait: --status is running or off, not '$want'" ;; esac
   t0=$(date -u +%s)
   while :; do
     st=$(hc GET "/servers/$id" "" "$out")
     [ "$st" = 200 ] || die "server $id: HTTP $st $(eph_err "$out")"
     status=$(jq -r '.server.status' "$out")
-    if [ "$status" = running ]; then break; fi
+    if [ "$status" = "$want" ]; then break; fi
     [ $(($(date -u +%s) - t0)) -lt "$timeout" ] || die "server $id: status $status after $timeout s"
     sleep 5
   done
-  note "server $id: running after $(($(date -u +%s) - t0)) s of waiting"
-  emit t_running "$(date -u +%s)"
+  note "server $id: $want after $(($(date -u +%s) - t0)) s of waiting"
+  emit "t_$want" "$(date -u +%s)"
+}
+
+# labels from --label k=v options into a JSON object; purpose=gh-ephemeral must be among them
+labels_json() {
+  local labels='{}' k v
+  for kv in "$@"; do
+    k=${kv%%=*}; v=${kv#*=}
+    [ "$k" != "$kv" ] || die "--label wants key=value, not '$kv'"
+    valid_label "$k" "$v"
+    labels=$(jq -c --arg k "$k" --arg v "$v" '. + {($k): $v}' <<< "$labels")
+  done
+  [ "$(jq -r '.purpose // ""' <<< "$labels")" = gh-ephemeral ] || die "everything this script makes carries --label purpose=gh-ephemeral"
+  echo "$labels"
+}
+
+# a selector that reaches only what this experiment labelled
+need_purpose() {
+  case ",${1// /}," in
+    *,purpose=gh-ephemeral,* | *,purpose==gh-ephemeral,*) ;;
+    *) die "the selector must contain the term purpose=gh-ephemeral, not [$1]" ;;
+  esac
+}
+
+cmd_snapshot() {
+  local id="" desc="" timeout=3600 lbl=() labels st out="$EPH_TMP/img.json" body="$EPH_TMP/snap.json" img t0 status
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$1 needs a value"
+    case "$1" in
+      --id) id=$2 ;;
+      --description) desc=$2 ;;
+      --label) lbl+=("$2") ;;
+      --timeout) timeout=$2 ;;
+      *) die "snapshot: unknown option $1" ;;
+    esac
+    shift 2
+  done
+  int_arg --id "$id"; int_arg --timeout "$timeout"
+  [ -n "$desc" ] || die "snapshot needs --description"
+  labels=$(labels_json ${lbl[@]+"${lbl[@]}"})
+  jq -n --arg d "$desc" --argjson l "$labels" '{type: "snapshot", description: $d, labels: $l}' > "$body"
+  st=$(hc POST "/servers/$id/actions/create_image" "$body" "$out")
+  [ "$st" = 201 ] || die "snapshot of server $id: HTTP $st $(eph_err "$out")"
+  img=$(jq -r '.image.id' "$out")
+  note "snapshot $img of server $id: requested"
+  t0=$(date -u +%s)
+  while :; do
+    st=$(hc GET "/images/$img" "" "$out")
+    [ "$st" = 200 ] || die "snapshot $img: HTTP $st $(eph_err "$out")"
+    status=$(jq -r '.image.status' "$out")
+    if [ "$status" = available ]; then break; fi
+    [ "$status" = creating ] || die "snapshot $img: status $status"
+    [ $(($(date -u +%s) - t0)) -lt "$timeout" ] || die "snapshot $img: still $status after $timeout s"
+    sleep 10
+  done
+  note "snapshot $img: available after $(($(date -u +%s) - t0)) s"
+  emit image_id "$img"
+  emit image_size "$(jq -r '.image.image_size // "?"' "$out")"
+  emit disk_size "$(jq -r '.image.disk_size // "?"' "$out")"
+}
+
+# every snapshot of a label selector, newest first, as one JSON array in $EPH_TMP/images.json
+list_images() {
+  local sel=$1 page=1 st out="$EPH_TMP/page.json" acc="$EPH_TMP/images.json"
+  echo '[]' > "$acc"
+  while :; do
+    st=$(hc GET "/images?type=snapshot&label_selector=$(eph_uri "$sel")&sort=created:desc&per_page=50&page=$page" "" "$out")
+    [ "$st" = 200 ] || die "list snapshots [$sel]: HTTP $st $(eph_err "$out")"
+    jq -s '.[0] + (.[1].images // [])' "$acc" "$out" > "$acc.n"
+    mv "$acc.n" "$acc"
+    page=$(jq -r '.meta.pagination.next_page // empty' "$out")
+    [ -n "$page" ] || break
+  done
+  jq 'sort_by(.created) | reverse' "$acc" > "$acc.n"
+  mv "$acc.n" "$acc"
+}
+
+cmd_image() {
+  local sel="" n
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$1 needs a value"
+    case "$1" in
+      --selector) sel=$2 ;;
+      *) die "image: unknown option $1" ;;
+    esac
+    shift 2
+  done
+  need_purpose "$sel"
+  list_images "$sel"
+  n=$(jq '[.[] | select(.status == "available")] | length' "$EPH_TMP/images.json")
+  [ "$n" -gt 0 ] || die "no available snapshot of [$sel]"
+  [ "$n" = 1 ] || note "snapshots of [$sel]: $n available, the newest is taken"
+  jq -r '[.[] | select(.status == "available")][0] | "image_id=\(.id)\nimage_size=\(.image_size // "?")\ndisk_size=\(.disk_size // "?")\ncreated=\(.created)"' \
+    "$EPH_TMP/images.json" | while IFS='=' read -r k v; do emit "$k" "$v"; done
+}
+
+cmd_delete_image() {
+  local id="" sel="" keep=0 ids i st out="$EPH_TMP/del.json" rc=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --id) [ $# -ge 2 ] || die "--id needs a value"; id=$2; shift ;;
+      --selector) [ $# -ge 2 ] || die "--selector needs a value"; sel=$2; shift ;;
+      --keep-newest) keep=1 ;;
+      *) die "delete-image: unknown option $1" ;;
+    esac
+    shift
+  done
+  if [ -n "$id" ]; then
+    int_arg --id "$id"
+    # a snapshot named by id is deleted only when it carries this experiment's label
+    st=$(hc GET "/images/$id" "" "$out")
+    case "$st" in
+      404) note "snapshot $id: not there"; return 0 ;;
+      200) ;;
+      *) die "snapshot $id: HTTP $st $(eph_err "$out")" ;;
+    esac
+    [ "$(jq -r '.image.labels.purpose // ""' "$out")" = gh-ephemeral ] || die "snapshot $id does not carry purpose=gh-ephemeral"
+    ids=$id
+  else
+    [ -n "$sel" ] || die "delete-image needs --id ID or --selector SEL"
+    need_purpose "$sel"
+    list_images "$sel"
+    ids=$(jq -r --argjson k "$keep" '.[$k:] | .[].id' "$EPH_TMP/images.json")
+  fi
+  for i in $ids; do
+    st=$(hc DELETE "/images/$i" "" "$out")
+    case "$st" in
+      200 | 204 | 404) note "snapshot $i: deleted" ;;
+      *) note "snapshot $i: DELETE HTTP $st $(eph_err "$out")"; rc=1 ;;
+    esac
+  done
+  return "$rc"
+}
+
+cmd_ssh_key_add() {
+  local name="" pub="" lbl=() labels st out="$EPH_TMP/key.json" body="$EPH_TMP/keybody.json"
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$1 needs a value"
+    case "$1" in
+      --name) name=$2 ;;
+      --public-key) pub=$2 ;;
+      --label) lbl+=("$2") ;;
+      *) die "ssh-key-add: unknown option $1" ;;
+    esac
+    shift 2
+  done
+  [ -n "$name" ] || die "ssh-key-add needs --name"
+  [ -f "$pub" ] || die "--public-key '$pub' is not a file"
+  labels=$(labels_json ${lbl[@]+"${lbl[@]}"})
+  jq -n --arg n "$name" --rawfile k "$pub" --argjson l "$labels" '{name: $n, public_key: ($k | rtrimstr("\n")), labels: $l}' > "$body"
+  st=$(hc POST /ssh_keys "$body" "$out")
+  [ "$st" = 201 ] || die "ssh key $name: HTTP $st $(eph_err "$out")"
+  emit ssh_key_id "$(jq -r '.ssh_key.id' "$out")"
+}
+
+cmd_ssh_key_delete() {
+  local id="" st out="$EPH_TMP/key.json"
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || die "$1 needs a value"
+    case "$1" in
+      --id) id=$2 ;;
+      *) die "ssh-key-delete: unknown option $1" ;;
+    esac
+    shift 2
+  done
+  int_arg --id "$id"
+  st=$(hc DELETE "/ssh_keys/$id" "" "$out")
+  case "$st" in
+    200 | 204 | 404) note "ssh key $id: deleted" ;;
+    *) die "ssh key $id: DELETE HTTP $st $(eph_err "$out")" ;;
+  esac
 }
 
 cmd_delete() {
@@ -286,6 +477,13 @@ cmd_list() {
     (["id", "name", "status", "type", "location", "age_min", "run"] | @tsv),
     (.[] | [.id, .name, .status, .server_type.name, .location.name,
             ((($now - (.created | epoch)) / 60) | floor), (.labels.run // "-")] | @tsv)' "$EPH_TMP/servers.json"
+  list_images "$sel"
+  jq -r '"", (["snapshot", "status", "image_size_gb", "disk_size_gb", "created", "role"] | @tsv),
+    (.[] | [.id, .status, (.image_size // "-"), (.disk_size // "-"), .created, (.labels.role // "-")] | @tsv)' "$EPH_TMP/images.json"
+  local st out="$EPH_TMP/keys.json"
+  st=$(hc GET "/ssh_keys?label_selector=$(eph_uri "$sel")&per_page=50" "" "$out")
+  [ "$st" = 200 ] || die "list ssh keys [$sel]: HTTP $st $(eph_err "$out")"
+  jq -r '"", (["ssh_key", "name", "created"] | @tsv), (.ssh_keys[]? | [.id, .name, .created] | @tsv)' "$out"
 }
 
 # ---- dry run: canned answers, one invocation's state in $EPH_TMP (deleted ids)
@@ -302,6 +500,16 @@ fake_servers() {
        public_net: {ipv4: {id: $ip, ip: "192.0.2.\($ip - 200000)"}, ipv6: null}};
     [srv(100001; "1000-1"; 5; "z"; 200001), srv(100002; "999-1"; 200; "offset"; 200002),
      srv(100003; "998-2"; 120; "frac"; 200003)] | map(select(.id as $i | $gone | index($i) | not))'
+}
+
+# two snapshots of earlier F-b preparations (vivado), 2 and 30 days old
+fake_images() {
+  jq -n --argjson now "$(date -u +%s)" --argjson gone "$(fake_list image)" '
+    def img($id; $days; $size):
+      {id: $id, type: "snapshot", status: "available", description: "vivado-env:2024.1 (dry run)",
+       created: (($now - $days * 86400) | todate), image_size: $size, disk_size: 80,
+       labels: {purpose: "gh-ephemeral", role: "vivado"}};
+    [img(300001; 30; 9.5), img(300002; 2; 9.6)] | map(select(.id as $i | $gone | index($i) | not))'
 }
 
 # a selector over the canned servers: k=v, k==v, k!=v, k in (a,b), k, !k
@@ -348,7 +556,7 @@ fake_response() {
         fake_servers | jq --argjson i "$id" '{server: (.[] | select(.id == $i))}' > "$out"
         echo 200
       elif [ "$id" = 100100 ] && ! fake_is server "$id"; then
-        jq -n '{server: {id: 100100, name: "gh-eph-dry-run", status: "running",
+        jq -n --arg s "${EPH_FAKE_STATUS:-running}" '{server: {id: 100100, name: "gh-eph-dry-run", status: $s,
                 public_net: {ipv4: {id: 200100, ip: "192.0.2.100"}, ipv6: null}}}' > "$out"
         echo 200
       else
@@ -373,6 +581,42 @@ fake_response() {
       fake_mark ip "${path#/primary_ips/}"
       : > "$out"
       echo 204 ;;
+    "POST /servers/"*"/actions/create_image")
+      jq '{image: {id: 300100, type: "snapshot", status: "creating", description: .description, labels: .labels,
+           image_size: null, disk_size: 80}, action: {id: 3, command: "create_image", status: "running"}}' "$body" > "$out"
+      echo 201 ;;
+    "GET /images?"*)
+      sel=${q#*label_selector=}; sel=${sel%%&*}
+      sel=$(printf '%b' "${sel//\%/\\x}")
+      fake_images | jq --arg sel "$sel" "$JQ_SELECT"' {images: map(select(sel_ok($sel))),
+        meta: {pagination: {page: 1, per_page: 50, previous_page: null, next_page: null, last_page: 1}}}' > "$out"
+      echo 200 ;;
+    "GET /images/"*)
+      id=${path#/images/}
+      if fake_images | jq -e --argjson i "$id" 'any(.[]; .id == $i)' > /dev/null; then
+        fake_images | jq --argjson i "$id" '{image: (.[] | select(.id == $i))}' > "$out"
+        echo 200
+      elif [ "$id" = 300100 ] && ! fake_is image "$id"; then
+        jq -n '{image: {id: 300100, type: "snapshot", status: "available", image_size: 9.87, disk_size: 80,
+                labels: {purpose: "gh-ephemeral", role: "vivado"}}}' > "$out"
+        echo 200
+      else
+        echo '{"error": {"code": "not_found", "message": "image not found"}}' > "$out"
+        echo 404
+      fi ;;
+    "DELETE /images/"*)
+      fake_mark image "${path#/images/}"
+      : > "$out"
+      echo 204 ;;
+    "POST /ssh_keys")
+      jq '{ssh_key: {id: 400100, name: .name, fingerprint: "00:00", labels: .labels}}' "$body" > "$out"
+      echo 201 ;;
+    "GET /ssh_keys?"*)
+      echo '{"ssh_keys": []}' > "$out"
+      echo 200 ;;
+    "DELETE /ssh_keys/"*)
+      : > "$out"
+      echo 204 ;;
     *) echo '{"error": {"code": "not_found", "message": "no canned answer"}}' > "$out"; echo 404 ;;
   esac
 }
@@ -381,7 +625,7 @@ main() {
   eph_globals "$@"
   set -- ${EPH_ARGS[@]+"${EPH_ARGS[@]}"}
   eph_need_tools
-  [ $# -ge 1 ] || die "usage: hcloud.sh [--dry-run] create|wait|delete|sweep|list ... (see the header)"
+  [ $# -ge 1 ] || die "usage: hcloud.sh [--dry-run] create|wait|delete|sweep|list|snapshot|image|delete-image|ssh-key-add|ssh-key-delete ... (see the header)"
   local cmd=$1
   shift
   case "$cmd" in
@@ -390,7 +634,12 @@ main() {
     delete) cmd_delete "$@" ;;
     sweep) cmd_sweep "$@" ;;
     list) cmd_list "$@" ;;
-    *) die "unknown subcommand $cmd (create, wait, delete, sweep, list)" ;;
+    snapshot) cmd_snapshot "$@" ;;
+    image) cmd_image "$@" ;;
+    delete-image) cmd_delete_image "$@" ;;
+    ssh-key-add) cmd_ssh_key_add "$@" ;;
+    ssh-key-delete) cmd_ssh_key_delete "$@" ;;
+    *) die "unknown subcommand $cmd (create, wait, delete, sweep, list, snapshot, image, delete-image, ssh-key-add, ssh-key-delete)" ;;
   esac
 }
 
