@@ -15,10 +15,15 @@
 #    self-hosted (or an OS or architecture label); jit refuses such a label, and fails without writing the config when
 #    GitHub's answer lists a label more than requested.
 #
+# U20 F-b (D25): the snapshot commands of hcloud.sh (image, delete-image, snapshot, ssh-key-*: the newest snapshot is
+# taken, --keep-newest keeps it, a selector or label set without purpose=gh-ephemeral is refused), the whole path of
+# snapshot.sh (snapshot made, server and one-time key deleted), and the label rule for ephemeral-b.yml as well.
+#
 #   ci/ephemeral/test_dryrun.sh          exit 0 when every check passed
 set -euo pipefail
 E="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WF="$E/../../.github/workflows/ephemeral-a.yml"
+WFB="$E/../../.github/workflows/ephemeral-b.yml"
 W=$(mktemp -d "${TMPDIR:-/tmp}/eph-test.XXXXXX")
 trap 'rm -rf "$W"' EXIT
 export HCLOUD_TOKEN=fake-hcloud-token-0123456789 RUNNER_REG_TOKEN=github_pat_fake_0123456789
@@ -105,18 +110,36 @@ check "without a token nothing is sent" bash -c "env -u HCLOUD_TOKEN '$E/hcloud.
 cat "$W"/r? >> "$LOG"
 
 # ---- the label rule (the quoted $... below are text of the workflow, not shell)
-# shellcheck disable=SC2016
-check "workflow: no self-hosted, OS or architecture label outside comments" awk '
-  !/^[[:space:]]*#/ && tolower($0) ~ /self-hosted|--label (linux|x64|arm64)/ { bad = 1 } END { exit bad }' "$WF"
-check "workflow: work runs on the run's label alone" grep -F -q "runs-on: ['\${{ needs.start.outputs.label }}']" "$WF"
-# shellcheck disable=SC2016,SC1003
-check "workflow: the JIT step requests the run's label alone" grep -F -q 'jit --repo "$GITHUB_REPOSITORY" --name "$NAME" --label "$LABEL" \' "$WF"
+for wf in "$WF" "$WFB"; do
+  b=$(basename "$wf")
+  # shellcheck disable=SC2016
+  check "$b: no self-hosted, OS or architecture label outside comments" awk '
+    !/^[[:space:]]*#/ && tolower($0) ~ /self-hosted|--label (linux|x64|arm64)/ { bad = 1 } END { exit bad }' "$wf"
+  check "$b: work runs on the run's label alone" grep -F -q "runs-on: ['\${{ needs.start.outputs.label }}']" "$wf"
+  # shellcheck disable=SC2016,SC1003
+  check "$b: the JIT step requests the run's label alone" grep -F -q 'jit --repo "$GITHUB_REPOSITORY" --name "$NAME" --label "$LABEL" \' "$wf"
+done
 check "jit refuses self-hosted" bash -c "! '$E/ghrunner.sh' --dry-run jit --repo Example/dry-run --name n --label self-hosted --label l --out '$W/j1' > '$W/l1' 2>&1 && [ ! -e '$W/j1' ]"
 check "jit refuses X64" bash -c "! '$E/ghrunner.sh' --dry-run jit --repo Example/dry-run --name n --label X64 --label l --out '$W/j2' > '$W/l2' 2>&1"
 check "jit fails, no config written, when GitHub adds a label" bash -c "! EPH_FAKE_EXTRA_LABEL=self-hosted '$E/ghrunner.sh' --dry-run jit \
   --repo Example/dry-run --name n --label eph-1-1-abcdef --out '$W/j3' > '$W/l3' 2>&1 && [ ! -e '$W/j3' ] &&
   grep -F -q 'not only the requested' '$W/l3'"
 cat "$W"/l? >> "$LOG"
+
+# ---- F-b (D25): the snapshot commands and snapshot.sh
+IMG=sha256:49521e302a028d5bf9cf8c7fa063b4ced38a7ce760335b283c31945fda4b195b
+step "image: the newest snapshot of role=vivado" "$E/hcloud.sh" --dry-run image --selector purpose=gh-ephemeral,role=vivado
+check "image: 300002 (2 days old) before 300001 (30 days)" has "image_id=300002" "$W/step.log"
+step "delete-image --keep-newest" "$E/hcloud.sh" --dry-run delete-image --selector purpose=gh-ephemeral,role=vivado --keep-newest
+check "delete-image: 300001 deleted, 300002 kept" bash -c "grep -F -q 'snapshot 300001: deleted' '$W/step.log' && ! grep -F -q 'DELETE https://api.hetzner.cloud/v1/images/300002' '$W/step.log'"
+check "delete-image: a selector without purpose=gh-ephemeral is refused" bash -c "! '$E/hcloud.sh' --dry-run delete-image --selector role=vivado > /dev/null 2>&1"
+check "snapshot: labels without purpose=gh-ephemeral are refused" bash -c "! '$E/hcloud.sh' --dry-run snapshot --id 1 --description d --label role=vivado > /dev/null 2>&1"
+step "snapshot.sh: the whole path" "$E/snapshot.sh" --dry-run --type cpx02 --source host.example --archive a.tar.zst --image-id "$IMG" --cache /c --replace
+check "snapshot.sh: snapshot 300100 made" has "image_id=300100" "$W/step.log"
+check "snapshot.sh: the server made with the one-time key" has '"ssh_keys": [' "$W/step.log"
+check "snapshot.sh: the server and the key deleted" bash -c "grep -F -q 'server 100100 (gh-eph-dry-run): deleted' '$W/step.log' && grep -F -q 'ssh key 400100: deleted' '$W/step.log'"
+check "snapshot.sh: --replace deletes the older snapshots" has "snapshot 300001: deleted" "$W/step.log"
+check "snapshot.sh: a bad image ID is refused" bash -c "! '$E/snapshot.sh' --dry-run --source h --archive a --image-id sha256:00 > /dev/null 2>&1"
 
 # ---- secrets
 check "log: no Hetzner token" not_in "$HCLOUD_TOKEN" "$LOG"

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # PROVENANCE: TRX64U-MultiCore tools/check_workflows.py (t239.3 d9ddadeb1; Alex Damhuis' code in both repositories), U20 B.
-# Changed here: rule 2 names our refs (main, v* tags); rule 6 accepts only GitHub-hosted images and one listed exception (U20 F, ephemeral-a.yml's job
-# `work`, whose runs-on is the run's random label: MultiCore's word test for `self-hosted` did not see it, U20 §6 F open point 4); rule 7 names our
+# Changed here: rule 2 names our refs (main, v* tags); rule 6 accepts only GitHub-hosted images and the listed exceptions (U20 F, the jobs `work` of
+# ephemeral-a.yml and ephemeral-b.yml, whose runs-on is the run's random label: MultiCore's word test for `self-hosted` did not see it, U20 §6 F open point 4); rule 7 names our
 # private repository and, through tools/check_public_tree.py's text rules (U20 A8), every internal host, address and path; rule 8 is new (the references to needs and steps outputs; actionlint is not in our images).
 """U20 B (MultiCore T239.1 D1, S9): the rules a workflow of .github/ must keep, read from the parsed YAML (and, for the names, the raw text).
 
@@ -11,7 +11,7 @@
   3. top-level `permissions: contents: read` (the only key)
   4. every `uses:` is a local path (./) or pinned by a full 40-hex commit SHA; docker:// needs a digest
   5. every container / service image carries @sha256:<64 hex>
-  6. every `runs-on` is a GitHub-hosted image (ubuntu-*, windows-*, macos-*); never self-hosted; the one exception is listed in EXCEPTIONS
+  6. every `runs-on` is a GitHub-hosted image (ubuntu-*, windows-*, macos-*); never self-hosted; the exceptions are listed in EXCEPTIONS
   7. no name of a private repository (the builder's) and no hit of tools/check_public_tree.py's text rules (internal hosts, private
      addresses, home and NAS paths, logins, personal mail addresses, claude.ai links) anywhere under .github/
   8. every needs.<job>.outputs.<name> names a job of the job's needs that declares that output (a called workflow's outputs are not checked), every
@@ -34,9 +34,10 @@ PRIVATE_NAMES = re.compile(r"trx64mc-builder\b", re.I)
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}\b")
 HOSTED = re.compile(r"^(ubuntu|windows|macos)-[0-9a-z.-]+$")
-# (workflow file, job): a runs-on that is no GitHub-hosted image, with why. U20 F-a: the job runs on the just-in-time runner of the run's server, whose
+# (workflow file, job): a runs-on that is no GitHub-hosted image, with why. U20 F-a, F-b: the job runs on the just-in-time runner of the run's server, whose
 # only label is the random one job `start` made (no `self-hosted`, so a fork's queued job cannot take that runner).
-EXCEPTIONS = {("ephemeral-a.yml", "work"): "${{ needs.start.outputs.label }}"}
+EXCEPTIONS = {("ephemeral-a.yml", "work"): "${{ needs.start.outputs.label }}",
+              ("ephemeral-b.yml", "work"): "${{ needs.start.outputs.label }}"}
 NEEDS_OUT = re.compile(r"needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)")
 STEPS_REF = re.compile(r"steps\.([A-Za-z0-9_-]+)\.")
 
