@@ -29,10 +29,6 @@ op	volume.change	value:int:-2:2:0:
 op	tone.apply	value:int:0:2:0:
 op	hotkeys.apply	value:int:0:65:0:
 op	home.apply	value:int:-2000:2000:0:
-op	base.overlay	value:int:0:16:0:
-op	base.scheme	value:int:0:16:0:
-op	base.squeeze	value:int:0:16:0:
-op	base.nav	value:int:0:16:0:
 op	base.joystick	value:int:0:16:0:
 op	base.mouse_mode	value:int:0:16:0:
 op	base.mouse_sens	value:int:0:16:0:
@@ -161,12 +157,15 @@ op	mon.run	line:string:0:0:60:
 op	monitor.key	key:int:0:8191:0:
 op	monitor.serve
 op	monitor.release
-op	online.set	field:string:0:0:12:	text:string:0:0:47:
-op	online.library
-op	online.presets
-op	online.cycle	slot:int:0:11:0:
+op	online.set	field:string:0:0:16:	text:string:0:0:120:
+op	online.next_source
 op	online.clear
 op	online.search
+op	online.open	index:int:0:9999:0:	answer:string:0:0:65:
+op	online.file	phase:int:0:9999:0:	answer:string:0:0:64:
+op	online.more	index:int:0:9999:0:	answer:string:0:0:65:
+op	online.new
+op	online.forget
 op	diag.save_log	name:string:0:0:55:
 op	diag.save_edid	name:string:0:0:55:
 op	diag.clear_log
@@ -298,55 +297,82 @@ state	tw.present
 state	tw.running
 state	tw.stopped
 state	monitor.wants_stop
-state	online.library
-state	online.name
-state	online.group
-state	online.handle
-state	online.event
+state	online.src
+state	online.ftitle
+state	online.l.source
+state	online.lbl.name
 state	online.v.name
 state	online.v.group
 state	online.v.handle
 state	online.v.event
-state	online.loaded
-state	online.unloaded
-state	online.results
-state	online.folder
-state	online.p0.title
-state	online.p0.value
-state	online.p0.hide
-state	online.p1.title
-state	online.p1.value
-state	online.p1.hide
-state	online.p2.title
-state	online.p2.value
-state	online.p2.hide
-state	online.p3.title
-state	online.p3.value
-state	online.p3.hide
-state	online.p4.title
-state	online.p4.value
-state	online.p4.hide
-state	online.p5.title
-state	online.p5.value
-state	online.p5.hide
-state	online.p6.title
-state	online.p6.value
-state	online.p6.hide
-state	online.p7.title
-state	online.p7.value
-state	online.p7.hide
-state	online.p8.title
-state	online.p8.value
-state	online.p8.hide
-state	online.p9.title
-state	online.p9.value
-state	online.p9.hide
-state	online.p10.title
-state	online.p10.value
-state	online.p10.hide
-state	online.p11.title
-state	online.p11.value
-state	online.p11.hide
+state	online.p.name
+state	online.p.group
+state	online.p.handle
+state	online.p.event
+state	online.h.ac
+state	online.h.b
+state	online.h.b.catm
+state	online.h.b.hwm
+state	online.v.a.category
+state	online.l.a.category
+state	online.h.a.category
+state	online.v.a.subcat
+state	online.l.a.subcat
+state	online.h.a.subcat
+state	online.v.a.repo
+state	online.l.a.repo
+state	online.h.a.repo
+state	online.v.a.date
+state	online.l.a.date
+state	online.h.a.date
+state	online.v.a.latest
+state	online.l.a.latest
+state	online.h.a.latest
+state	online.v.a.rating
+state	online.l.a.rating
+state	online.h.a.rating
+state	online.v.a.type
+state	online.l.a.type
+state	online.h.a.type
+state	online.v.a.sort
+state	online.l.a.sort
+state	online.h.a.sort
+state	online.v.a.order
+state	online.l.a.order
+state	online.h.a.order
+state	online.v.b.look
+state	online.l.b.look
+state	online.v.b.cat
+state	online.l.b.cat
+state	online.v.b.catm
+state	online.l.b.catm
+state	online.v.b.plat
+state	online.l.b.plat
+state	online.v.b.env
+state	online.l.b.env
+state	online.v.b.hw
+state	online.l.b.hw
+state	online.v.b.hwm
+state	online.l.b.hwm
+state	online.v.b.ai
+state	online.l.b.ai
+state	online.v.b.show
+state	online.l.b.show
+state	online.busy
+state	online.net
+state	online.s.last
+state	online.s.result
+state	online.s.never
+state	online.shown
+state	online.title
+state	online.rows
+state	online.r.source
+state	online.r.query
+state	online.r.found
+state	online.r.hidden
+state	online.r.nohidden
+state	online.at
+state	online.files
 state	usb.mouse
 state	usb.mouse_mode
 state	usb.keyboard

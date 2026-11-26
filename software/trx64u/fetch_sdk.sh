@@ -19,6 +19,7 @@ DIR="trx64-sdk-$VER"
 TAR="${1:?usage: fetch_sdk.sh <path to $(pin sdk_tarball)> | --download | --release}"
 [ $# -le 1 ] || { echo "usage: fetch_sdk.sh <path to $(pin sdk_tarball)> | --download | --release (online.u2a is built by build.sh, U20 D22)" >&2; exit 2; }
 if [ "$TAR" = --download ]; then
+    [ -n "$(pin sdk_package)" ] || { echo "fetch_sdk.sh --download: sdk.pin names no sdk_package (no registry copy of SDK $VER): use --release" >&2; exit 1; }
     mkdir -p "$HERE/.sdk"
     # the Gitea server: GITEA_URL, else the url: of the tea login (tea's config on macOS, then on Linux); the public tree names no host (U20 A8)
     SRV="${GITEA_URL:-}"
