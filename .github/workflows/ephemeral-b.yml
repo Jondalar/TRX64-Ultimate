@@ -1,0 +1,278 @@
+name: Ephemeral Vivado (U20 F-b)
+
+# U20 D17 b, D25, experiment F-b (docs/specs/U20-github-home.md §6 "F"): the bitstream of this commit built by Vivado on a
+# Hetzner Cloud server made from our private snapshot (ci/ephemeral/snapshot.sh: the builder's vivado-env image, copied
+# once, and its Vivado cache), and compared with the builder's release of the same gateware key in time and cost.
+# The shape is F-a's (ephemeral-a.yml, whose header gives the reasons): job start creates the server with a just-in-time
+# runner that carries one random label, job work runs on it, job stop deletes the server and the registration whatever
+# happened. Here job work runs ci/ephemeral/vivado.sh (two builds: warm with the snapshot's cache, cold without), and job
+# report (GitHub-hosted) writes the comparison (ci/ephemeral/vivado_report.py) into the run's summary.
+#
+# The documented exception to the workflow rule "every runs-on is a GitHub-hosted image" (tools/check_workflows.py rule 6,
+# EXCEPTIONS), for the reasons of ephemeral-a.yml: no event that carries fork code starts this workflow (a push to
+# scratch/vivado-* by an account with write access, or workflow_dispatch), the runner is just-in-time with only the run's
+# random label, the server goes in job stop, by a later start's sweep or by its own power-off cap.
+# Secrets by name only, never printed: HCLOUD_TOKEN and RUNNER_REG_TOKEN, in start and stop. Jobs work and report get none.
+#
+# A run: push a branch scratch/vivado-<type>-t<threads>, e.g. scratch/vivado-ccx23-t3 (the builder's thread count) or
+# scratch/vivado-ccx33-t8. The type must be one of EPH_VIVADO_TYPES. One run at a time (concurrency): Hetzner's limit of
+# dedicated vCPUs for this account is 8.
+
+on:
+  push:
+    branches: ['scratch/vivado-*']
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Hetzner server type (one of EPH_VIVADO_TYPES)'
+        default: ccx23
+      threads:
+        description: 'Vivado threads (general.maxThreads)'
+        default: '3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ephemeral-b
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # x86 types whose disk fits the snapshot (80 GB, made on a CPX22) and whose cores fit the account's limits
+  EPH_VIVADO_TYPES: ccx13 ccx23 ccx33 cpx32 cpx42 cpx52 cpx62
+  EPH_LOCATIONS: nbg1 fsn1
+  # the server powers itself off this long after its user data starts: start (20) + work (60) + margin
+  EPH_CAP_MINUTES: '90'
+  # start deletes this repository's experiment servers older than this: none of a live run is (start + work + stop = 90)
+  EPH_SWEEP_MINUTES: '120'
+
+jobs:
+  start:
+    name: Start (Hetzner server from the Vivado snapshot, just-in-time runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      label: ${{ steps.names.outputs.label }}
+      threads: ${{ steps.names.outputs.threads }}
+      runner_id: ${{ steps.jit.outputs.runner_id }}
+      server_id: ${{ steps.create.outputs.server_id }}
+      server_type: ${{ steps.create.outputs.server_type }}
+      location: ${{ steps.create.outputs.location }}
+      price_hourly: ${{ steps.create.outputs.price_hourly }}
+      t_create: ${{ steps.create.outputs.t_create }}
+      t_running: ${{ steps.running.outputs.t_running }}
+      t_online: ${{ steps.online.outputs.t_online }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Names, server type and threads
+        id: names
+        env:
+          IN_TYPE: ${{ inputs.type }}
+          IN_THREADS: ${{ inputs.threads }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            type=$IN_TYPE; threads=$IN_THREADS
+          elif [[ "$GITHUB_REF_NAME" =~ ^scratch/vivado-([a-z]+[0-9]+)-t([0-9]+)$ ]]; then
+            type=${BASH_REMATCH[1]}; threads=${BASH_REMATCH[2]}
+          else
+            echo "::error::the branch is scratch/vivado-<type>-t<threads>, not $GITHUB_REF_NAME"; exit 1
+          fi
+          case " $EPH_VIVADO_TYPES " in *" $type "*) ;; *) echo "::error::type '$type' is not one of $EPH_VIVADO_TYPES"; exit 1 ;; esac
+          [[ "$threads" =~ ^[0-9]+$ ]] && [ "$threads" -ge 1 ] && [ "$threads" -le 32 ] || { echo "::error::threads 1-32, not '$threads'"; exit 1; }
+          run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rnd="$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "type=$type"
+            echo "threads=$threads"
+            echo "run=$run"
+            echo "name=gh-viv-$run"
+            echo "label=eph-$run-$rnd"
+            echo "repo=${GITHUB_REPOSITORY//\//.}"
+          } | tee -a "$GITHUB_OUTPUT"
+      - name: The snapshot
+        id: image
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: ci/ephemeral/hcloud.sh image --selector purpose=gh-ephemeral,role=vivado --outputs "$GITHUB_OUTPUT"
+      - name: Sweep this repository's experiment servers left by earlier runs
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          REPO_LABEL: ${{ steps.names.outputs.repo }}
+        run: ci/ephemeral/hcloud.sh sweep --older-than "$EPH_SWEEP_MINUTES" --selector "purpose=gh-ephemeral,repo=$REPO_LABEL"
+      - name: Just-in-time runner config
+        id: jit
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          NAME: ${{ steps.names.outputs.name }}
+          LABEL: ${{ steps.names.outputs.label }}
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/eph"
+          ci/ephemeral/ghrunner.sh jit --repo "$GITHUB_REPOSITORY" --name "$NAME" --label "$LABEL" \
+            --out "$RUNNER_TEMP/eph/jit" --outputs "$GITHUB_OUTPUT"
+      - name: User data
+        env:
+          LABEL: ${{ steps.names.outputs.label }}
+        run: |
+          ci/ephemeral/ghrunner.sh user-data --jit-file "$RUNNER_TEMP/eph/jit" --label "$LABEL" \
+            --cap-minutes "$EPH_CAP_MINUTES" --out "$RUNNER_TEMP/eph/user-data"
+      - name: Create the server
+        id: create
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          NAME: ${{ steps.names.outputs.name }}
+          RUN: ${{ steps.names.outputs.run }}
+          REPO_LABEL: ${{ steps.names.outputs.repo }}
+          TYPE: ${{ steps.names.outputs.type }}
+          IMAGE: ${{ steps.image.outputs.image_id }}
+        run: |
+          ci/ephemeral/hcloud.sh create --name "$NAME" \
+            --label purpose=gh-ephemeral --label "repo=$REPO_LABEL" --label "run=$RUN" --label role=vivado-build \
+            --user-data "$RUNNER_TEMP/eph/user-data" --types "$TYPE" --locations "$EPH_LOCATIONS" --image "$IMAGE" \
+            --outputs "$GITHUB_OUTPUT"
+      - name: Drop the JIT config from this machine
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/eph"
+      - name: Wait until the server runs
+        id: running
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          SERVER_ID: ${{ steps.create.outputs.server_id }}
+        run: ci/ephemeral/hcloud.sh wait --id "$SERVER_ID" --timeout 300 --outputs "$GITHUB_OUTPUT"
+      - name: Wait until the runner is online
+        id: online
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          RUNNER_ID: ${{ steps.jit.outputs.runner_id }}
+        run: ci/ephemeral/ghrunner.sh wait-online --repo "$GITHUB_REPOSITORY" --id "$RUNNER_ID" --timeout 600 --outputs "$GITHUB_OUTPUT"
+
+  work:
+    name: Work (Vivado on the server, warm and cold)
+    needs: start
+    # only the run's random label (header): a self-hosted runner, though no `self-hosted` label names it
+    runs-on: ['${{ needs.start.outputs.label }}']
+    timeout-minutes: 60
+    outputs:
+      t_job: ${{ steps.job.outputs.t_job }}
+    steps:
+      - name: Job start
+        id: job
+        run: |
+          echo "T_JOB=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "t_job=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Machine and timings
+        env:
+          T_CREATE: ${{ needs.start.outputs.t_create }}
+          T_RUNNING: ${{ needs.start.outputs.t_running }}
+          T_ONLINE: ${{ needs.start.outputs.t_online }}
+          SERVER_TYPE: ${{ needs.start.outputs.server_type }}
+          SERVER_LOCATION: ${{ needs.start.outputs.location }}
+          PRICE_HOURLY: ${{ needs.start.outputs.price_hourly }}
+          RUNNER_LABEL: ${{ needs.start.outputs.label }}
+          EPH_TITLE: 'U20 F-b: Vivado on an ephemeral Hetzner Cloud server'
+        run: ci/ephemeral/proof.sh
+      - name: Vivado (ci/bitstream.sh c64u, warm and cold)
+        env:
+          THREADS: ${{ needs.start.outputs.threads }}
+        run: ci/ephemeral/vivado.sh "$RUNNER_TEMP/vivado" "$THREADS"
+      - name: Results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: vivado-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vivado
+          retention-days: 30
+
+  report:
+    name: Report (Hetzner builds against the builder's release)
+    needs: [start, work]
+    if: ${{ always() && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: vivado-${{ github.run_id }}-${{ github.run_attempt }}
+          path: art
+      - name: The builder's release of the same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # shellcheck disable=SC1091
+          . ci/pkg.env
+          entry=$(ci/keys.sh)
+          mkdir -p builder
+          if gh release download "${BUILDS_TAG_PREFIX}bit-$entry" -R "$MC_BUILDS_REPO" -D builder -p reports.tar.gz -p wns.txt -p key -p '*.bit'; then
+            tar -xzf builder/reports.tar.gz -C builder
+          else
+            echo "the builder has no release ${BUILDS_TAG_PREFIX}bit-$entry: only the Hetzner builds are shown"
+            rm -rf builder
+          fi
+      - name: Comparison
+        env:
+          T_CREATE: ${{ needs.start.outputs.t_create }}
+          T_RUNNING: ${{ needs.start.outputs.t_running }}
+          T_ONLINE: ${{ needs.start.outputs.t_online }}
+          T_JOB: ${{ needs.work.outputs.t_job }}
+          SERVER_TYPE: ${{ needs.start.outputs.server_type }}
+          SERVER_LOCATION: ${{ needs.start.outputs.location }}
+          PRICE_HOURLY: ${{ needs.start.outputs.price_hourly }}
+        run: python3 -I ci/ephemeral/vivado_report.py art builder | tee -a "$GITHUB_STEP_SUMMARY"
+
+  stop:
+    name: Stop (delete the server and the runner registration)
+    needs: [start, work]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803   # v6.1.0
+        with:
+          persist-credentials: false
+      # by id (start's output) and by label (every attempt of this run), so a start that failed before its outputs leaves nothing
+      - name: Delete the server
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          SERVER_ID: ${{ needs.start.outputs.server_id }}
+        run: |
+          rc=0
+          runs=""
+          for a in $(seq 1 "$GITHUB_RUN_ATTEMPT"); do runs="$runs${runs:+,}$GITHUB_RUN_ID-$a"; done
+          if [ -n "$SERVER_ID" ]; then ci/ephemeral/hcloud.sh delete --id "$SERVER_ID" || rc=1; fi
+          ci/ephemeral/hcloud.sh delete --selector "purpose=gh-ephemeral,run in ($runs)" || rc=1
+          exit "$rc"
+      - name: Remove the runner registration
+        if: ${{ always() }}
+        env:
+          RUNNER_REG_TOKEN: ${{ secrets.RUNNER_REG_TOKEN }}
+          RUNNER_ID: ${{ needs.start.outputs.runner_id }}
+        run: |
+          rc=0
+          if [ -n "$RUNNER_ID" ]; then ci/ephemeral/ghrunner.sh delete --repo "$GITHUB_REPOSITORY" --id "$RUNNER_ID" || rc=1; fi
+          for a in $(seq 1 "$GITHUB_RUN_ATTEMPT"); do
+            ci/ephemeral/ghrunner.sh delete --repo "$GITHUB_REPOSITORY" --name "gh-viv-$GITHUB_RUN_ID-$a" || rc=1
+          done
+          exit "$rc"
+      - name: Experiment servers and snapshots after this run
+        if: ${{ always() }}
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          {
+            echo "### Hetzner servers, snapshots and SSH keys with purpose=gh-ephemeral after this run"
+            echo
+            echo '```'
+            ci/ephemeral/hcloud.sh list
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

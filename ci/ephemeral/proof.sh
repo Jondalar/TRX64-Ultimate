@@ -9,6 +9,7 @@
 #   T_JOB                          epoch seconds of this job's first step
 #   SERVER_TYPE, SERVER_LOCATION, PRICE_HOURLY, RUNNER_LABEL   from job `start`
 #   EPH_STAMPS                     the stamps of ci/ephemeral/user-data.sh (default /var/lib/gh-ephemeral/stamps)
+#   EPH_TITLE                      the heading (default F-a's; F-b's job work names its own)
 # The two clocks (GitHub's runner, the server) are both NTP-synchronised; a second either way is within reading.
 # No grep: under pipefail a grep without a match ends the script (MultiCore T239.5); awk answers an empty line instead.
 set -euo pipefail
@@ -28,7 +29,7 @@ os=$( (cat /etc/os-release 2>/dev/null || true) | awk -F= '$1 == "PRETTY_NAME" {
 failed=$( (cat "$stamps" 2>/dev/null || true) | awk '$1 ~ /^failed/ { print $1 }')
 
 {
-  echo "## U20 F-a: one job on an ephemeral Hetzner Cloud server"
+  echo "## ${EPH_TITLE:-U20 F-a: one job on an ephemeral Hetzner Cloud server}"
   echo
   echo "| | |"
   echo "|---|---|"

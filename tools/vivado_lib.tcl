@@ -11,8 +11,9 @@
 # Where a build puts its reports: build.tcl sets TRX_BUILD's directory here.
 if {![info exists ::trx_build]} { set ::trx_build build }
 
-# Vivado threads: TRX_VIVADO_THREADS from the runner's config envs (builder: all of its
-# cores), else 3 (the NAS has four and runs Gitea too; the Mac keeps to its limit).
+# Vivado threads: TRX_VIVADO_THREADS from the caller's environment (the Gitea runner on the
+# builder sets it in its config; F-b's ci/ephemeral/vivado.sh per run), else 3 (the NAS has
+# four cores and runs Gitea too; the Mac keeps to its limit).
 if {[info exists ::env(TRX_VIVADO_THREADS)]} {
   set_param general.maxThreads $::env(TRX_VIVADO_THREADS)
 } else {

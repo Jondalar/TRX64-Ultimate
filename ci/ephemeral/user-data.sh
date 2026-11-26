@@ -40,6 +40,8 @@ echo 'DPkg::Lock::Timeout "600";' > /etc/apt/apt.conf.d/90-gh-ephemeral
 useradd --create-home --shell /bin/bash runner
 echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-gh-runner
 chmod 440 /etc/sudoers.d/90-gh-runner
+# F-b: on the Vivado snapshot (ci/ephemeral/snapshot.sh) the job runs docker; plain Ubuntu has no docker group
+if getent group docker > /dev/null; then usermod -aG docker runner; fi
 
 R=/home/runner/actions-runner
 T=$(mktemp -d)
